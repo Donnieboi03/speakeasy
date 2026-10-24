@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+tests/reports/
+tests/audit/reports/
+*.jsonl
+last_capture.png
+tests/images/highlight_fixture.png
