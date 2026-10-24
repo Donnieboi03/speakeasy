@@ -680,7 +680,12 @@ class NeedReask(Exception):
 class StreamReject(Exception):
     pass
 
-_SENT_END = re.compile(r"[.!?][\"'\u201d)\]]*\s")
+_TITLES = ("Dr", "Mr", "Mrs", "Ms", "Mx", "Prof", "St", "Jr", "Sr", "Mt", "Ft", "Lt", "Col", "Gen", "Capt", "Cpt", "Sgt",
+           "Rev", "Hon", "Gov", "Sen", "Rep", "Pres", "Supt", "Dept", "Univ", "Inc", "Ltd", "Co", "Corp", "Messrs", "Mme",
+           "Mlle", "Fig", "Figs", "Eq", "Vol", "pp", "vs", "approx", "e.g", "i.e", "cf", "al")
+# not a sentence end: a title / abbreviation right before the period ("Dr. Smith", "Fig. 4", "e.g. this")
+_NOT_ABBR = "".join(r"(?<!\b" + re.escape(t) + r"\.)" for t in sorted(set(_TITLES), key=len))
+_SENT_END = re.compile(r"[.!?]" + _NOT_ABBR + r"[\"'\u201d)\]]*\s")
 _CLAUSE = re.compile(r"[,;:\u2014]\s|\s[\u2014\u2013]\s")
 
 class Releaser:
@@ -960,7 +965,7 @@ def check_superlatives(inp, out):
     cols = parse_columns(inp)
     if not cols:
         return out, None
-    notes, sents = [], re.split(r"(?<=[.!?])\s+", out)
+    notes, sents = [], re.split(r"(?<=[.!?])" + _NOT_ABBR + r"\s+", out)
     for i, sent in enumerate(sents):
         for m in list(_SUP2.finditer(sent)):
             if m.group(1):                                    # "second highest" etc.: not checked
@@ -1087,7 +1092,18 @@ def _normalize(text):
         out.append(l)
     return out
 
+_MASKNUM = re.compile(r"(?<![\w-])(?:\+?1[-.\s])?\(?[\dxX#]{2,4}\)?(?:[-.\s][\dxX#]{2,4}){1,3}(?![\w-])")
+def mask_numbers(s):
+    """Phone-like numbers with an x-run anywhere (555-xxxx, (555) xxx-1234, xxx-xxx-xxxx) -> 'a placeholder phone number'."""
+    def f(m):
+        t = m.group(0)
+        core = re.sub(r"[^\dxX#]", "", t)
+        if not re.search(r"[xX#]{2,}", t) or len(core) < 7: return t
+        return ("(" if False else "") + "a placeholder phone number"
+    return _MASKNUM.sub(f, s)
+
 def sanitize(s):
+    s = mask_numbers(s)
     s = re.sub(r"(?i)(great|good) question[!.]?\s*|\b(let me know|hope this helps|feel free to ask)[^.!?]*[.!?]?", "", s)
     s = re.sub(r"(?i)^\s*(?:absolutely|sure|certainly|of course|great)\s*[!.,]\s*(\w?)", lambda m: m.group(1).upper(), s)
     s = re.sub(r"(?i)\b(here is|here's) (the|a) (code|table|comparison|chart)\s*:?\s*", "", s)
@@ -1249,7 +1265,7 @@ SCREEN_INSTRUCTION = ("Explain what the user is currently looking at in their {w
     "Speak about the content directly (e.g. 'This is a research paper about...'); never mention a screenshot, image, picture, capture, or screen.")
 
 def _sent_split(o):
-    return [x.strip() for x in re.split(r"(?<=[.!?])[\"\u201d')]*\s+", o.strip()) if x.strip()]
+    return [x.strip() for x in re.split(r"(?<=[.!?])" + _NOT_ABBR + r"[\"\u201d')]*\s+", o.strip()) if x.strip()]
 
 def _clause_split(x):
     """Split one sentence at clause boundaries: ; , which , while  —  and ' and ' (only between long-ish clauses)."""
@@ -1437,6 +1453,27 @@ def _v_kind(block_lines, context):
         return "letter"
     return "message"
 
+class VLines(list):
+    framing = None      # the line introducing the block ("Here's a text you could send to Sam:")
+    who = None          # inline quote speaker ("Sam wrote: ...")
+    lead = None         # short words before an inline quote on the same line
+    verb = None
+
+_V_FRAME = re.compile(r"(?i)\b(?:e-?mails?|messages?|texts?|replies|reply|dm|post|tweet|letter|note|draft|caption|response|announcement|invite|invitation)\b")
+_V_INLINE = re.compile(r"(?P<who>\b[A-Z][\w.'\u2019-]*(?:\s+[A-Z][\w.'\u2019-]*){0,3})\s+(?P<verb>wrote|said|says|writes|posted|replied|tweeted|commented|asked|added|texted|emailed)\s*[:,]?\s*[\"\u201c](?P<q>[^\"\u201d]{8,})[\"\u201d]")
+_V_LONGQ = re.compile(r"[\"\u201c](?P<q>[^\"\u201d]{50,})[\"\u201d]")
+
+def _take_framing(plain):
+    """Pop the introducing line ('Here's a text you could send to Sam:') off the plain buffer, if there is one."""
+    k = len(plain) - 1
+    while k >= 0 and not plain[k].strip(): k -= 1
+    if k < 0: return None
+    l = plain[k].strip()
+    if l.endswith(":") and _V_FRAME.search(l) and len(l.split()) <= 25:
+        del plain[k:]
+        return l
+    return None
+
 def split_verbatim(text):
     """[(kind, lines)] where kind is 'plain' or ('verbatim', info). Only clear cases are marked verbatim:
     an email/message (headers or greeting ... sign-off), a run of '>' blockquote lines, or a long fully quoted paragraph."""
@@ -1466,19 +1503,40 @@ def split_verbatim(text):
                     e = end + 1
                     while e < n and e - end <= 3 and lines[e].strip() and len(lines[e].split()) <= 6: e += 1   # name / title lines
                     if sum(len(x.split()) for x in lines[i:e]) >= 8:
-                        flush(); out.append(("verbatim", lines[i:e])); i = e; continue
+                        vl = VLines(lines[i:e])
+                        if not any(_V_HDR.match(x) for x in lines[i:e]): vl.framing = _take_framing(plain)
+                        flush(); out.append(("verbatim", vl)); i = e; continue
         # blockquote run
         if re.match(r"^\s*>", l):
             j = i
             while j < n and re.match(r"^\s*>", lines[j]): j += 1
             q = [re.sub(r"^\s*>\s?", "", x) for x in lines[i:j]]
             if sum(len(x.split()) for x in q) >= 6 and not re.match(r"(?i)\s*\**(note|tip|warning|important|info)\b", q[0]):
-                flush(); out.append(("quote", q)); i = j; continue
+                fr = _take_framing(plain)
+                vl = VLines(q); vl.framing = fr
+                flush(); out.append(("verbatim" if fr else "quote", vl)); i = j; continue
         # fully quoted paragraph (>= 12 words)
         m = re.match(r'^\s*["\u201c](.+)["\u201d]\s*(?:[-\u2014\u2013]\s*(.+))?$', l)
         if m and len(m.group(1).split()) >= 12:
             flush(); out.append(("quote", [m.group(1)] + ([("\u2014 " + m.group(2))] if m.group(2) else []))); i += 1; continue
-        plain.append(l); i += 1
+        # inline quotes: 'Sam wrote: "..."' or a long quoted sentence inside a line
+        rest = l
+        while True:
+            m = _V_INLINE.search(rest)
+            mq = None if m else _V_LONGQ.search(rest)
+            if mq and len(mq.group("q").split()) < 10: mq = None
+            mm = m or mq
+            if not mm: break
+            before = rest[:mm.start()].rstrip()
+            vl = VLines([mm.group("q").strip()])
+            if before.strip() and len(before.split()) <= 12 and not re.search(r"[.!?]$", before):
+                vl.lead = before.rstrip(" ,;:")              # 'Yesterday in the thread, Dr. Patel wrote:'
+            elif before.strip(): plain.append(before)
+            if m: vl.who, vl.verb = m.group("who"), m.group("verb")
+            flush(); out.append(("inline", vl))
+            rest = rest[mm.end():].lstrip(" .,;:")
+        if rest.strip() or rest == l: plain.append(rest)
+        i += 1
     flush()
     return out
 
@@ -1490,7 +1548,7 @@ def _ph(label):
 
 def speak_placeholders(s):
     """[mailing address] -> 'a placeholder for the mailing address'; xxx-xxxx -> 'a placeholder phone number'."""
-    s = re.sub(r"\(?\b[xX#]{3}\)?[-.\s][xX#]{3}[-.\s][xX#]{4}\b|\b[xX#]{3}[-.][xX#]{4}\b", "a placeholder phone number", s)
+    s = mask_numbers(s)
     s = re.sub(r"\b[xX]{1,2}/[xX]{1,2}/[xX]{2,4}\b|\b[mM]{2}/[dD]{2}/[yY]{2,4}\b", "a placeholder date", s)
     s = re.sub(r"\$\s?[xX]+(?:[.,][xX]+)?\b", "a placeholder amount", s)
     s = re.sub(r"\[([A-Za-z][A-Za-z0-9 '\u2019/&.-]{1,48})\](?!\()", lambda m: _ph(m.group(1)), s)
@@ -1510,7 +1568,23 @@ def _smooth_line(l):
 def verbatim_speech(kind, lines, context=""):
     """Sentences to speak for one verbatim block: a short naming line, then the body nearly word for word."""
     out = []
-    if kind == "quote":
+    if kind == "inline":
+        q = _smooth_line(lines[0] if lines else "")
+        if not re.search(r"[.!?\u2026]$", q): q += "."
+        who = getattr(lines, "who", None)
+        lead = getattr(lines, "lead", None)
+        if who: head = (_smooth_line(lead) + ", " if lead else "") + f"{_smooth_line(who)} {lines.verb}:"
+        else: head = (_smooth_line(lead) + ":") if lead else "Here's the quote:"
+        return [head] + \
+               [x for x in re.split(r"(?<=[.!?])" + _NOT_ABBR + r"\s+(?=[A-Z\"\u201c(])", q) if x.strip()]
+    framing = getattr(lines, "framing", None)
+    if framing and kind == "verbatim":
+        out.append(_smooth_line(framing).rstrip(":") + ":")
+        body = []
+        for l in lines:
+            if _V_HDR.match(l) and not body: continue
+            body.append(l)
+    elif kind == "quote":
         attr = None
         if lines and re.match(r"^\s*[-\u2014\u2013]\s*\S", lines[-1]):
             attr = re.sub(r"^\s*[-\u2014\u2013]\s*", "", lines[-1]).strip(); lines = lines[:-1]
@@ -1559,7 +1633,7 @@ def verbatim_speech(kind, lines, context=""):
     # split long paragraphs into sentences for streaming TTS (keeps every word)
     res = []
     for t in out:
-        res.extend(x for x in re.split(r"(?<=[.!?])\s+(?=[A-Z\"\u201c(])", t) if x.strip())
+        res.extend(x for x in re.split(r"(?<=[.!?])" + _NOT_ABBR + r"\s+(?=[A-Z\"\u201c(])", t) if x.strip())
     return res
 
 def rewrite(text, rec, keep_error=False):
@@ -1567,7 +1641,9 @@ def rewrite(text, rec, keep_error=False):
     segs = split_verbatim(text) if os.environ.get("SPEAKEASY_VERBATIM", "on").lower() != "off" else [("plain", text.splitlines())]
     if not any(k != "plain" for k, _ in segs):
         return _rewrite(text, rec, keep_error)
-    rec["verbatim_blocks"] = [k if k == "quote" else _v_kind(v, text) for k, v in segs if k != "plain"]
+    rec["verbatim_blocks"] = [("quote" if k in ("quote", "inline") else
+                               "text" if re.search(r"(?i)\btexts?\b|\bsms\b|\bimessage\b", getattr(v, "framing", None) or "")
+                               else _v_kind(v, getattr(v, "framing", None) or text)) for k, v in segs if k != "plain"]
     parts, streamed_any = [], False
     plain_all = "\n".join("\n".join(v) for k, v in segs if k == "plain")
     for k, v in segs:
@@ -1642,7 +1718,7 @@ def _rewrite(text, rec, keep_error=False):
 # ---------------- speech ----------------
 def sentences(text):
     buf = ""
-    for s in re.split(r"(?<=[.!?])[\"\u201d')]*\s+", text):
+    for s in re.split(r"(?<=[.!?])" + _NOT_ABBR + r"[\"\u201d')]*\s+", text):
         buf = (buf + " " + s).strip()
         if len(buf) >= 120 or s is None:
             yield buf; buf = ""
@@ -2274,7 +2350,7 @@ def main(argv=None):
     if a.cmd == "stats":
         return cmd_stats(a.n)
     t0 = time.time()
-    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": a.cmd}
+    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": a.cmd, "verbatim_blocks": []}
     timing = {"copy_ms": None, "capture_ms": a.capture_ms, "vision_ms": None, "llm_ms": None,
               "tts_first_audio_ms": None, "speak_ms": None}
     if a.cmd == "selection":
