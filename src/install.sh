@@ -76,6 +76,7 @@ else
   echo "Kokoro venv not found at $TTS_VENV; using macOS say. (Optional: python3 -m venv $TTS_VENV && $TTS_VENV/bin/pip install mlx-audio, then re-run.)"
 fi
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
+set_cfg SPEAKEASY_VISION auto
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
 
 cat <<MSG

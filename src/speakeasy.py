@@ -518,6 +518,41 @@ def vision_call(text, data_url, timeout, mode=None):
     content = [{"type": "text", "text": msg}, {"type": "image_url", "image_url": {"url": data_url}}]
     return chat(vision_model(), VISION_PROMPT, content, timeout)
 
+_FIG_CUES = re.compile(r"(?i)\b(fig\.?|figure|table|tab\.|axis|axes|x-axis|y-axis|chart|plot|graph|diagram|legend|histogram|scatter|panel|flowchart)\b|%")
+
+def vision_gate(text):
+    """Cheap, model-free check: does this copied text need the screenshot? Returns (use_vision, reason)."""
+    t = text.strip()
+    if not t:
+        return True, "no text"
+    lines = [l for l in t.splitlines() if l.strip()]
+    words = t.split()
+    if "\t" in t:
+        return True, "tabs (table)"
+    if sum(1 for l in lines if l.count("|") >= 2) >= 2:
+        return True, "pipe table rows"
+    if len(lines) >= 2 and sum(1 for l in lines if l.count(",") >= 2 and not re.search(r"[.!?]\s", l) and len(l) < 200) >= max(2, len(lines) // 2):
+        return True, "CSV-like rows"
+    if sum(1 for l in lines if re.search(r"\S\s{3,}\S", l)) >= 2:
+        return True, "column alignment"
+    if re.search(r"[\u2500-\u257f\u2580-\u259f]", t):
+        return True, "box/bar drawing chars"
+    m = _FIG_CUES.search(t)
+    if m:
+        return True, f"figure/chart cue '{m.group(0).strip()}'"
+    nums = len(re.findall(r"(?<![A-Za-z])\d+(?:[.,]\d+)?", t))
+    if words and nums / len(words) > 0.15 and nums >= 4:
+        return True, f"dense numbers ({nums}/{len(words)} tokens)"
+    if len(words) < 12:
+        return True, f"short/fragmentary ({len(words)} words)"
+    sents = len(re.findall(r"[.!?](?:[\"')\]]*)(?:\s|$)", t))
+    if sents == 0:
+        return True, "no sentence punctuation"
+    short_lines = sum(1 for l in lines if len(l.split()) <= 4)
+    if len(lines) >= 4 and short_lines / len(lines) > 0.6:
+        return True, "fragmentary lines (labels)"
+    return False, f"prose ({len(words)} words, {sents} sentences)"
+
 def rewrite_with_image(text, path, rec, mode=None):
     rec.update(image=False, image_px=None, image_sent_px=None, vision_model=vision_model(), vision_ms=None)
     try:
@@ -1109,6 +1144,7 @@ def main(argv=None):
     rec.update(capture_method=method, capture_rect=a.capture_rect)
     out = ""
     rec.update(image=False, image_px=None, image_sent_px=None, vision_model=vision_model() if img else None, vision_ms=None)
+    rec.update(vision_gate=None, vision_gate_reason=None)
     prior_err = rec.pop("error", None)
     tmp_crop = None
     if img and a.capture_rect and os.path.exists(img):
@@ -1134,7 +1170,26 @@ def main(argv=None):
             img = None; rec["capture_method"] = "none"
             out = rewrite(text, rec)
         else:
-            out = rewrite_with_image(text, img, rec, a.capture_method)
+            vmode = os.environ.get("SPEAKEASY_VISION", "auto").lower()
+            if vmode == "always":
+                use, why, gate = True, "SPEAKEASY_VISION=always", "forced"
+            elif vmode == "never":
+                use, why, gate = False, "SPEAKEASY_VISION=never", "never"
+            else:
+                use, why = vision_gate(text)
+                gate = "auto-use" if use else "auto-skip-prose"
+            rec["vision_gate"], rec["vision_gate_reason"] = gate, why
+            if use:
+                out = rewrite_with_image(text, img, rec, a.capture_method)
+            else:
+                if is_owned_capture(img):          # temp-file rules: only our own captures are deleted
+                    try: os.remove(img)
+                    except OSError: pass
+                img = None
+                rec.update(image=False, image_px=None, image_sent_px=None, vision_model=None, vision_ms=None)
+                out = rewrite(text, rec) if text.strip() else ""
+                if not text.strip():
+                    rec.update(backend="none", model=None, llm_ms=None)
     elif text.strip():
         out = rewrite(text, rec)
     else:

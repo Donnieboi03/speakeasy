@@ -26,6 +26,7 @@ cd src && ./install.sh
 | `SPEAKEASY_TTS_CMD` | none | Custom TTS command for `cmd` (`{text}`, `{rate}`) |
 | `SPEAKEASY_NO_SELECTION_CAPTURE` | `window` | Nothing highlighted: `window`, `screen`, or `none` |
 | `SPEAKEASY_KEEP_CAPTURE` | `1` | Keep the last crop at `~/.speakeasy/last_capture.png` for auditing (`0` deletes it) |
+| `SPEAKEASY_VISION` | `auto` | Vision gate: `auto` (only send the screenshot when it likely adds info, e.g. tables or figures), `always`, or `never` |
 | `SPEAKEASY_MODEL` | `qwen2.5:3b-instruct` | Text model |
 
 The `CAPTURE` variable in the Hammerspoon block can be `auto`, `select`, `mouse`, or `off`.

@@ -36,6 +36,8 @@ REQUIRED = {
     "capture_original_px": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "pre-crop WxH"),
     "capture_cropped_px": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "post-crop WxH"),
     "capture_crop": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "cropped|already-cropped"),
+    "vision_gate": ((str, type(None)), lambda l: l.get("command") in ("rewrite", "speak", "selection"), "auto-skip-prose|auto-use|forced|never|null(no image)"),
+    "vision_gate_reason": ((str, type(None)), lambda l: l.get("vision_gate") is not None, "why the gate decided"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
@@ -54,9 +56,14 @@ def validate(l):
         if when and not when(l): continue
         if k not in l: probs.append(f"missing:{k}")
         elif not isinstance(l[k], types) or (isinstance(l[k], bool) and bool not in types): probs.append(f"type:{k}={type(l[k]).__name__}")
-    if "capture_method" in l and l["capture_method"] not in CAPTURE_METHODS: probs.append(f"bad_capture_method:{l['capture_method']}")
+    if l.get("capture_method") is not None and l["capture_method"] not in CAPTURE_METHODS: probs.append(f"bad_capture_method:{l['capture_method']}")
     if str(l.get("capture_method", "")).startswith("no-selection") and not l.get("image"): probs.append("no_selection_method_without_image")
     if l.get("capture_method") == "none" and l.get("image"): probs.append("capture_none_but_image_used")
+    g = l.get("vision_gate")
+    if g not in (None, "auto-skip-prose", "auto-use", "forced", "never"): probs.append(f"bad_vision_gate:{g}")
+    if g in ("auto-skip-prose", "never") and (l.get("image") or l.get("vision_ms") or l.get("image_px") or l.get("capture_path")): probs.append("gate_skip_but_image_fields_set")
+    if g in ("auto-use", "forced") and l.get("image") is False and not l.get("error"): probs.append("gate_use_but_no_image_and_no_error")
+    if g and not l.get("vision_gate_reason"): probs.append("vision_gate_without_reason")
     le = str(l.get("llm_error") or "").lower()
     if le.startswith(("copy", "capture")) or "clipboard" in le or "pbpaste" in le: probs.append("non_llm_error_in_llm_error")
     if not l.get("image") and l.get("capture_path"): probs.append("capture_path_set_without_image")

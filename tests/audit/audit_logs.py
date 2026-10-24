@@ -49,6 +49,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
            "capture_method_mix": dict(Counter(l.get("capture_method") for l in lines if "capture_method" in l)),
            "image_sizes": dict(Counter(f"{l.get('image_px')}->{l.get('image_sent_px')}" for l in lines if l.get("image"))),
            "tts_mix": dict(Counter(f"{l.get('tts_requested')}->{l.get('tts')}" for l in lines if l.get("tts"))), "tts_server_rss_mb_max": max([l["tts_server_rss_mb"] for l in lines if isinstance(l.get("tts_server_rss_mb"), (int, float))], default=None),
+           "vision_gate_mix": dict(Counter(str(l.get("vision_gate")) for l in lines if "vision_gate" in l)),
            "errors": [l.get("error") for l in lines if l.get("error")],
            "peak_rss_mb": {"max": max([l["peak_rss_mb"] for l in lines if isinstance(l.get("peak_rss_mb"), (int, float))], default=None)},
            "ollama_models_seen": sorted({json.dumps({k: m.get(k) for k in ("name", "model", "size", "size_vram", "size_mb", "size_vram_mb") if k in m}) for m in mem}),
@@ -57,7 +58,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
 
 def to_md(r):
     o = [f"# speakeasy log audit", f"- file: `{r['path']}`  runs: {r['runs']}  bad JSON lines: {r['bad_json_lines']}",
-         f"- backend mix: {r['backend_mix']}  commands: {r['command_mix']}", f"- capture methods: {r['capture_method_mix']}",
+         f"- backend mix: {r['backend_mix']}  commands: {r['command_mix']}", f"- vision gate: {r.get('vision_gate_mix')}", f"- capture methods: {r['capture_method_mix']}",
          f"- image sizes (orig->sent): {r['image_sizes']}", f"- TTS (requested->used): {r['tts_mix']}  TTS server RSS max: {r['tts_server_rss_mb_max']} MB", f"- peak RSS max: {r['peak_rss_mb']['max']} MB",
          f"- Ollama models seen: {r['ollama_models_seen'] or 'none logged'}", "", "## Latency (ms)", "| stage | n | p50 | p90 | p99 | max |", "|---|---|---|---|---|---|"]
     o += [f"| {s} | {v['n']} | {v['p50']} | {v['p90']} | {v['p99']} | {v['max']} |" for s, v in r["latency_ms"].items()]
