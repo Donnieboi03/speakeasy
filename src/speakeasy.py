@@ -647,7 +647,7 @@ class Focus:
         ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect],
               "expires": round(time.time() + est + 4, 1), "text": text[:80], **self.style}
         if getattr(rect, "src", None): ev["src"] = rect.src
-        if getattr(rect, "rng", None): ev["range"] = rect.rng
+        ev["range"] = getattr(rect, "rng", None)                    # absolute AX character range, or null when unknown
         self._write(ev)
     def clear(self):
         self._write({"state": "clear", "seq": self.events + 1})

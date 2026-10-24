@@ -185,6 +185,13 @@ struct Tracker {
             print("{\"rss_mb\":\(Int(rss_mb())),\"cpu_s\":\(String(format: "%.2f", cpu_s()))}")
             return
         }
+        // Never prompt: without Screen Recording permission, log and exit before any ScreenCaptureKit/CGWindowList call.
+        if !CGPreflightScreenCaptureAccess() {
+            let h = a["home"] ?? (NSHomeDirectory() + "/.speakeasy")
+            try? FileManager.default.createDirectory(atPath: h + "/logs", withIntermediateDirectories: true)
+            appendLine(["ts": (now() * 1000).rounded() / 1000, "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0], h + "/logs/tracker.jsonl")
+            exit(0)
+        }
         guard let widS = a["window-id"], let wid = CGWindowID(widS) else { FileHandle.standardError.write("usage: speakeasy-track --window-id N --pid P [--home DIR] [--fps 3]\n".data(using: .utf8)!); exit(2) }
         let pid = pid_t(a["pid"] ?? "0") ?? 0
         let home = a["home"] ?? (NSHomeDirectory() + "/.speakeasy")
@@ -197,7 +204,7 @@ struct Tracker {
 
         // ScreenCaptureKit: find our window once
         var filter: SCContentFilter? = nil
-        if CGPreflightScreenCaptureAccess(), let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
+        if let content = try? await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: false),
            let w = content.windows.first(where: { $0.windowID == wid }) {
             filter = SCContentFilter(desktopIndependentWindow: w)
         }
