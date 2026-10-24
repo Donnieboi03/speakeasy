@@ -212,6 +212,7 @@ local function interactive(t0)
 end
 
 hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
+  os.remove("/tmp/speakeasy_sel.png"); os.remove("/tmp/speakeasy_win.png")   -- legacy capture files
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
   if hs.fs.attributes(pidf) then hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return end
   local t0 = hs.timer.secondsSinceEpoch()

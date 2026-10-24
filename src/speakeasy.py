@@ -362,7 +362,7 @@ class Releaser:
                 raise StreamReject("system prompt leak")
         sseg, sup = check_superlatives(self.inp, sseg)
         if sup:
-            self.rec["error"] = "llm: superlative removed: " + sup
+            self.rec.setdefault("_notes", []).append("superlative removed: " + sup)
         sseg = demeta_text(sseg, self.rec, self.inp)
         if not sseg.strip():
             return
@@ -484,37 +484,125 @@ def _num(x):
     try: return float(x.replace(",", ""))
     except ValueError: return None
 
+_RATE_C = re.compile(r"(?i)\bper\s+(?:second|sec|minute|min|hour|hr|day)\b|/\s*(?:s|sec|secs|second|seconds|min|mins|minute|minutes|h|hr|hour|hours|day)\b|\b(?:rps|qps|tps|fps|ops|iops)\b|throughput|bandwidth|\bhz\b|speed\b|rate\b")
+_LOW_C = re.compile(r"(?i)latency|\bms\b|millisecond|\bsec(?:ond)?s?\b|duration|\btime\b|delay|\bp9\d\b|cost|price|\$|dollar|fee|error|loss|\bmb\b|memory|ram\b")
+_HIGH_C = re.compile(r"(?i)score|accuracy|\bacc\b|\bf1\b|precision|recall|uptime|rating|stars?|throughput|revenue|users")
+_MAX_W = ("highest", "largest", "biggest", "most", "greatest", "maximum", "max", "top", "peak", "priciest", "most expensive", "longest", "heaviest")
+_MIN_W = ("lowest", "smallest", "least", "fewest", "minimum", "min", "cheapest", "least expensive", "shortest", "lightest")
+_SUP2 = re.compile(r"(?i)\b(?:the\s+)?(?:(second|third|next)[\s-]+)?(most\s+expensive|least\s+expensive|fastest|slowest|quickest|highest|lowest|largest|smallest|biggest|greatest|best|worst|cheapest|priciest|longest|shortest|fewest|most|least)\b")
+
+def _cellnum(c):
+    m = re.search(r"-?\d[\d,]*(?:\.\d+)?", c or "")
+    return _num(m.group(0)) if m else None
+
+def parse_columns(inp):
+    """Numeric columns from the source: tables (pipe/box/TSV/CSV/aligned) or a 'Label number' series.
+    Returns [{'name': str, 'rows': {label: value}, 'context': str}]."""
+    cols = []
+    lines = [l for l in _normalize(inp) if l.strip() and not _is_sep(l)]
+    def rows_from(split):
+        rs = [split(l) for l in lines]
+        rs = [r for r in rs if len(r) >= 2]
+        return rs if len(rs) >= 3 else None
+    rows = None
+    for split in (lambda l: [c.strip() for c in l.strip().strip("|").split("|")] if "|" in l else [],
+                  lambda l: [c.strip() for c in l.split("\t")] if "\t" in l else [],
+                  lambda l: [c.strip() for c in l.split(",")] if l.count(",") >= 1 and not re.search(r"[.!?]\s", l) else [],
+                  lambda l: [c.strip() for c in re.split(r"\s{2,}", l.strip())]):
+        rows = rows_from(split)
+        if rows: break
+    if rows:
+        hdr, body = rows[0], rows[1:]
+        if all(_cellnum(c) is None or re.search(r"[A-Za-z]", c) for c in hdr):
+            for j in range(1, max(len(r) for r in rows)):
+                vals = {r[0]: _cellnum(r[j]) for r in body if j < len(r) and _cellnum(r[j]) is not None}
+                if len(vals) >= 2:
+                    name = hdr[j] if j < len(hdr) else f"column {j+1}"
+                    cols.append({"name": name, "rows": vals, "context": name + " " + " ".join(r[j] for r in body if j < len(r))})
+    if not cols:
+        pairs = re.findall(r"\b([A-Z][\w\-]*(?:\s[A-Z][\w\-]*)?)\s*[:=]?\s+(-?\d[\d,]*(?:\.\d+)?)", inp)
+        if len(pairs) >= 2:
+            cols.append({"name": "series", "rows": {k: _num(v) for k, v in pairs}, "context": inp})
+    return cols
+
+def _want(word, col):
+    """'max', 'min' or None (unsure) for a superlative word applied to a column."""
+    w = word.lower()
+    if w in _MAX_W: return "max"
+    if w in _MIN_W: return "min"
+    ctx = col["name"] + " " + col["context"]
+    rate = bool(_RATE_C.search(ctx))                       # rates first: anything "per time" is higher-is-better
+    low = (not rate) and bool(_LOW_C.search(ctx))          # pure time / cost / errors: lower is better
+    high = rate or bool(_HIGH_C.search(ctx))
+    if w in ("fastest", "quickest"):
+        return "max" if rate else "min" if low else None
+    if w == "slowest":
+        return "min" if rate else "max" if low else None
+    if w == "best":
+        return "max" if (rate or high) and not low else "min" if low and not (rate or high) else None
+    if w == "worst":
+        return "min" if (rate or high) and not low else "max" if low and not (rate or high) else None
+    return None
+
 def check_superlatives(inp, out):
-    """Deterministic guard: if a superlative points at a value that isn't the max/min it implies, strip superlatives."""
-    rate = bool(_RATE.search(inp)); low = bool(_LOWBETTER.search(inp)) and not rate
-    vals = [v for v in (_num(n) for n in _NUM.findall(out)) if v is not None]
-    if len(set(vals)) < 2:   # output names one value: compare against the input's values
-        vals = vals + [v for v in (_num(n) for n in _NUM.findall(inp)) if v is not None]
-    if len(set(vals)) < 2:
+    """Direction-aware guard. For each superlative, find the value it refers to (a nearby number, or the
+    entity + metric named in the sentence), find the source column holding it, and strip the word ONLY if
+    it contradicts that column's real max/min. Unsure -> keep. Returns (text, note or None)."""
+    cols = parse_columns(inp)
+    if not cols:
         return out, None
-    hi, lo = max(vals), min(vals)
-    bad = None
-    for sent in re.split(r"(?<=[.!?])\s+", out):
-        for m in _SUP.finditer(sent):
-            w = m.group(1).lower(); pre = m.group(0).lower()
-            if any(k in pre for k in ("second", "third", "next")):
+    notes, sents = [], re.split(r"(?<=[.!?])\s+", out)
+    for i, sent in enumerate(sents):
+        for m in list(_SUP2.finditer(sent)):
+            if m.group(1):                                    # "second highest" etc.: not checked
                 continue
-            after = _NUM.search(sent, m.end()) or _NUM.search(sent)
-            v = _num(after.group(0)) if after else None
-            if v is None: continue
-            if w in ("highest", "largest", "biggest", "most", "priciest") or w.startswith("most "): want = hi
-            elif w in ("lowest", "smallest", "least", "cheapest") or w.startswith("least "): want = lo
-            elif w in ("fastest", "quickest", "best"): want = hi if rate else lo if low else None
-            elif w in ("slowest", "worst"): want = lo if rate else hi if low else None
-            else: want = None
-            if want is not None and v != want:
-                bad = f"superlative '{w}' on {after.group(0)} contradicts data"; break
-        if bad: break
-    if not bad:
+            word = m.group(2).lower()
+            nm = None
+            for cand in (_NUM.search(sent, m.end(), min(len(sent), m.end() + 50)),):
+                nm = cand
+            if nm is None:
+                before = [x for x in _NUM.finditer(sent[:m.start()]) if m.start() - x.end() <= 50]
+                nm = before[-1] if before else None
+            low_s = sent.lower()
+            if nm is not None:
+                v = _num(nm.group(0))
+                cands = [c for c in cols if any(abs(x - v) < 1e-9 for x in c["rows"].values())]
+                named = [c for c in cands if any(w in low_s for w in re.findall(r"[a-z]{3,}", c["name"].lower()))]
+                cands = named or cands
+            else:
+                ents = [c for c in cols for k in c["rows"] if k and k.lower() in low_s]
+                named = [c for c in cols if any(w in low_s for w in re.findall(r"[a-z]{3,}", c["name"].lower()))]
+                cands = named if named else (cols if len(cols) == 1 else [])
+                ent = [k for c in cols for k in c["rows"] if k and re.search(r"\b" + re.escape(k.lower()) + r"\b", low_s[:m.start()])]
+                if not ent or not cands:
+                    continue
+                v = None
+                vals = [c["rows"].get(ent[-1]) for c in cands if c["rows"].get(ent[-1]) is not None]
+                if len(vals) != 1:
+                    continue
+                v = vals[0]
+            if not cands:
+                continue                                       # number not in any column: unsure
+            verdicts = []
+            for c in cands:
+                want = _want(word, c)
+                if want is None:
+                    verdicts.append(None); continue
+                target = max(c["rows"].values()) if want == "max" else min(c["rows"].values())
+                verdicts.append(abs(target - v) < 1e-9)
+            if verdicts and all(x is False for x in verdicts):
+                notes.append(f"superlative '{word}' on {v:g} contradicts {cands[0]['name']}")
+                span = m.group(0)
+                new = re.sub(r"(?i)\b(has|had|have)\s+" + re.escape(span) + r"\s+at\s+", lambda mm: mm.group(1) + " ", sent, count=1)
+                if new != sent:
+                    sents[i] = sent = new; continue
+                new = re.sub(r"(?i)\b(?:is|are|was|were|has|had)\s+" + re.escape(span) + r"\s+(?:at|with)\b", lambda mm: mm.group(0).split()[0] + " at", sent, count=1)
+                if new == sent:
+                    new = sent.replace(span, "", 1)
+                sents[i] = sent = re.sub(r"\s{2,}", " ", new).replace(" ,", ",").strip()
+    if not notes:
         return out, None
-    fixed = re.sub(r"(?i)\s*,?\s*\b(?:is|are|was|were)\s+(?:the\s+)?(?:second|third|next)?[\s-]*(?:fastest|slowest|quickest|highest|lowest|largest|smallest|biggest|best|worst|cheapest|priciest|most\s+\w+|least\s+\w+)\s+(?:at|with)\b", " is at", out)
-    fixed = re.sub(r"(?i)\b(?:the\s+)?(?:second|third|next)?[\s-]*(?:fastest|slowest|quickest|best|worst)\b\s*", "", fixed)
-    return re.sub(r"\s{2,}", " ", fixed).strip(), bad
+    return " ".join(sents), "; ".join(notes)
 
 def validate(inp, out):
     """Return None if acceptable, else a short reason. Lenient: only reject clear failures."""
@@ -892,7 +980,7 @@ def rewrite_with_image(text, path, rec, mode=None):
         rec.update(backend="llm", model=model_name(), llm_ms=0, error=None)
         o = demeta_text(o, rec, text)
         o, sup = check_superlatives(text, o)
-        if sup: rec["error"] = "llm: superlative removed: " + sup
+        if sup: rec.setdefault("_notes", []).append("superlative removed: " + sup)
         return o
     except Exception as e:
         rec["vision_ms"] = rec["vision_ms"] or int((time.time() - t0) * 1000)
@@ -938,7 +1026,7 @@ def rewrite(text, rec, keep_error=False):
                 if why is None:
                     o, sup = check_superlatives(c, o)
                     if sup:
-                        rec["error"] = "llm: superlative removed: " + sup
+                        rec.setdefault("_notes", []).append("superlative removed: " + sup)
                     parts.append(o); continue
                 raise ValueError("validation: " + why)
             except Exception as e:
@@ -1555,6 +1643,10 @@ def main(argv=None):
     sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50)
     a = p.parse_args(argv)
     load_config()
+    for legacy in ("/tmp/speakeasy_sel.png", "/tmp/speakeasy_win.png"):   # pre-prefix capture files
+        if a.cmd in ("selection", "speak", "rewrite") and os.path.isfile(legacy) and not (a.cmd != "selection" and getattr(a, "image", None) and os.path.realpath(a.image) == os.path.realpath(legacy)):
+            try: os.remove(legacy)
+            except OSError: pass
 
     if a.cmd == "stop":
         stop(); return 0
@@ -1730,6 +1822,7 @@ def main(argv=None):
     rec["tts_error"] = tts_err or None
     parts = stage["copy"] + stage["capture"] + stage["llm"] + (["tts: " + tts_err] if tts_err else [])
     rec["error"] = "; ".join(parts) if parts else None
+    rec["notes"] = "; ".join(rec.pop("_notes", [])) or None
     rec.update(input_chars=len(text), output_chars=len(out), total_ms=int((time.time() - t0) * 1000))
     rec["peak_rss_mb"] = peak_rss_mb()
     rec["ollama_models"] = ollama_ps()

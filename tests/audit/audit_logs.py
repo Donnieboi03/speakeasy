@@ -51,6 +51,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
            "tts_mix": dict(Counter(f"{l.get('tts_requested')}->{l.get('tts')}" for l in lines if l.get("tts"))), "tts_server_rss_mb_max": max([l["tts_server_rss_mb"] for l in lines if isinstance(l.get("tts_server_rss_mb"), (int, float))], default=None),
            "vision_gate_mix": dict(Counter(str(l.get("vision_gate")) for l in lines if "vision_gate" in l)),
            "streamed_mix": dict(Counter(str(l.get("streamed")) for l in lines if "streamed" in l)), "meta_refs_removed_total": sum(l.get("meta_refs_removed") or 0 for l in lines),
+           "notes": [l.get("notes") for l in lines if l.get("notes")][:50],
            "errors": [l.get("error") for l in lines if l.get("error")],
            "peak_rss_mb": {"max": max([l["peak_rss_mb"] for l in lines if isinstance(l.get("peak_rss_mb"), (int, float))], default=None)},
            "ollama_models_seen": sorted({json.dumps({k: m.get(k) for k in ("name", "model", "size", "size_vram", "size_mb", "size_vram_mb") if k in m}) for m in mem}),

@@ -44,6 +44,7 @@ REQUIRED = {
     "first_sentence_ms": (NUM + (type(None),), lambda l: l.get("streamed") is True, "time to first full sentence"),
     "meta_refs_removed": ((int,), lambda l: l.get("backend") == "llm", "count of screenshot/image references stripped"),
     "vision_reasked": ((bool, type(None)), lambda l: str(l.get("capture_method", "")).startswith("no-selection") and l.get("image"), "no-selection answer re-asked"),
+    "notes": ((list, str, type(None)), lambda l: l.get("command") in ("rewrite", "speak", "selection"), "non-error corrections (e.g. superlative fixes)"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
@@ -72,6 +73,7 @@ def validate(l):
     if g in ("auto-use", "forced") and l.get("image") is False and not l.get("error"): probs.append("gate_use_but_no_image_and_no_error")
     if g and not l.get("vision_gate_reason"): probs.append("vision_gate_without_reason")
     le = str(l.get("llm_error") or "").lower()
+    if any(w in le for w in ("superlative", "corrected", "contradict")): probs.append("correction_logged_as_llm_error")
     if le.startswith(("copy", "capture")) or "clipboard" in le or "pbpaste" in le: probs.append("non_llm_error_in_llm_error")
     if not l.get("image") and l.get("capture_path"): probs.append("capture_path_set_without_image")
     if l.get("capture_crop") not in (None, "cropped", "already-cropped"): probs.append(f"bad_capture_crop:{l.get('capture_crop')}")

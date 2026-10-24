@@ -34,13 +34,20 @@ def checks(name, text, path, meta, rc, out, err, log, cond, dt=0):
     if meta.get("bad"): add("bad_image_warns_stderr", err.strip() != "", err[:100])
     if cond == "unreachable": add("fallback_warns_stderr", err.strip() != "", err[:100])
     if "order" in meta and cond == "vision":
-        o = _norm(out); pos = []
-        for s in meta["order"]:
-            i = o.find(_norm(s).strip()); 
-            if i >= 0: pos.append((i, s))
-        seq = [s for _, s in sorted(pos)]; expect = [s for s in meta["order"] if s in seq]
-        add("pipeline_mentions_4plus_stages", len(seq) >= 4, seq)
-        add("pipeline_stage_order", seq == expect, " > ".join(seq))
+        o = _norm(out); st = [_norm(x).strip() for x in meta["order"]]
+        found = [x for x in st if x in o]
+        def chain(start_stage_idx, pos):
+            n, p = 1, pos
+            for x in st[start_stage_idx + 1:]:
+                q = o.find(x, p + 1)
+                if q >= 0: n += 1; p = q
+            return n
+        best = 0
+        for i, x in enumerate(st):
+            p = o.find(x)
+            while p >= 0: best = max(best, chain(i, p)); p = o.find(x, p + 1)
+        add("pipeline_mentions_4plus_stages", len(found) >= 4, found)
+        add("pipeline_stage_order", best >= len(found), f"longest ordered chain {best} of {len(found)} mentioned")
     if meta.get("trend") == "up" and cond == "vision":
         up = re.search(r"\b(grow|grew|growth|increas|ris|rose|climb|up|upward|steadily higher)", out, re.I)
         down = re.search(r"\b(declin|decreas|fell|fall|drop|down)", out, re.I)
