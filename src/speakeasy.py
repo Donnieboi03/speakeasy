@@ -1414,8 +1414,192 @@ def _empty(rec):
     rec.setdefault("error", None)
     return ""
 
-# ---------------- rewrite ----------------
+
+# ---------------- verbatim blocks (drafted emails, messages, letters, quotes) ----------------
+# Content meant to be sent or quoted is conveyed, not summarised: name it, then read the body
+# essentially word for word (lightly smoothed). Detected locally, so it costs no model time.
+_V_HDR = re.compile(r"(?i)^\s*(?:\*\*)?(to|subject|subj|re|cc|bcc|from)(?:\*\*)?\s*:\s*(.*)$")
+_V_GREET = re.compile(r"(?i)^\s*(?:hi|hello|hey|dear|greetings|good\s+(?:morning|afternoon|evening)|to whom it may concern)\b[^.!?]{0,60}[,!:]?\s*$")
+def _greet(l):
+    return _V_GREET.match(re.sub(r"\b(Mr|Ms|Mrs|Dr|Prof|St)\.", r"\1", l))
+_V_SIGN = re.compile(r"(?i)^\s*(?:best|best regards|kind regards|warm regards|warmly|regards|sincerely|sincerely yours|yours truly|yours|thanks|thank you|many thanks|thanks again|cheers|respectfully|all the best|talk soon|take care|love|xo)\s*[,.!]?\s*$")
+_V_KIND = [("email", r"\be-?mails?\b|\binbox\b"), ("letter", r"\bletters?\b|\bcover letter\b"),
+           ("post", r"\bpost\b|\btweet\b|\blinkedin\b|\bthread\b|\bcaption\b"),
+           ("message", r"\bmessages?\b|\btexts?\b|\bdm\b|\bslack\b|\bimessage\b|\bwhatsapp\b|\breply\b")]
+
+def _v_kind(block_lines, context):
+    if any(_V_HDR.match(l) and _V_HDR.match(l).group(1).lower() in ("to", "subject", "subj", "cc", "bcc", "from") for l in block_lines):
+        return "email"
+    ctx = (context or "").lower()
+    for k, rx in _V_KIND:
+        if re.search(rx, ctx): return k
+    if block_lines and re.match(r"(?i)\s*dear\b", block_lines[0]) and any(re.match(r"(?i)\s*(sincerely|yours)", l) for l in block_lines):
+        return "letter"
+    return "message"
+
+def split_verbatim(text):
+    """[(kind, lines)] where kind is 'plain' or ('verbatim', info). Only clear cases are marked verbatim:
+    an email/message (headers or greeting ... sign-off), a run of '>' blockquote lines, or a long fully quoted paragraph."""
+    lines = (text or "").splitlines()
+    n = len(lines); out = []; i = 0; plain = []
+    def flush():
+        if plain: out.append(("plain", plain[:])); plain.clear()
+    while i < n:
+        l = lines[i]
+        # email / message / letter
+        if _V_HDR.match(l) or _greet(l):
+            j = i
+            while j < n and (_V_HDR.match(lines[j]) or not lines[j].strip()): j += 1     # header block
+            start_body = j
+            if j < n and (_greet(lines[j]) or _greet(l)) or any(_V_HDR.match(x) for x in lines[i:j]):
+                k = start_body
+                end = None
+                while k < n and k - i < 200:
+                    if _V_SIGN.match(lines[k]): end = k; break
+                    k += 1
+                has_hdr = any(_V_HDR.match(x) and _V_HDR.match(x).group(1).lower() in ("to", "subject", "subj") for x in lines[i:start_body])
+                if end is None and has_hdr:
+                    # headers but no sign-off: body runs to the next blank-line-separated commentary or the end
+                    end = n - 1
+                    while end > start_body and not lines[end].strip(): end -= 1
+                if end is not None:
+                    e = end + 1
+                    while e < n and e - end <= 3 and lines[e].strip() and len(lines[e].split()) <= 6: e += 1   # name / title lines
+                    if sum(len(x.split()) for x in lines[i:e]) >= 8:
+                        flush(); out.append(("verbatim", lines[i:e])); i = e; continue
+        # blockquote run
+        if re.match(r"^\s*>", l):
+            j = i
+            while j < n and re.match(r"^\s*>", lines[j]): j += 1
+            q = [re.sub(r"^\s*>\s?", "", x) for x in lines[i:j]]
+            if sum(len(x.split()) for x in q) >= 6 and not re.match(r"(?i)\s*\**(note|tip|warning|important|info)\b", q[0]):
+                flush(); out.append(("quote", q)); i = j; continue
+        # fully quoted paragraph (>= 12 words)
+        m = re.match(r'^\s*["\u201c](.+)["\u201d]\s*(?:[-\u2014\u2013]\s*(.+))?$', l)
+        if m and len(m.group(1).split()) >= 12:
+            flush(); out.append(("quote", [m.group(1)] + ([("\u2014 " + m.group(2))] if m.group(2) else []))); i += 1; continue
+        plain.append(l); i += 1
+    flush()
+    return out
+
+_PH_ART = re.compile(r"(?i)^(your|my|our|their|his|her|the|a|an)\b")
+def _ph(label):
+    label = re.sub(r"[_\s]+", " ", label).strip().strip(".:")
+    low = label.lower()
+    return f"a placeholder for {'' if _PH_ART.match(low) else 'the '}{low}"
+
+def speak_placeholders(s):
+    """[mailing address] -> 'a placeholder for the mailing address'; xxx-xxxx -> 'a placeholder phone number'."""
+    s = re.sub(r"\(?\b[xX#]{3}\)?[-.\s][xX#]{3}[-.\s][xX#]{4}\b|\b[xX#]{3}[-.][xX#]{4}\b", "a placeholder phone number", s)
+    s = re.sub(r"\b[xX]{1,2}/[xX]{1,2}/[xX]{2,4}\b|\b[mM]{2}/[dD]{2}/[yY]{2,4}\b", "a placeholder date", s)
+    s = re.sub(r"\$\s?[xX]+(?:[.,][xX]+)?\b", "a placeholder amount", s)
+    s = re.sub(r"\[([A-Za-z][A-Za-z0-9 '\u2019/&.-]{1,48})\](?!\()", lambda m: _ph(m.group(1)), s)
+    s = re.sub(r"\{\{?\s*([A-Za-z][A-Za-z0-9 _'.-]{1,48})\s*\}?\}", lambda m: _ph(m.group(1)), s)
+    s = re.sub(r"<\s*([A-Za-z][A-Za-z0-9 _'.-]{1,48})\s*>", lambda m: _ph(m.group(1)) if " " in m.group(1) or m.group(1).islower() else m.group(0), s)
+    s = re.sub(r"(?<![\w])_{3,}(?![\w])", "a blank", s)
+    s = re.sub(r"\bXXX+\b", "a placeholder", s)
+    return s
+
+def _smooth_line(l):
+    l = re.sub(r"!?\[([^\]]+)\]\(([^)]*)\)", r"\1", l)                 # markdown link -> its text
+    l = re.sub(r"<?https?://(?:www\.)?([^/\s>]+)\S*", r"\1", l)          # URL -> domain
+    l = re.sub(r"(\*\*|__|\*|`)(.+?)\1", r"\2", l)
+    l = re.sub(r"^\s*(?:#{1,6}\s+|[-*+\u2022]\s+|\d+[.)]\s+)", "", l)
+    return speak_placeholders(l).strip()
+
+def verbatim_speech(kind, lines, context=""):
+    """Sentences to speak for one verbatim block: a short naming line, then the body nearly word for word."""
+    out = []
+    if kind == "quote":
+        attr = None
+        if lines and re.match(r"^\s*[-\u2014\u2013]\s*\S", lines[-1]):
+            attr = re.sub(r"^\s*[-\u2014\u2013]\s*", "", lines[-1]).strip(); lines = lines[:-1]
+        out.append(f"Here's the quote{' from ' + _smooth_line(attr) if attr else ''}:")
+        body = lines
+    else:
+        hdr = {}
+        body = []
+        for l in lines:
+            m = _V_HDR.match(l)
+            if m and not body: hdr.setdefault(m.group(1).lower(), m.group(2).strip()); continue
+            body.append(l)
+        k = _v_kind(lines, context)
+        to = hdr.get("to") or ""
+        to = re.sub(r"\s*<[^>]*>", "", to).strip()
+        if re.fullmatch(r"[\w.+-]+@[\w-]+\.[\w.]+", to): to = ""                     # bare address: say the name only
+        if not to:
+            m = re.search(r"\b(?i:e-?mail|message|letter|note|text|reply|post|dm)\s+(?i:to|for)\s+((?:[A-Z][\w&'\u2019.-]*)(?:\s+(?:[A-Z][\w&'\u2019.-]*|&|and|of))*)", context or "")
+            if m: to = m.group(1).rstrip(".")
+        if not to:
+            g = next((x for x in body if x.strip()), "")
+            m = re.match(r"(?i)\s*(?:hi|hello|hey|dear)\s+([A-Z][\w'\u2019.-]*(?:\s+[A-Z][\w'\u2019.-]*){0,3})\s*[,!:]?\s*$", g)
+            if m and m.group(1).lower() not in ("all", "team", "everyone", "there", "folks", "sir", "madam"): to = m.group(1)
+        subj = hdr.get("subject") or hdr.get("subj") or hdr.get("re") or ""
+        head = f"Here's the {k}"
+        if to: head += f" to {_smooth_line(to)}"
+        if subj: head += f", subject: {_smooth_line(subj).rstrip('.')}"
+        out.append(head + ".")
+    para = []
+    def push():
+        if para:
+            t = " ".join(para).strip()
+            if t:
+                if not re.search(r"[.!?:;,\u2026\"\u201d')]$", t): t += "."
+                out.append(t)
+            para.clear()
+    for l in body:
+        sl = _smooth_line(l)
+        if not sl: push(); continue
+        if _greet(l) or _V_SIGN.match(l):
+            push(); out.append(sl if re.search(r"[.!?,:]$", sl) else sl + ","); continue
+        para.append(sl)
+        if re.search(r"[.!?:]\s*$", sl) is None and len(sl.split()) <= 6 and not para[:-1]:
+            push()                                               # short standalone line (name, title, list item)
+    push()
+    # split long paragraphs into sentences for streaming TTS (keeps every word)
+    res = []
+    for t in out:
+        res.extend(x for x in re.split(r"(?<=[.!?])\s+(?=[A-Z\"\u201c(])", t) if x.strip())
+    return res
+
 def rewrite(text, rec, keep_error=False):
+    """Splits out verbatim blocks (drafted email/message/letter/quote); everything else goes through _rewrite."""
+    segs = split_verbatim(text) if os.environ.get("SPEAKEASY_VERBATIM", "on").lower() != "off" else [("plain", text.splitlines())]
+    if not any(k != "plain" for k, _ in segs):
+        return _rewrite(text, rec, keep_error)
+    rec["verbatim_blocks"] = [k if k == "quote" else _v_kind(v, text) for k, v in segs if k != "plain"]
+    parts, streamed_any = [], False
+    plain_all = "\n".join("\n".join(v) for k, v in segs if k == "plain")
+    for k, v in segs:
+        if k == "plain":
+            seg = "\n".join(v).strip()
+            if not seg: continue
+            if len(seg.split()) <= 15:                 # short framing ("Here's a draft you could send:"): say it as is
+                o = sanitize(_smooth_line(re.sub(r"\s*\n\s*", " ", seg)))
+                if o and not re.search(r"[.!?:]$", o): o += "."
+                outs = [o] if o else []
+            else:
+                rec.pop("streamed", None)
+                o = _rewrite(seg, rec, keep_error=True)
+                if SINK is not None and rec.get("streamed"):
+                    streamed_any = True; parts.append(o); continue
+                outs = list(sentences(o)) if o else []
+        else:
+            outs = verbatim_speech(k, v, plain_all)
+        for x in outs:
+            if SINK is not None and not STOP.is_set():
+                if rec.get("first_sentence_ms") is None and rec.get("_t0"):
+                    rec["first_sentence_ms"] = int((time.time() - rec["_t0"]) * 1000)
+                SINK(x)
+        parts.append(" ".join(outs))
+    if SINK is not None:
+        rec["streamed"] = True
+    if rec.get("backend") is None or "backend" not in rec:
+        rec.update(backend="llm" if streamed_any else "verbatim", model=model_name())
+    rec.setdefault("llm_ms", 0)
+    return "\n".join(p for p in parts if p).strip()
+
+def _rewrite(text, rec, keep_error=False):
     """Returns spoken text; fills rec with backend/llm_ms/error."""
     prev = rec.get("error") if keep_error else None
     rec.update(backend="llm", model=model_name(), llm_ms=0, error=None)
