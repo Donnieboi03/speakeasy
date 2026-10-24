@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+# copy fixture to the output path (last arg); log the flags used
+out="${@: -1}"; cp "${STUB_SCREEN:?}" "$out"
+echo "{\"tool\":\"screencapture\",\"args\":\"$(printf '%s ' "$@" | tr '"' "'")\"}" >> "${STUB_LOG:-/dev/null}"

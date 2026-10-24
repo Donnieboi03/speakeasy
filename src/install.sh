@@ -26,10 +26,24 @@ fi
 TTS_VENV="$HOME_DIR/tts-venv"
 CONFIG="$HOME_DIR/config"
 touch "$CONFIG"
+# Create/repair the Kokoro venv (Python 3.10-3.12: spaCy/misaki do not build on newer Pythons).
+if [ "$(uname)" = "Darwin" ] && [ "${SPEAKEASY_SKIP_KOKORO:-0}" != 1 ]; then
+  PY=""; for v in 3.12 3.11 3.10; do command -v python$v >/dev/null && { PY=$(command -v python$v); break; }; done
+  if [ -n "$PY" ]; then
+    [ -x "$TTS_VENV/bin/python" ] && "$TTS_VENV/bin/python" -c 'import sys; sys.exit(sys.version_info[:2] > (3,12))' || { rm -rf "$TTS_VENV"; "$PY" -m venv "$TTS_VENV"; }
+    "$TTS_VENV/bin/python" -m ensurepip --upgrade >/dev/null 2>&1 || true
+    if ! "$TTS_VENV/bin/python" -c 'import mlx_audio.server, misaki.en, spacy; spacy.load("en_core_web_sm")' >/dev/null 2>&1; then
+      echo "Installing Kokoro TTS deps (mlx-audio, misaki, spaCy model)..."
+      "$TTS_VENV/bin/python" -m pip install -q "mlx-audio[server]" "misaki[en]" webrtcvad-wheels uvicorn fastapi python-multipart num2words \
+        "en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl" \
+        || echo "WARNING: Kokoro deps failed; falling back to macOS say."
+    fi
+  else echo "No python3.10-3.12 found (brew install python@3.12) - skipping Kokoro."; fi
+fi
 set_cfg() { grep -q "^$1=" "$CONFIG" 2>/dev/null || echo "$1=$2" >> "$CONFIG"; }
 if [ -x "$TTS_VENV/bin/mlx_audio.server" ] && [ "$(uname)" = "Darwin" ]; then
   PLIST="$HOME/Library/LaunchAgents/com.speakeasy.tts.plist"
-  mkdir -p "$HOME/Library/LaunchAgents" "$HOME_DIR/logs"
+  mkdir -p "$HOME/Library/LaunchAgents" "$HOME_DIR/logs" "$HOME_DIR/tts"
   cat > "$PLIST" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -42,19 +56,26 @@ if [ -x "$TTS_VENV/bin/mlx_audio.server" ] && [ "$(uname)" = "Darwin" ]; then
   </array>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>WorkingDirectory</key><string>$HOME_DIR/tts</string>
   <key>StandardOutPath</key><string>$HOME_DIR/logs/tts-server.log</string>
   <key>StandardErrorPath</key><string>$HOME_DIR/logs/tts-server.log</string>
 </dict></plist>
 PL
   launchctl bootout "gui/$(id -u)/com.speakeasy.tts" 2>/dev/null || true
-  launchctl bootstrap "gui/$(id -u)" "$PLIST" && echo "Kokoro TTS server installed as LaunchAgent (com.speakeasy.tts on 127.0.0.1:8000)."
+  sleep 2
+  for t in 1 2 3; do launchctl bootstrap "gui/$(id -u)" "$PLIST" 2>/dev/null && break; sleep 2; done
+  launchctl print "gui/$(id -u)/com.speakeasy.tts" >/dev/null 2>&1 && echo "Kokoro TTS server installed as LaunchAgent (com.speakeasy.tts on 127.0.0.1:8000)."
   set_cfg SPEAKEASY_TTS kokoro
   set_cfg SPEAKEASY_TTS_VOICE af_heart
   set_cfg SPEAKEASY_TTS_URL http://127.0.0.1:8000/v1/audio/speech
+  for i in $(seq 1 40); do curl -s --max-time 5 -o /dev/null http://127.0.0.1:8000/docs && break; sleep 3; done
+  curl -s --max-time 120 -o /dev/null -X POST http://127.0.0.1:8000/v1/audio/speech -H 'Content-Type: application/json' \
+    -d '{"model":"mlx-community/Kokoro-82M-bf16","input":"Ready.","voice":"af_heart","response_format":"wav"}' && echo "Kokoro model warmed up." || echo "WARNING: Kokoro warm-up failed (see $HOME_DIR/logs/tts-server.log)."
   echo "Default TTS set to kokoro in $CONFIG (falls back to say if the server is down)."
 else
   echo "Kokoro venv not found at $TTS_VENV; using macOS say. (Optional: python3 -m venv $TTS_VENV && $TTS_VENV/bin/pip install mlx-audio, then re-run.)"
 fi
+set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
 
 cat <<MSG
@@ -72,8 +93,40 @@ Bind a hotkey (pick one):
 --          "select" (always drag a box; Esc = text only), "mouse" (900x600 around cursor), "off" (never screenshot)
 local CAPTURE = os.getenv("SPEAKEASY_CAPTURE") or "auto"
 local SPEAKEASY = "$LINKDIR/speakeasy"
-local SHOT = "/tmp/speakeasy_sel.png"
-local WINSHOT = "/tmp/speakeasy_win.png"
+local SHOT = "/tmp/speakeasy_cap_sel.png"
+local WINSHOT = "/tmp/speakeasy_cap_win.png"
+
+-- read a key from ~/.speakeasy/config (Hammerspoon does not see shell env vars)
+local function cfg(key, default)
+  local v = os.getenv(key)
+  if v and v ~= "" then return v end
+  local f = io.open(os.getenv("HOME") .. "/.speakeasy/config", "r")
+  if f then
+    for line in f:lines() do
+      local k, val = line:match("^%s*([%w_]+)%s*=%s*(.-)%s*$")
+      if k == key and val ~= "" then f:close(); return (val:gsub("^[\"']", ""):gsub("[\"']$", "")) end
+    end
+    f:close()
+  end
+  return default
+end
+-- What to capture when NOTHING is selected: window (default) | screen | none
+local NO_SEL = cfg("SPEAKEASY_NO_SELECTION_CAPTURE", "window")
+
+-- Is any text selected? Copy with Cmd-C and see if the pasteboard changed; restore it afterwards.
+local function hasTextSelection()
+  local saved = hs.pasteboard.readAllData()
+  local before = hs.pasteboard.changeCount()
+  hs.eventtap.keyStroke({ "cmd" }, "c", 0)
+  local changed = false
+  for _ = 1, 8 do
+    hs.timer.usleep(25000)
+    if hs.pasteboard.changeCount() ~= before then changed = true; break end
+  end
+  local txt = changed and (hs.pasteboard.getContents() or "") or ""
+  if changed and saved then hs.pasteboard.writeAllData(saved) end
+  return changed and txt:match("%S") ~= nil
+end
 
 local function clamp(r)
   local sf = hs.mouse.getCurrentScreen():fullFrame()
@@ -180,11 +233,32 @@ hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   end
   local hr = highlightCapture()
   if hr then return run({ "selection", "--image", SHOT }, "highlight", hr, t0) end
-  interactive(t0)
+  if hasTextSelection() then return interactive(t0) end   -- text selected but not locatable: drag a box (Esc = text only)
+  -- nothing selected: explain the focused window (or screen) per SPEAKEASY_NO_SELECTION_CAPTURE
+  os.remove(SHOT)
+  if NO_SEL == "window" then
+    local win = hs.window.focusedWindow()
+    if win then
+      hs.execute(string.format("/usr/sbin/screencapture -x -o -l %d %s", win:id(), SHOT))
+      local f = win:frame()
+      if hs.fs.attributes(SHOT) then
+        return run({ "selection", "--image", SHOT }, "no-selection-window", { x = f.x, y = f.y, w = f.w, h = f.h }, t0)
+      end
+    end
+  elseif NO_SEL == "screen" then
+    local f = hs.mouse.getCurrentScreen():fullFrame()
+    hs.execute(string.format("/usr/sbin/screencapture -x -R %d,%d,%d,%d %s", f.x, f.y, f.w, f.h, SHOT))
+    if hs.fs.attributes(SHOT) then
+      return run({ "selection", "--image", SHOT }, "no-selection-screen", { x = f.x, y = f.y, w = f.w, h = f.h }, t0)
+    end
+  end
+  run({ "selection" }, "none", nil, t0)
 end)
 -- end speakeasy
 
     Hammerspoon needs Accessibility AND Screen Recording permission (System Settings > Privacy & Security).
+    Nothing selected? auto mode explains the focused window. Set SPEAKEASY_NO_SELECTION_CAPTURE=window|screen|none
+    in ~/.speakeasy/config (default window).
     Capture modes: set CAPTURE in the block (auto|select|mouse|off). Last screenshot is kept at ~/.speakeasy/last_capture.png
     (SPEAKEASY_KEEP_CAPTURE=0 deletes it after use). Inspect runs with: speakeasy last ; speakeasy stats
     Pluggable TTS: SPEAKEASY_TTS=cmd SPEAKEASY_TTS_CMD='your-tts --rate {rate} {text}' (text piped to stdin if no {text}).

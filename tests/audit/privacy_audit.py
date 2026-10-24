@@ -9,13 +9,19 @@ home = os.path.expanduser(os.environ.get("SPEAKEASY_HOME", "~/.speakeasy"))
 ap = argparse.ArgumentParser(); ap.add_argument("--image", default=os.path.join(home, "last_capture.png"))
 ap.add_argument("--log", default=os.path.join(home, "logs", "runs.jsonl")); ap.add_argument("--screen"); ap.add_argument("--thumb", default="/tmp/speakeasy_capture_thumb.png")
 a = ap.parse_args(); out = {"image": a.image}
+_ls = [l for l in open(a.log) if l.strip()] if os.path.exists(a.log) else []
+_last = json.loads(_ls[-1]) if _ls else {}
+if os.path.exists(a.image) and _last and not _last.get("image"):
+    out["STALE_CAPTURE"] = f"{a.image} exists but the last run used no image; it is a leftover from an earlier run"
+for stray in ("/tmp/speakeasy_sel.png",):
+    if os.path.exists(stray): out.setdefault("stray_files", []).append(stray)
 if not os.path.exists(a.image): out["error"] = "no capture image kept"; print(json.dumps(out, indent=2)); sys.exit(1)
 im = Image.open(a.image); out["capture_px"] = f"{im.size[0]}x{im.size[1]}"
 last = None
 if os.path.exists(a.log):
     ls = [l for l in open(a.log) if l.strip()]
     if ls: last = json.loads(ls[-1])
-if last: out.update({k: last.get(k) for k in ("ts", "command", "capture_method", "capture_rect", "image_px", "image_sent_px")})
+if last: out.update({k: last.get(k) for k in ("ts", "command", "capture_method", "error", "capture_rect", "capture_crop", "capture_original_px", "capture_cropped_px", "image_px", "image_sent_px")})
 if a.screen:
     sw, sh = map(int, a.screen.split("x")); out["capture_frac_of_screen"] = round(im.size[0] * im.size[1] / (sw * sh), 3)
     out["verdict"] = "FULL SCREEN captured, check this" if out["capture_frac_of_screen"] > 0.9 else ("large capture" if out["capture_frac_of_screen"] > 0.5 else "ok")

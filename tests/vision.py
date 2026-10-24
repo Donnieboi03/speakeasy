@@ -76,6 +76,7 @@ def run_grid(run, read_logs, good_url, bad_url, llm_up, vision_model, vision_up,
     conds = {"vision": (good_url, vision_model), "vision_unavail": (good_url, "no-such-vision-model:0b"), "unreachable": (bad_url, vision_model)}
     for cond, (url, vm) in conds.items():
         for name, (text, path, meta) in X.items():
+            if os.environ.get("VISION_FILTER") and not any(f in name for f in os.environ["VISION_FILTER"].split(",")): continue
             rec = {"fixture": name, "condition": cond, "checks": []}
             if cond != "unreachable" and not llm_up: rec["skipped"] = "LLM down"; res.append(rec); continue
             if cond == "vision" and not vision_up: rec["skipped"] = f"vision model {vm} unavailable"; res.append(rec); continue

@@ -1,7 +1,13 @@
 __pycache__/
 *.pyc
+.scratch/
+*.jsonl
+*.log
+logs/
 tests/reports/
 tests/audit/reports/
-*.jsonl
-last_capture.png
 tests/images/highlight_fixture.png
+last_capture*.png
+*_capture*.png
+*.wav
+.DS_Store

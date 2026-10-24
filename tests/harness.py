@@ -7,7 +7,7 @@ from checks import check_output, check_log
 import judge
 import vision
 
-BIN = os.environ.get("SPEAKEASY_BIN", "/workspace/speakeasy/src/speakeasy")
+BIN = os.environ.get("SPEAKEASY_BIN", os.path.join(os.path.dirname(os.path.abspath(__file__)), "../src/speakeasy"))
 GOOD_URL = os.environ.get("TEST_LLM_URL", "http://localhost:11434/v1")
 BAD_URL = "http://127.0.0.1:9/v1"
 OUT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reports")

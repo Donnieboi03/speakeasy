@@ -14,7 +14,7 @@ REQUIRED = {
     "total_ms": (NUM, None, "wall time"),
     "llm_ms": (NUM + (type(None),), None, "LLM stage"),
     "copy_ms": (NUM + (type(None),), _sel, "clipboard copy stage"),
-    "capture_ms": (NUM + (type(None),), _sel, "screenshot stage"),
+    "capture_ms": (NUM, _sel, "screenshot stage"),
     "capture_method": ((str,), _sel, "bounds|highlight|select|mouse|none"),
     "capture_rect": ((list, str, dict, type(None)), _sel, "x,y,w,h captured"),
     "image": ((bool,), None, "image supplied & valid"),
@@ -24,10 +24,22 @@ REQUIRED = {
     "speak_ms": (NUM + (type(None),), _spoken, "speech duration"),
     "dry_run": ((bool,), _spk, "dry-run flag (decides whether tts/speak timings are required)"),
     "capture_path": ((str, type(None)), _img, "kept capture file path"),
+    "tts": ((str, type(None)), _spoken, "engine actually used: say|kokoro"),
+    "tts_requested": ((str, type(None)), _spoken, "engine requested via env/config"),
+    "tts_voice": ((str, type(None)), lambda l: l.get("tts") == "kokoro", "voice used"),
+    "tts_synth_ms": (NUM + (type(None),), lambda l: l.get("tts") == "kokoro", "total synth time"),
+    "tts_server_rss_mb": (NUM + (type(None),), lambda l: l.get("tts_requested") == "kokoro", "TTS server memory"),
+    "llm_error": ((str, type(None)), lambda l: l.get("command") not in ("stop", "last", "stats"), "LLM-stage error"),
+    "copy_error": ((str, type(None)), _sel, "clipboard/copy-stage error"),
+    "capture_error": ((str, type(None)), _sel, "screenshot/capture-stage error"),
+    "tts_error": ((str, type(None)), _spk, "TTS-stage error"),
+    "capture_original_px": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "pre-crop WxH"),
+    "capture_cropped_px": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "post-crop WxH"),
+    "capture_crop": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "cropped|already-cropped"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
-CAPTURE_METHODS = {"bounds", "highlight", "select", "mouse", "none"}
+CAPTURE_METHODS = {"bounds", "highlight", "select", "mouse", "none", "no-selection-window", "no-selection-screen"}
 
 def flatten(l):
     t = l.get("timings")
@@ -43,4 +55,15 @@ def validate(l):
         if k not in l: probs.append(f"missing:{k}")
         elif not isinstance(l[k], types) or (isinstance(l[k], bool) and bool not in types): probs.append(f"type:{k}={type(l[k]).__name__}")
     if "capture_method" in l and l["capture_method"] not in CAPTURE_METHODS: probs.append(f"bad_capture_method:{l['capture_method']}")
+    if str(l.get("capture_method", "")).startswith("no-selection") and not l.get("image"): probs.append("no_selection_method_without_image")
+    if l.get("capture_method") == "none" and l.get("image"): probs.append("capture_none_but_image_used")
+    le = str(l.get("llm_error") or "").lower()
+    if le.startswith(("copy", "capture")) or "clipboard" in le or "pbpaste" in le: probs.append("non_llm_error_in_llm_error")
+    if not l.get("image") and l.get("capture_path"): probs.append("capture_path_set_without_image")
+    if l.get("capture_crop") not in (None, "cropped", "already-cropped"): probs.append(f"bad_capture_crop:{l.get('capture_crop')}")
+    for st in ("copy", "capture", "llm", "tts"):
+        tags = ("llm", "vision") if st == "llm" else (st,)
+        if l.get(f"{st}_error") and not (l.get("error") and any(t in str(l.get("error")).lower() for t in tags)): probs.append(f"{st}_error_not_in_error")
+    if _spoken(l) and l.get("tts") and l.get("tts_requested") and l["tts"] != l["tts_requested"] and not l.get("error"):
+        probs.append("tts_fallback_without_error")
     return probs

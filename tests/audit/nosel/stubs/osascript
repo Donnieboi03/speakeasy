@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+a="$(printf '%s ' "$@")"
+echo "{\"tool\":\"osascript\",\"args\":\"$(printf '%s' "$a" | head -c 150 | tr '"\\\n' "'' ")\"}" >> "${STUB_LOG:-/dev/null}"
+case "$a" in *id*|*window*) echo 12345;; esac; exit 0

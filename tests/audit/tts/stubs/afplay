@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# afplay stub: records start/end and whether the file existed; "plays" for STUB_PLAY_SEC.
+f="${@: -1}"; s=$(date +%s.%N); ex=0; [ -f "$f" ] && ex=1
+sz=$( [ -f "$f" ] && stat -c%s "$f" || echo 0)
+trap 'echo "{\"tool\":\"afplay\",\"file\":\"$f\",\"start\":$s,\"end\":$(date +%s.%N),\"existed\":$ex,\"bytes\":$sz,\"killed\":1}" >> "$STUB_LOG"; exit 143' TERM INT
+sleep "${STUB_PLAY_SEC:-0.5}" & wait $!
+echo "{\"tool\":\"afplay\",\"file\":\"$f\",\"start\":$s,\"end\":$(date +%s.%N),\"existed\":$ex,\"bytes\":$sz,\"killed\":0}" >> "$STUB_LOG"
