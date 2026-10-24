@@ -30,6 +30,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
         if l.get("backend") == "fallback" and reach and l.get("input_chars"): flags.append("fallback_while_llm_reachable")
         if l.get("tts_requested") and l.get("tts") and l["tts"] != l["tts_requested"]: flags.append(f"tts_fallback:{l['tts_requested']}->{l['tts']}")
         if isinstance(l.get("tts_first_audio_ms"), (int, float)) and l["tts_first_audio_ms"] > 3000: flags.append(f"slow_first_audio:{l['tts_first_audio_ms']:.0f}ms")
+        if l.get("command") in ("speak", "selection") and l.get("dry_run") is False and "focus_events" in l and l.get("focus_events") == 0 and l.get("capture_rect") and l.get("output_chars"): flags.append(f"focus_no_events:{l.get('focus_fallback')}")
         if l.get("error"): flags.append(f"error:{str(l['error'])[:60]}")
         a = rect_area(l.get("capture_rect"))
         if a and screen:
@@ -52,6 +53,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
            "vision_gate_mix": dict(Counter(str(l.get("vision_gate")) for l in lines if "vision_gate" in l)),
            "streamed_mix": dict(Counter(str(l.get("streamed")) for l in lines if "streamed" in l)), "meta_refs_removed_total": sum(l.get("meta_refs_removed") or 0 for l in lines),
            "notes": [l.get("notes") for l in lines if l.get("notes")][:50],
+           "focus": {"runs_with_events": sum(1 for l in lines if (l.get("focus_events") or 0) > 0), "events_total": sum(l.get("focus_events") or 0 for l in lines), "fallback_mix": dict(Counter(str(l.get("focus_fallback")) for l in lines if "focus_fallback" in l)), "tag_hit_rate_mean": (lambda v: round(sum(v)/len(v), 2) if v else None)([l["focus_tag_hit_rate"] for l in lines if isinstance(l.get("focus_tag_hit_rate"), (int, float))])},
            "errors": [l.get("error") for l in lines if l.get("error")],
            "peak_rss_mb": {"max": max([l["peak_rss_mb"] for l in lines if isinstance(l.get("peak_rss_mb"), (int, float))], default=None)},
            "ollama_models_seen": sorted({json.dumps({k: m.get(k) for k in ("name", "model", "size", "size_vram", "size_mb", "size_vram_mb") if k in m}) for m in mem}),
@@ -60,7 +62,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
 
 def to_md(r):
     o = [f"# speakeasy log audit", f"- file: `{r['path']}`  runs: {r['runs']}  bad JSON lines: {r['bad_json_lines']}",
-         f"- backend mix: {r['backend_mix']}  commands: {r['command_mix']}", f"- vision gate: {r.get('vision_gate_mix')}", f"- streamed: {r.get('streamed_mix')}  meta refs removed: {r.get('meta_refs_removed_total')}", f"- capture methods: {r['capture_method_mix']}",
+         f"- backend mix: {r['backend_mix']}  commands: {r['command_mix']}", f"- vision gate: {r.get('vision_gate_mix')}", f"- streamed: {r.get('streamed_mix')}  meta refs removed: {r.get('meta_refs_removed_total')}", f"- focus: {r.get('focus')}", f"- capture methods: {r['capture_method_mix']}",
          f"- image sizes (orig->sent): {r['image_sizes']}", f"- TTS (requested->used): {r['tts_mix']}  TTS server RSS max: {r['tts_server_rss_mb_max']} MB", f"- peak RSS max: {r['peak_rss_mb']['max']} MB",
          f"- Ollama models seen: {r['ollama_models_seen'] or 'none logged'}", "", "## Latency (ms)", "| stage | n | p50 | p90 | p99 | max |", "|---|---|---|---|---|---|"]
     o += [f"| {s} | {v['n']} | {v['p50']} | {v['p90']} | {v['p99']} | {v['max']} |" for s, v in r["latency_ms"].items()]

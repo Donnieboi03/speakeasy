@@ -3,6 +3,8 @@
 import json, os, re, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); AUD = os.path.dirname(HERE); sys.path.insert(0, AUD)
 from schema import validate, flatten
+sys.path.insert(0, os.path.dirname(AUD))
+from checks import BROKEN
 BIN = os.environ.get("SPEAKEASY_BIN", os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../src/speakeasy")); PORT = 18891; MOCK = f"http://127.0.0.1:{PORT}/v1"; R = []
 def add(c, ok, d=""): R.append({"check": c, "pass": bool(ok), "detail": str(d)[:260]})
 def jl(p): return [json.loads(x) for x in open(p) if x.strip()] if os.path.exists(p) else []
@@ -79,6 +81,7 @@ try:
                 bad = claim(out, ent, "highest") and not claim(out, ent, "second highest")
                 add(f"{tag}_not_promoted_to_highest", not bad, out[:150])
             add(f"{tag}_numbers_kept", all(n in out for n in re.findall(r"\d+", ans)), out[:120])
+            g = BROKEN.search(out); add(f"{tag}_no_broken_clauses", not g, f"{g.group(0) if g else ''} :: {out[:120]}")
             add(f"{tag}_llm_error_clean", not l.get("llm_error"), l.get("llm_error"))
             add(f"{tag}_schema", not validate(l), validate(l))
     # legacy file cleanup

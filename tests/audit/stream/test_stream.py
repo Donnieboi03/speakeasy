@@ -3,6 +3,8 @@
 import json, os, re, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); AUD = os.path.dirname(HERE); sys.path.insert(0, AUD)
 from schema import validate, flatten
+sys.path.insert(0, os.path.dirname(AUD))
+from checks import BROKEN
 BIN = os.environ.get("SPEAKEASY_BIN", os.path.join(os.path.dirname(os.path.abspath(__file__)), "../../../src/speakeasy")); REAL = os.environ.get("TEST_LLM_URL", "http://localhost:11434/v1")
 IMGS = os.path.join(os.path.dirname(AUD), "images"); BAR = os.path.join(IMGS, "bar.png"); HUGE = os.path.join(IMGS, "huge.png"); SHOT = os.path.join(IMGS, "screenshot.png")
 PORT = 18890; MOCK = f"http://127.0.0.1:{PORT}/v1"; R = []
@@ -67,6 +69,7 @@ try:
         ns = len([s for s in re.split(r"(?<=[.!?])\s+", out.strip()) if len(s.split()) >= 3])
         add(f"b_{tag}_2to4_sentences", 2 <= ns <= 4, f"{ns}: {out[:160]}")
         add(f"b_{tag}_vision_reasked_logged", "vision_reasked" in l and isinstance(l.get("vision_reasked"), bool), l.get("vision_reasked"))
+        g = BROKEN.search(out); add(f"b_{tag}_no_broken_clauses", not g, f"{g.group(0) if g else ''} :: {out[:120]}")
         m = META.search(out); add(f"b_{tag}_no_meta_refs", not m, m.group(0) if m else "")
         if tag == "meta_heavy": add("b_meta_refs_removed_logged", isinstance(l.get("meta_refs_removed"), int) and l["meta_refs_removed"] > 0, l.get("meta_refs_removed"))
         add(f"b_{tag}_keeps_facts", tag == "seven" or ("480" in out and "210" in out), out[:120])
@@ -74,8 +77,13 @@ try:
     mock(MOCK_TEXT="The image shows a table. I can see that Alpha handles 42 requests per second, and in this screenshot Beta handles 77.")
     for cmd in (["rewrite"], ["speak"]):
         h, e = env(); rc, out, err, _ = run(cmd, TABLE, e); txt = out if cmd[0] == "rewrite" else spoken(h); l = last(h)
+        g = BROKEN.search(txt); add(f"d_{cmd[0]}_no_broken_clauses_after_demeta", not g, f"{g.group(0) if g else ''} :: {txt[:120]}")
         m = META.search(txt); add(f"d_{cmd[0]}_text_model_meta_removed", not m and "42" in txt and "77" in txt, f"{m.group(0) if m else ''} :: {txt[:140]}")
         add(f"d_{cmd[0]}_meta_refs_removed_count", isinstance(l.get("meta_refs_removed"), int) and l["meta_refs_removed"] > 0, l.get("meta_refs_removed"))
+    for i, rep in enumerate(("I can see three bars. I can see two lines.", "The image shows that Alpha leads, and I can see Beta trails.", "In this screenshot, there are four rows.")):
+        mock(MOCK_TEXT=rep); h, e = env(); rc, out, _, _ = run(["rewrite"], TABLE, e)
+        g = BROKEN.search(out); m = META.search(out)
+        add(f"d_demeta_grammar_{i}", not g and not m and out.strip(), f"{g.group(0) if g else ''}{m.group(0) if m else ''} :: {out[:120]}")
     # user's own text mentioning 'screen' must be preserved (no over-deletion)
     mock(MOCK_TEXT="Turn off the screen saver and restart the capture card driver.")
     h, e = env(); rc, out, _, _ = run(["rewrite"], "Turn off the screen saver and restart the capture card driver.", e)

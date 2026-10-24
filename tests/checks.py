@@ -4,6 +4,7 @@ MD_PATTERNS = {"pipe": r"\|", "heading": r"(?m)^\s*#{1,6}\s", "bold": r"\*\*|__"
 URL_RE = re.compile(r"https?://\S+|www\.\S+|\b\S+\.(com|io|org|md)/\S*")
 NUM_RE = re.compile(r"\d+(?:[.,]\d+)?")
 WORDNUM = {"zero":0,"one":1,"two":2,"three":3,"four":4,"five":5,"six":6,"seven":7,"eight":8,"nine":9,"ten":10}
+BROKEN = re.compile(r",\s*,|\bis also and\b|\b(and|or|but|while)\s*[.,;]|\bthere is (two|three|four|five|six|seven|eight|nine|ten|\d+|many|several)\b|\b(the|a|an|is|at|of)\s*[.,;]|\s[,;](?!\d)|\.\s*\.|\b(\w{3,}) \4\b", re.I)
 LOG_KEYS = ["ts","command","input_chars","output_chars","backend","model","llm_ms","total_ms","error"]
 
 def nums(s):
@@ -47,6 +48,7 @@ def check_output(name, inp, out, rc, stderr, condition):
         else:
             add("yesno_mentions_deploy", "deploy" in low, out[:120])
         add("yesno_no_raw_marks", not re.search(r"[✅❌✔]", out), "")
+    g = BROKEN.search(out); add("no_broken_clauses", not g, g.group(0) if g else "")
     r += check_rank(name, out)
     if condition == "unreachable":
         add("fallback_warns_stderr", stderr.strip() != "", stderr[:120])

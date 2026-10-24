@@ -45,6 +45,10 @@ REQUIRED = {
     "meta_refs_removed": ((int,), lambda l: l.get("backend") == "llm", "count of screenshot/image references stripped"),
     "vision_reasked": ((bool, type(None)), lambda l: str(l.get("capture_method", "")).startswith("no-selection") and l.get("image"), "no-selection answer re-asked"),
     "notes": ((list, str, type(None)), lambda l: l.get("command") in ("rewrite", "speak", "selection"), "non-error corrections (e.g. superlative fixes)"),
+    "focus_events": ((int,), _spoken, "focus show events emitted"),
+    "focus_tags": ((bool,), _spoken, "SPEAKEASY_FOCUS_TAGS on"),
+    "focus_fallback": ((str, type(None)), _spoken, "focus mapping fallback/method summary"),
+    "focus_tag_hit_rate": (NUM + (type(None),), lambda l: l.get("focus_tags") is True and (l.get("focus_events") or 0) > 0, "share of sentences mapped via tags"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
@@ -67,6 +71,8 @@ def validate(l):
     if str(l.get("capture_method", "")).startswith("no-selection") and not l.get("image"): probs.append("no_selection_method_without_image")
     if l.get("capture_method") == "none" and l.get("image"): probs.append("capture_none_but_image_used")
     if l.get("streamed") is True and isinstance(l.get("llm_first_token_ms"), NUM) and isinstance(l.get("first_sentence_ms"), NUM) and l["first_sentence_ms"] < l["llm_first_token_ms"]: probs.append("first_sentence_before_first_token")
+    if l.get("focus_tags") is False and l.get("focus_tag_hit_rate") not in (None, 0): probs.append("tag_hit_rate_without_tags")
+    if isinstance(l.get("focus_tag_hit_rate"), NUM) and not 0 <= l["focus_tag_hit_rate"] <= 1: probs.append("tag_hit_rate_out_of_range")
     g = l.get("vision_gate")
     if g not in (None, "auto-skip-prose", "auto-use", "forced", "never"): probs.append(f"bad_vision_gate:{g}")
     if g in ("auto-skip-prose", "never") and (l.get("image") or l.get("vision_ms") or l.get("image_px") or l.get("capture_path")): probs.append("gate_skip_but_image_fields_set")
