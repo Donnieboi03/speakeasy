@@ -469,10 +469,22 @@ def numbered(text):
 def _toks(s):
     return {w[:5] for w in re.findall(r"[a-z0-9]{3,}", s.lower())} - {"the", "and", "thi", "tha", "wit", "for", "are", "was", "fro"}
 
+class FRect(list):
+    src = None
+    rng = None
+
+def _plain_line(l):
+    """A source line as it looks rendered on screen (markdown/table syntax removed), for OCR re-finding."""
+    l = re.sub(r"\[([^\]]*)\]\([^)]*\)", r"\1", l)
+    l = re.sub(r"^\s*(?:#{1,6}\s+|>\s*|[-*+]\s+(?:\[[ xX]\]\s*)?|\d+[.)]\s+)", "", l)
+    l = re.sub(r"[*_`|]+", " ", l)
+    return re.sub(r"\s{2,}", " ", l).strip()
+
 class Focus:
     def __init__(self, text, rect, line_bounds, image_mode, dry, rec):
         self.lines = source_lines(text)
         self.rect = rect                 # (x, y, w, h) screen points
+        self.ranges = None
         self.line_bounds = self._map_bounds(text, line_bounds)
         self.image_mode = image_mode     # True when the output may be about an image (R tags)
         self.dry, self.rec = dry, rec
@@ -503,15 +515,24 @@ class Focus:
             if all(isinstance(r, (list, tuple)) and len(r) == 4 for r in lb):
                 return [list(map(float, r)) for r in lb] if len(lb) == len(self.lines) else None
             vis = [(int(d["loc"]), int(d["len"]), list(map(float, d["rect"]))) for d in lb]
-            out, pos = [], 0
+            base = None
+            if all("abs" in d for d in lb):
+                base = int(lb[0]["abs"]) - int(lb[0]["loc"])           # selection start in the element's text
+            out, pos, rngs = [], 0, []
             for raw in (text or "").splitlines(True):
                 st, en = pos, pos + len(raw); pos = en
                 if not raw.strip(): continue
                 rs = [r for (lo, n, r) in vis if lo < en and lo + max(n, 1) > st]
                 if not rs: return None
+                lead = len(raw) - len(raw.lstrip())
+                body = len(raw.rstrip("\r\n")) - lead
+                rngs.append([base + st + lead, max(1, body)] if base is not None else None)
                 x0 = min(r[0] for r in rs); y0 = min(r[1] for r in rs)
                 out.append([x0, y0, max(r[0] + r[2] for r in rs) - x0, max(r[1] + r[3] for r in rs) - y0])
-            return out if len(out) == len(self.lines) else None
+            if len(out) == len(self.lines):
+                self.ranges = rngs
+                return out
+            return None
         except (KeyError, TypeError, ValueError):
             return None
     # -- mapping --
@@ -529,6 +550,17 @@ class Focus:
         x, y, w, h = self.rect
         return [x + x0 * w, y + y0 * h, max(20.0, (x1 - x0) * w), max(14.0, (y1 - y0) * h)]
     def locate(self, sentence, tag):
+        """(rect, method); the rect also carries .src (source lines, for the live tracker to re-find on screen)
+        and .rng (absolute AX character range of those lines, when the hotkey supplied per-line offsets)."""
+        rect, method = self._locate(sentence, tag)
+        r = FRect(rect)
+        if self.last_lines and self.lines:
+            a, b = self.last_lines
+            r.src = [_plain_line(l) for l in self.lines[a - 1:b]][:6]
+            if self.ranges and a - 1 < len(self.ranges) and b - 1 < len(self.ranges) and self.ranges[a - 1] and self.ranges[b - 1]:
+                r.rng = [self.ranges[a - 1][0], self.ranges[b - 1][0] + self.ranges[b - 1][1] - self.ranges[a - 1][0]]
+        return r, method
+    def _locate(self, sentence, tag):
         """Return (screen rect, method) for one spoken sentence."""
         self.n += 1
         t = parse_tag(tag) if isinstance(tag, str) else tag
@@ -537,6 +569,7 @@ class Focus:
             self.prev_line = min(t[2], len(self.lines)); self.last_lines = [t[1], self.prev_line]
             return self._line_rect(t[1], t[2]), "tag"
         if t and t[0] == "R":
+            self.last_lines = None
             return self._norm_rect(*t[1:]), "tag"
         if self.lines:
             return self._match(sentence)
@@ -611,8 +644,11 @@ class Focus:
     def show(self, rect, text):
         self.events += 1
         est = 2.0 + len(text) / 13.0                                # seconds of speech, for the overlay's watchdog
-        self._write({"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect],
-                     "expires": round(time.time() + est + 4, 1), "text": text[:80], **self.style})
+        ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect],
+              "expires": round(time.time() + est + 4, 1), "text": text[:80], **self.style}
+        if getattr(rect, "src", None): ev["src"] = rect.src
+        if getattr(rect, "rng", None): ev["range"] = rect.rng
+        self._write(ev)
     def clear(self):
         self._write({"state": "clear", "seq": self.events + 1})
     def summary(self):
@@ -2110,6 +2146,11 @@ def main(argv=None):
         else:
             try:
                 fr = [float(v) for v in a.capture_rect.split(",")]
+                cm = getattr(a, "capture_method", None) or ""
+                if cm == "bounds" and fr[2] > 48 and fr[3] > 40:
+                    fr = [fr[0] + 16, fr[1] + 16, fr[2] - 32, fr[3] - 32]     # the hotkey pads AX bounds by 16pt for the screenshot
+                elif cm == "no-selection-window" and fr[3] > 120:
+                    fr = [fr[0], fr[1] + 28, fr[2], fr[3] - 28]                # skip the title bar
                 lb = None
                 if a.line_bounds:
                     try:

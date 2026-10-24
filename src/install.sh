@@ -7,6 +7,14 @@ MODEL="${SPEAKEASY_MODEL:-qwen2.5:3b-instruct}"
 VMODEL="${SPEAKEASY_VISION_MODEL:-qwen2.5vl:3b}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
 cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
+# Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
+if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
+  if command -v swiftc >/dev/null; then
+    if swiftc -O -parse-as-library -swift-version 5 "$SRC/tracker.swift" -o "$HOME_DIR/bin/speakeasy-track.new" 2>"$HOME_DIR/logs/tracker_build.log"; then
+      mv "$HOME_DIR/bin/speakeasy-track.new" "$HOME_DIR/bin/speakeasy-track"; echo "Built live focus tracker: $HOME_DIR/bin/speakeasy-track"
+    else echo "WARNING: tracker build failed (see $HOME_DIR/logs/tracker_build.log); focus box will not follow scrolling."; fi
+  else echo "NOTE: swiftc not found (xcode-select --install) - focus box will not follow scrolling."; fi
+fi
 chmod +x "$HOME_DIR/bin/speakeasy" "$HOME_DIR/bin/speakeasy.py"
 if [ -d /usr/local/bin ] && [ -w /usr/local/bin ]; then LINKDIR=/usr/local/bin; else LINKDIR="$HOME/.local/bin"; mkdir -p "$LINKDIR"; fi
 ln -sf "$HOME_DIR/bin/speakeasy" "$LINKDIR/speakeasy"
@@ -79,6 +87,8 @@ set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 set_cfg SPEAKEASY_VISION auto
 set_cfg SPEAKEASY_FOCUS on
 set_cfg SPEAKEASY_FOCUS_TAGS off
+set_cfg SPEAKEASY_TRACK on
+set_cfg SPEAKEASY_TRACK_FPS 3
 set_cfg SPEAKEASY_FOCUS_COLOR "#3B82F6"
 set_cfg SPEAKEASY_FOCUS_OPACITY 0.22
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
@@ -119,13 +129,17 @@ end
 local NO_SEL = cfg("SPEAKEASY_NO_SELECTION_CAPTURE", "window")
 local FOCUS_ON = cfg("SPEAKEASY_FOCUS", "on") ~= "off"
 local LINES = "/tmp/speakeasy_cap_lines.json"
+local TRACK_ON = FOCUS_ON and cfg("SPEAKEASY_TRACK", "on") ~= "off"
+local TRACKER = os.getenv("HOME") .. "/.speakeasy/bin/speakeasy-track"
 
 -- Focus highlight: speakeasy writes ~/.speakeasy/focus.json as each sentence starts playing;
 -- draw a translucent, click-through rounded box over the part of the selection being read.
 local focusCanvas, focusTimer, focusKey = nil, nil, nil
+local focusCur = nil            -- the focus event currently shown (pid, seq), so tracker updates can be matched
 local function focusClear()
   if focusTimer then focusTimer:stop(); focusTimer = nil end
   if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
+  focusCur = nil
 end
 local function hexColor(h, a)
   local r, g, b = tostring(h or ""):match("^#?(%x%x)(%x%x)(%x%x)")
@@ -145,7 +159,7 @@ local function focusShow(e)
     focusCanvas[1] = { type = "rectangle", action = "strokeAndFill", roundedRectRadii = { xRadius = 6, yRadius = 6 } }
     focusCanvas:show()
   else
-    focusCanvas:frame(f)
+    focusCanvas:frame(f); focusCanvas:show()
   end
   focusCanvas[1].fillColor = hexColor(e.color, op)
   focusCanvas[1].strokeColor = hexColor(e.color, e.border == false and 0 or math.min(1, op * 3))
@@ -163,12 +177,41 @@ local function focusRead()
   local key = tostring(e.pid) .. ":" .. tostring(e.seq)
   if key == focusKey then return end
   focusKey = key
-  if e.state == "show" and FOCUS_ON then focusShow(e) else focusClear() end
+  if e.state == "show" and FOCUS_ON then focusShow(e); focusCur = e else focusClear() end
+end
+-- Live tracker updates (~/.speakeasy/track.json): move the box with scrolling, hide it when the window is not
+-- frontmost, its content changed, or the text scrolled off.
+local trackKey = nil
+local function trackRead()
+  if not focusCur or not focusCanvas then return end
+  local f = io.open(os.getenv("HOME") .. "/.speakeasy/track.json", "r")
+  if not f then return end
+  local raw = f:read("*a"); f:close()
+  local ok, t = pcall(hs.json.decode, raw)
+  if not ok or type(t) ~= "table" then return end
+  if t.focus_pid ~= focusCur.pid or t.seq ~= focusCur.seq then return end
+  if raw == trackKey then return end
+  trackKey = raw
+  if t.visible == false then focusCanvas:hide()
+  elseif type(t.rect) == "table" and #t.rect == 4 then
+    local r = t.rect
+    focusCanvas:frame({ x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 })
+    focusCanvas:show()
+  end
+end
+local function startTracker(win)
+  if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
+  if not TRACK_ON or not win or not hs.fs.attributes(TRACKER) then return end
+  local app = win:application()
+  speakeasyTracker = hs.task.new(TRACKER, nil, { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
+    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "3") })
+  speakeasyTracker:start()
 end
 if speakeasyFocusWatcher then speakeasyFocusWatcher:stop() end
 speakeasyFocusWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.speakeasy/", function(paths)
   for _, p in ipairs(paths) do
-    if p:match("focus%.json") then focusRead(); return end
+    if p:match("focus%.json") then focusRead(); trackRead(); return end
+    if p:match("track%.json") then trackRead(); return end
   end
 end):start()
 
@@ -213,7 +256,7 @@ local function writeLineBounds(el, range)
         local s1 = math.min(lr.location + lr.length, range.location + range.length)
         if s1 > s0 then
           local b = el:parameterizedAttributeValue("AXBoundsForRange", { location = s0, length = s1 - s0 })
-          if goodRect(b) then table.insert(out, { loc = s0 - range.location, len = s1 - s0, rect = { b.x, b.y, b.w, b.h } }) end
+          if goodRect(b) then table.insert(out, { loc = s0 - range.location, abs = s0, len = s1 - s0, rect = { b.x, b.y, b.w, b.h } }) end
         end
       end
     end
@@ -301,9 +344,14 @@ end
 hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   os.remove("/tmp/speakeasy_sel.png"); os.remove("/tmp/speakeasy_win.png")   -- legacy capture files
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
-  if hs.fs.attributes(pidf) then focusClear(); hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return end
+  if hs.fs.attributes(pidf) then
+    focusClear()
+    if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
+    hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return
+  end
   focusClear(); os.remove(LINES)
   local t0 = hs.timer.secondsSinceEpoch()
+  startTracker(hs.window.focusedWindow())      -- lock onto the source window now; it idles until the first sentence plays
   if CAPTURE == "off" then return run({ "selection" }, "none", nil, t0) end
   if CAPTURE == "select" then return interactive(t0) end
   if CAPTURE == "mouse" then
