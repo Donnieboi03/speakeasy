@@ -131,13 +131,34 @@ local FOCUS_ON = cfg("SPEAKEASY_FOCUS", "on") ~= "off"
 local LINES = "/tmp/speakeasy_cap_lines.json"
 local TRACK_ON = FOCUS_ON and cfg("SPEAKEASY_TRACK", "on") ~= "off"
 local TRACKER = os.getenv("HOME") .. "/.speakeasy/bin/speakeasy-track"
+pcall(require, "hs.ipc")        -- lets the 'hs' command-line tool talk to Hammerspoon (e.g. hs -c 'hs.reload()')
+-- speakeasy's own Hammerspoon log: ~/.speakeasy/logs/hs.log (also printed to the Hammerspoon console)
+local function hslog(fmt, ...)
+  local msg = string.format(fmt, ...)
+  hs.printf("speakeasy: %s", msg)
+  os.execute("mkdir -p '" .. os.getenv("HOME") .. "/.speakeasy/logs'")
+  local f = io.open(os.getenv("HOME") .. "/.speakeasy/logs/hs.log", "a")
+  if f then f:write(os.date("%Y-%m-%d %H:%M:%S ") .. msg .. "\n"); f:close() end
+end
+hslog("config loaded (focus=%s, track=%s, tracker binary %s)", tostring(FOCUS_ON), tostring(TRACK_ON),
+      hs.fs.attributes(TRACKER) and "present" or "MISSING")
 
 -- Focus highlight: speakeasy writes ~/.speakeasy/focus.json as each sentence starts playing;
 -- draw a translucent, click-through rounded box over the part of the selection being read.
 local focusCanvas, focusTimer, focusKey = nil, nil, nil
 local focusCur = nil            -- the focus event currently shown (pid, seq), so tracker updates can be matched
+local srcWinId = nil            -- the window the selection came from (locked at hotkey time)
+local trackerHidden = false     -- the live tracker said the text is not visible
+local frontTimer = nil
+local function srcIsFront()
+  if not srcWinId then return true end
+  local fw = hs.window.frontmostWindow()
+  return fw ~= nil and fw:id() == srcWinId
+end
 local function focusClear()
   if focusTimer then focusTimer:stop(); focusTimer = nil end
+  if frontTimer then frontTimer:stop(); frontTimer = nil end
+  trackerHidden = false
   if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
   focusCur = nil
 end
@@ -167,6 +188,14 @@ local function focusShow(e)
   if focusTimer then focusTimer:stop() end
   local left = (tonumber(e.expires) or (os.time() + 20)) - os.time()
   focusTimer = hs.timer.doAfter(math.max(1, left), focusClear)   -- watchdog if speakeasy dies
+  -- hide the box whenever the source window is not frontmost (works with or without the live tracker)
+  if not srcIsFront() then focusCanvas:hide() end
+  if not frontTimer then
+    frontTimer = hs.timer.doEvery(0.3, function()
+      if not focusCanvas then return end
+      if not srcIsFront() then focusCanvas:hide() elseif not trackerHidden then focusCanvas:show() end
+    end)
+  end
 end
 local function focusRead()
   local f = io.open(os.getenv("HOME") .. "/.speakeasy/focus.json", "r")
@@ -192,20 +221,30 @@ local function trackRead()
   if t.focus_pid ~= focusCur.pid or t.seq ~= focusCur.seq then return end
   if raw == trackKey then return end
   trackKey = raw
-  if t.visible == false then focusCanvas:hide()
+  if t.visible == false then trackerHidden = true; focusCanvas:hide()
   elseif type(t.rect) == "table" and #t.rect == 4 then
     local r = t.rect
+    trackerHidden = false
     focusCanvas:frame({ x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 })
-    focusCanvas:show()
+    if srcIsFront() then focusCanvas:show() end
   end
 end
 local function startTracker(win)
   if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
-  if not TRACK_ON or not win or not hs.fs.attributes(TRACKER) then return end
+  srcWinId = win and win:id() or nil
+  if not TRACK_ON then hslog("tracker off (SPEAKEASY_TRACK)"); return end
+  if not win then hslog("tracker not started: no focused window"); return end
+  if not hs.fs.attributes(TRACKER) then hslog("tracker not started: %s missing (re-run install.sh)", TRACKER); return end
   local app = win:application()
-  speakeasyTracker = hs.task.new(TRACKER, nil, { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
-    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "3") })
-  speakeasyTracker:start()
+  local args = { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
+    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "3") }
+  speakeasyTracker = hs.task.new(TRACKER, function(code, out, err)
+    hslog("tracker exited code=%s %s", tostring(code), ((err or "") .. (out or "")):gsub("%s+$", ""):sub(1, 300))
+  end, args)
+  if not speakeasyTracker then hslog("tracker not started: hs.task.new failed for %s", TRACKER); return end
+  local ok = speakeasyTracker:start()
+  hslog("tracker start %s: window %s (%s) pid %s", ok and "ok" or "FAILED", tostring(win:id()),
+        tostring(app and app:name()), tostring(app and app:pid()))
 end
 if speakeasyFocusWatcher then speakeasyFocusWatcher:stop() end
 speakeasyFocusWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.speakeasy/", function(paths)

@@ -1342,7 +1342,15 @@ def vision_gate(text):
     m = _FIG_CUES.search(t)
     if m:
         return True, f"figure/chart cue '{m.group(0).strip()}'"
-    pairs = re.findall(r"\b(?:[A-Z][\w\-]*|[a-z][\w\-]*:)\s*[:=]?\s+\d+(?:[.,]\d+)?\b|\b[\w\-]+:\s*\d+(?:[.,]\d+)?\b", t)
+    _PAIR = r"\b(?:[A-Z][\w\-]*|[a-z][\w\-]*:)\s*[:=]?\s+\d+(?:[.,]\d+)?\b|\b[\w\-]+:\s*\d+(?:[.,]\d+)?\b"
+    pairs = []
+    for l in lines:
+        l2 = re.sub(r"\(\s*\d[\d\s-]*\)", " ", l)                       # '(93726)', '(559)': ids / area codes, not data
+        l2 = mask_numbers(re.sub(r"\b\d{3}[-.\s]\d{3,4}(?:[-.\s]\d{4})?\b", " ", l2))
+        ps = re.findall(_PAIR, l2)
+        prose = len(l2) > 70 and re.search(r"[a-z]{3,}[,.;!?]\s+[a-z]", l2)
+        if ps and (len(ps) >= 2 or not prose):                          # a label-number inside a prose sentence is not data
+            pairs.extend(ps)
     if len(pairs) >= 3:
         return True, f"label-number series ({len(pairs)} pairs)"
     nums = len(re.findall(r"(?<![A-Za-z])\d+(?:[.,]\d+)?", t))
@@ -1474,6 +1482,25 @@ def _take_framing(plain):
         return l
     return None
 
+def _is_label(l):
+    """A commentary label line such as 'Who gets it:' or '**Why this works:**'."""
+    t = re.sub(r"[*_#>]+", "", l).strip()
+    return bool(t) and t.endswith(":") and len(t.split()) <= 8 and not _V_HDR.match(l)
+
+def _is_signame(l):
+    """'Donovan Butler', 'Donovan Butler, Co-founder, Tytis', '- Sam' : a signature line."""
+    t = re.sub(r"^[-\u2014\u2013~]\s*", "", l.strip())
+    return bool(re.match(r"^[A-Z][a-z'\u2019.-]+(?:\s+[A-Z][\w'\u2019.-]*){0,3}(?:\s*[,|\u00b7\u2013\u2014-]\s*[^.!?]{2,60})?$", t)) \
+        and len(t.split()) <= 10 and not re.search(r"\d", t.split(",")[0])
+
+def _is_footer(l):
+    t = l.strip()
+    return bool(re.search(r"\s[\u00b7|\u2022]\s|(?i:unsubscribe|not interested\??|reply\s+[\"\u201c']?(?:no|stop|unsubscribe)|opt[- ]out|sent from my)"
+                          r"|\[[A-Za-z][^\]]{1,40}\]\s*$|(?:[\dxX#]{3}\)?[-.\s][\dxX#]{3}[-.\s][\dxX#]{4})", t)) and len(t.split()) <= 25
+
+def _prev_blank_or_end(lines, k):
+    return k == 0 or not lines[k - 1].strip() or bool(re.search(r"[,]\s*$", lines[k - 1]))
+
 def split_verbatim(text):
     """[(kind, lines)] where kind is 'plain' or ('verbatim', info). Only clear cases are marked verbatim:
     an email/message (headers or greeting ... sign-off), a run of '>' blockquote lines, or a long fully quoted paragraph."""
@@ -1491,17 +1518,31 @@ def split_verbatim(text):
             if j < n and (_greet(lines[j]) or _greet(l)) or any(_V_HDR.match(x) for x in lines[i:j]):
                 k = start_body
                 end = None
+                saw_body = False
                 while k < n and k - i < 200:
-                    if _V_SIGN.match(lines[k]): end = k; break
+                    L = lines[k]
+                    if _V_SIGN.match(L): end = k; break
+                    if saw_body and _is_label(L):                       # commentary resumes ("Who gets it:")
+                        end = k - 1; break
+                    if saw_body and _is_signame(L) and _prev_blank_or_end(lines, k): end = k; break
+                    if saw_body and _is_footer(L): end = k - 1; break
+                    if L.strip() and not _greet(L): saw_body = True
                     k += 1
                 has_hdr = any(_V_HDR.match(x) and _V_HDR.match(x).group(1).lower() in ("to", "subject", "subj") for x in lines[i:start_body])
                 if end is None and has_hdr:
-                    # headers but no sign-off: body runs to the next blank-line-separated commentary or the end
-                    end = n - 1
-                    while end > start_body and not lines[end].strip(): end -= 1
+                    end = min(k, n) - 1                              # headers but no sign-off: up to the end / commentary
                 if end is not None:
+                    while end > start_body and not lines[end].strip(): end -= 1
                     e = end + 1
-                    while e < n and e - end <= 3 and lines[e].strip() and len(lines[e].split()) <= 6: e += 1   # name / title lines
+                    extra = 0
+                    while e < n and extra < 6:                       # name / title / footer / unsubscribe lines
+                        L = lines[e]
+                        if not L.strip(): e += 1; continue
+                        if _is_label(L): break
+                        if _is_footer(L) or _is_signame(L) or (len(L.split()) <= 6 and not re.search(r"[.!?:]\s*$", L)):
+                            e += 1; extra += 1; continue
+                        break
+                    while e > end + 1 and not lines[e - 1].strip(): e -= 1
                     if sum(len(x.split()) for x in lines[i:e]) >= 8:
                         vl = VLines(lines[i:e])
                         if not any(_V_HDR.match(x) for x in lines[i:e]): vl.framing = _take_framing(plain)
@@ -1563,6 +1604,7 @@ def _smooth_line(l):
     l = re.sub(r"<?https?://(?:www\.)?([^/\s>]+)\S*", r"\1", l)          # URL -> domain
     l = re.sub(r"(\*\*|__|\*|`)(.+?)\1", r"\2", l)
     l = re.sub(r"^\s*(?:#{1,6}\s+|[-*+\u2022]\s+|\d+[.)]\s+)", "", l)
+    l = re.sub(r"\s+[\u00b7|\u2022]\s+", ", ", l)
     return speak_placeholders(l).strip()
 
 def verbatim_speech(kind, lines, context=""):
@@ -1582,7 +1624,7 @@ def verbatim_speech(kind, lines, context=""):
         out.append(_smooth_line(framing).rstrip(":") + ":")
         body = []
         for l in lines:
-            if _V_HDR.match(l) and not body: continue
+            if _V_HDR.match(l) and not any(x.strip() for x in body): body = []; continue
             body.append(l)
     elif kind == "quote":
         attr = None
@@ -1595,11 +1637,12 @@ def verbatim_speech(kind, lines, context=""):
         body = []
         for l in lines:
             m = _V_HDR.match(l)
-            if m and not body: hdr.setdefault(m.group(1).lower(), m.group(2).strip()); continue
+            if m and not any(x.strip() for x in body): hdr.setdefault(m.group(1).lower(), m.group(2).strip()); body = []; continue
             body.append(l)
         k = _v_kind(lines, context)
         to = hdr.get("to") or ""
         to = re.sub(r"\s*<[^>]*>", "", to).strip()
+        to = re.split(r"\s*[,;(\u2014\u2013]|\s+-\s+", to)[0].strip()             # 'Andres Liquor (93726), owner's address...' -> name
         if re.fullmatch(r"[\w.+-]+@[\w-]+\.[\w.]+", to): to = ""                     # bare address: say the name only
         if not to:
             m = re.search(r"\b(?i:e-?mail|message|letter|note|text|reply|post|dm)\s+(?i:to|for)\s+((?:[A-Z][\w&'\u2019.-]*)(?:\s+(?:[A-Z][\w&'\u2019.-]*|&|and|of))*)", context or "")
@@ -2442,6 +2485,15 @@ def main(argv=None):
                 try: os.remove(img)
                 except OSError: pass
             img = None
+    if img and text.strip() and os.environ.get("SPEAKEASY_VERBATIM", "on").lower() != "off" \
+            and any(k != "plain" for k, _ in split_verbatim(text)):
+        # a drafted email / message / quote is read word for word from the copied text; the image is not needed
+        rec["vision_gate"], rec["vision_gate_reason"] = "skip-verbatim", "verbatim block in selection"
+        if is_owned_capture(img):
+            try: os.remove(img)
+            except OSError: pass
+        img = None
+        rec.update(image=False, image_px=None, image_sent_px=None, vision_model=None, vision_ms=None)
     if img:
         if (a.capture_method or "").startswith("no-selection") and text.strip():
             # something WAS selected after all: never ship a whole-window/screen image with it

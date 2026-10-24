@@ -185,11 +185,16 @@ struct Tracker {
             print("{\"rss_mb\":\(Int(rss_mb())),\"cpu_s\":\(String(format: "%.2f", cpu_s()))}")
             return
         }
+        let h0 = a["home"] ?? (NSHomeDirectory() + "/.speakeasy")
+        try? FileManager.default.createDirectory(atPath: h0 + "/logs", withIntermediateDirectories: true)
+        let srAllowed = CGPreflightScreenCaptureAccess()          // checked first; never prompts
+        let axAllowed = AXIsProcessTrusted()
+        appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "start", "window_id": Int(a["window-id"] ?? "") ?? NSNull(),
+                    "pid": Int(a["pid"] ?? "") ?? NSNull(), "fps": a["fps"] ?? "3", "screen_recording": srAllowed, "accessibility": axAllowed,
+                    "tracker_pid": Int(getpid())], h0 + "/logs/tracker.jsonl")
         // Never prompt: without Screen Recording permission, log and exit before any ScreenCaptureKit/CGWindowList call.
-        if !CGPreflightScreenCaptureAccess() {
-            let h = a["home"] ?? (NSHomeDirectory() + "/.speakeasy")
-            try? FileManager.default.createDirectory(atPath: h + "/logs", withIntermediateDirectories: true)
-            appendLine(["ts": (now() * 1000).rounded() / 1000, "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0], h + "/logs/tracker.jsonl")
+        if !srAllowed {
+            appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0], h0 + "/logs/tracker.jsonl")
             exit(0)
         }
         guard let widS = a["window-id"], let wid = CGWindowID(widS) else { FileHandle.standardError.write("usage: speakeasy-track --window-id N --pid P [--home DIR] [--fps 3]\n".data(using: .utf8)!); exit(2) }
@@ -219,6 +224,7 @@ struct Tracker {
         var activeS = 0.0
         var errNote: String? = filter == nil ? "window not shareable (Screen Recording permission?)" : nil
 
+        var exitReason = "max-time"
         while true {
             let tick = now()
             if tick - t0 > 900 { break }
@@ -226,11 +232,11 @@ struct Tracker {
             let state = ev["state"] as? String ?? ""
             let epid = ev["pid"] as? Int ?? -1
             let seq = ev["seq"] as? Int ?? -1
-            if state == "clear" { if lastClear == nil { lastClear = tick }; if tick - lastClear! > 1.5 { break } } else { lastClear = nil }
+            if state == "clear" { if lastClear == nil { lastClear = tick }; if tick - lastClear! > 1.5 { exitReason = "speech-finished"; break } } else { lastClear = nil }
             if state == "show" { lastShowTs = tick }
-            if tick - lastShowTs > (lastSeq < 0 ? 45 : 25) { break }                  // nothing to follow (first wait covers LLM/vision)
-            if epid > 0 && lastPid > 0 && epid != lastPid { break }                   // a newer speakeasy run took over
-            if epid > 0 && kill(pid_t(epid), 0) != 0 && state == "show" && tick - t0 > 2 { break }   // speaker died
+            if tick - lastShowTs > (lastSeq < 0 ? 45 : 25) { exitReason = "no-focus-events"; break }                  // nothing to follow (first wait covers LLM/vision)
+            if epid > 0 && lastPid > 0 && epid != lastPid { exitReason = "newer-run"; break }                   // a newer speakeasy run took over
+            if epid > 0 && kill(pid_t(epid), 0) != 0 && state == "show" && tick - t0 > 2 { exitReason = "speaker-died"; break }   // speaker died
             if state == "show" && (seq != lastSeq || epid != lastPid) { lastSeq = seq; lastPid = epid; missRun = 0 }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
             if state == "show" {
@@ -303,7 +309,7 @@ struct Tracker {
         writeJSONAtomic(["visible": false, "reason": "tracker-exit", "seq": lastSeq, "focus_pid": lastPid, "ts": now()], trackPath)
         let wall = max(0.001, now() - t0), active = frames
         let hits = axHits + ocrHits
-        var st: [String: Any] = ["ts": (now() * 1000).rounded() / 1000, "focus_pid": lastPid, "window_id": Int(wid), "wall_s": (wall * 10).rounded() / 10,
+        var st: [String: Any] = ["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": exitReason, "focus_pid": lastPid, "window_id": Int(wid), "wall_s": (wall * 10).rounded() / 10,
                                  "frames": active, "fps": (Double(active) / max(0.001, activeS) * 100).rounded() / 100, "active_s": (activeS * 10).rounded() / 10,
                                  "ax_hits": axHits, "ocr_hits": ocrHits, "misses": misses, "hidden_frames": hidden,
                                  "refind_hit_rate": hits + misses > 0 ? (Double(hits) / Double(hits + misses) * 100).rounded() / 100 : NSNull(),
