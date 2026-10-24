@@ -22,7 +22,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
         try: lines.append(flatten(json.loads(raw)))
         except Exception: bad_json += 1
     runs, anomalies = [], []
-    stages = ["copy_ms", "capture_ms", "vision_ms", "llm_ms", "tts_synth_ms", "tts_first_audio_ms", "speak_ms", "total_ms"]
+    stages = ["copy_ms", "capture_ms", "vision_ms", "llm_first_token_ms", "first_sentence_ms", "llm_ms", "tts_synth_ms", "tts_first_audio_ms", "speak_ms", "total_ms"]
     for i, l in enumerate(lines):
         flags = validate(l)
         if (l.get("total_ms") or 0) > slow_ms: flags.append(f"slow:{l['total_ms']:.0f}ms")
@@ -50,6 +50,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
            "image_sizes": dict(Counter(f"{l.get('image_px')}->{l.get('image_sent_px')}" for l in lines if l.get("image"))),
            "tts_mix": dict(Counter(f"{l.get('tts_requested')}->{l.get('tts')}" for l in lines if l.get("tts"))), "tts_server_rss_mb_max": max([l["tts_server_rss_mb"] for l in lines if isinstance(l.get("tts_server_rss_mb"), (int, float))], default=None),
            "vision_gate_mix": dict(Counter(str(l.get("vision_gate")) for l in lines if "vision_gate" in l)),
+           "streamed_mix": dict(Counter(str(l.get("streamed")) for l in lines if "streamed" in l)), "meta_refs_removed_total": sum(l.get("meta_refs_removed") or 0 for l in lines),
            "errors": [l.get("error") for l in lines if l.get("error")],
            "peak_rss_mb": {"max": max([l["peak_rss_mb"] for l in lines if isinstance(l.get("peak_rss_mb"), (int, float))], default=None)},
            "ollama_models_seen": sorted({json.dumps({k: m.get(k) for k in ("name", "model", "size", "size_vram", "size_mb", "size_vram_mb") if k in m}) for m in mem}),
@@ -58,7 +59,7 @@ def audit(path, screen=None, max_frac=0.5, slow_ms=30000, llm_reachable=None):
 
 def to_md(r):
     o = [f"# speakeasy log audit", f"- file: `{r['path']}`  runs: {r['runs']}  bad JSON lines: {r['bad_json_lines']}",
-         f"- backend mix: {r['backend_mix']}  commands: {r['command_mix']}", f"- vision gate: {r.get('vision_gate_mix')}", f"- capture methods: {r['capture_method_mix']}",
+         f"- backend mix: {r['backend_mix']}  commands: {r['command_mix']}", f"- vision gate: {r.get('vision_gate_mix')}", f"- streamed: {r.get('streamed_mix')}  meta refs removed: {r.get('meta_refs_removed_total')}", f"- capture methods: {r['capture_method_mix']}",
          f"- image sizes (orig->sent): {r['image_sizes']}", f"- TTS (requested->used): {r['tts_mix']}  TTS server RSS max: {r['tts_server_rss_mb_max']} MB", f"- peak RSS max: {r['peak_rss_mb']['max']} MB",
          f"- Ollama models seen: {r['ollama_models_seen'] or 'none logged'}", "", "## Latency (ms)", "| stage | n | p50 | p90 | p99 | max |", "|---|---|---|---|---|---|"]
     o += [f"| {s} | {v['n']} | {v['p50']} | {v['p90']} | {v['p99']} | {v['max']} |" for s, v in r["latency_ms"].items()]

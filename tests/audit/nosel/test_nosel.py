@@ -34,6 +34,8 @@ for method in ("no-selection-window", "no-selection-screen"):
     add(f"{tag}_exit0", rc == 0, f"rc={rc} {err[:120]}")
     n = len(sentences(out)); add(f"{tag}_2to4_sentences", 2 <= n <= 4, f"{n}: {out[:200]}")
     add(f"{tag}_mentions_screen_content", any(w in out.lower() for w in ("latency", "migration", "480", "210")), out[:160])
+    mm = re.search(r"\b(screenshot|image|picture|photo|capture|screen|i can see)\b", out, re.I)
+    add(f"{tag}_no_meta_refs", not mm, mm.group(0) if mm else "")
     add(f"{tag}_log_method", l.get("capture_method") == method, l.get("capture_method"))
     add(f"{tag}_log_image_true", l.get("image") is True, l.get("image"))
     add(f"{tag}_schema", not validate(l), validate(l))

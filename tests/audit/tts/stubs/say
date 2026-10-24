@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
-s=$(date +%s.%N); args=$(printf '%s ' "$@" | head -c 200 | tr '"\\' "''"); in=""; [ -t 0 ] || in=$(head -c 200 | tr '"\\\n' "''' ")
-trap 'echo "{\"tool\":\"say\",\"args\":\"$args\",\"stdin\":\"$in\",\"start\":$s,\"killed\":1}" >> "$STUB_LOG"; exit 143' TERM INT
+# say stub: logs invocation; appends full spoken text (args or stdin or -f file) to $STUB_SPOKEN
+s=$(date +%s.%N); txt=""; f=""; args=()
+while [ $# -gt 0 ]; do case "$1" in -f) f="$2"; shift 2;; -v|-r|-o|--voice|--rate) shift 2;; --) shift; args+=("$@"); break;; -*) shift;; *) args+=("$1"); shift;; esac; done
+if [ -n "$f" ] && [ -f "$f" ]; then txt=$(cat "$f"); elif [ ${#args[@]} -gt 0 ]; then txt="${args[*]}"; elif [ ! -t 0 ]; then txt=$(cat); fi
+[ -n "$STUB_SPOKEN" ] && printf '%s\n' "$txt" >> "$STUB_SPOKEN"
+short=$(printf '%s' "$txt" | head -c 200 | tr '"\\\n' "''' ")
+trap 'echo "{\"tool\":\"say\",\"args\":\"$short\",\"start\":$s,\"killed\":1}" >> "${STUB_LOG:-/dev/null}"; exit 143' TERM INT
 sleep "${STUB_PLAY_SEC:-0.5}" & wait $!
-echo "{\"tool\":\"say\",\"args\":\"$args\",\"stdin\":\"$in\",\"start\":$s,\"end\":$(date +%s.%N),\"killed\":0}" >> "$STUB_LOG"
+echo "{\"tool\":\"say\",\"args\":\"$short\",\"start\":$s,\"end\":$(date +%s.%N),\"killed\":0}" >> "${STUB_LOG:-/dev/null}"

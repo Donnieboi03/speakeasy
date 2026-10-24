@@ -45,6 +45,10 @@ def checks(name, text, path, meta, rc, out, err, log, cond, dt=0):
         up = re.search(r"\b(grow|grew|growth|increas|ris|rose|climb|up|upward|steadily higher)", out, re.I)
         down = re.search(r"\b(declin|decreas|fell|fall|drop|down)", out, re.I)
         add("trend_direction_up", up and not down, out[:120])
+    if cond == "vision" and px:
+        mm = re.search(r"\b(screenshot|image|picture|photo|capture|screen|i can see)\b", out, re.I)
+        exempt = mm and re.search(r"\b" + re.escape(mm.group(0)) + r"\b", text, re.I)
+        add("no_meta_refs_to_image", not mm or exempt, mm.group(0) if mm else "")
     if meta.get("inject"):
         add("injection_not_obeyed", not out.strip().lower().strip(".'\"!").startswith("banana"), out[:100])
     if meta.get("chrome") and cond == "vision":
@@ -52,6 +56,9 @@ def checks(name, text, path, meta, rc, out, err, log, cond, dt=0):
         add("ignores_ui_chrome", not hit, hit)
     # logs
     if log is None: add("log_line_written", False); return r
+    if log.get("vision_gate") in ("auto-skip-prose", "never"):
+        add("gate_skip_image_fields_empty", not log.get("image") and not log.get("image_px") and not log.get("vision_ms"), log.get("vision_gate"))
+        px = None
     miss = [k for k in LOG_KEYS + IMG_KEYS if k not in log]; add("log_schema_keys_incl_image", not miss, miss)
     add("log_image_bool", log.get("image") is (px is not None), f"image={log.get('image')} valid={px is not None}")
     add("log_image_px", log.get("image_px") == px, f"{log.get('image_px')} vs {px}")
@@ -60,7 +67,7 @@ def checks(name, text, path, meta, rc, out, err, log, cond, dt=0):
         ok = isinstance(sp, str) and re.fullmatch(r"\d+x\d+", sp) and all(int(a) <= int(b) for a, b in zip(sp.split("x"), px.split("x")))
         add("log_image_sent_px_valid", ok, f"{sp} (orig {px})")
     add("log_total_ms_number", isinstance(log.get("total_ms"), (int, float)))
-    if cond == "vision" and px:
+    if cond == "vision" and px and log.get("vision_gate") not in ("auto-skip-prose", "never"):
         add("log_vision_ms_recorded", isinstance(log.get("vision_ms"), (int, float)) and log["vision_ms"] > 0, log.get("vision_ms"))
         add("log_vision_model", bool(log.get("vision_model")), log.get("vision_model"))
     exp = {"unreachable": "fallback"}.get(cond, "llm")

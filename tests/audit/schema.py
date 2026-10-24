@@ -38,6 +38,12 @@ REQUIRED = {
     "capture_crop": ((str, type(None)), lambda l: bool(l.get("capture_rect")) and bool(l.get("image")), "cropped|already-cropped"),
     "vision_gate": ((str, type(None)), lambda l: l.get("command") in ("rewrite", "speak", "selection"), "auto-skip-prose|auto-use|forced|never|null(no image)"),
     "vision_gate_reason": ((str, type(None)), lambda l: l.get("vision_gate") is not None, "why the gate decided"),
+    "streamed": ((bool,), lambda l: _spoken(l), "LLM output streamed into TTS"),
+    "stream_note": ((str, type(None)), lambda l: _spoken(l), "why streaming was/wasn't used"),
+    "llm_first_token_ms": (NUM + (type(None),), lambda l: l.get("streamed") is True, "time to first LLM token"),
+    "first_sentence_ms": (NUM + (type(None),), lambda l: l.get("streamed") is True, "time to first full sentence"),
+    "meta_refs_removed": ((int,), lambda l: l.get("backend") == "llm", "count of screenshot/image references stripped"),
+    "vision_reasked": ((bool, type(None)), lambda l: str(l.get("capture_method", "")).startswith("no-selection") and l.get("image"), "no-selection answer re-asked"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
@@ -59,6 +65,7 @@ def validate(l):
     if l.get("capture_method") is not None and l["capture_method"] not in CAPTURE_METHODS: probs.append(f"bad_capture_method:{l['capture_method']}")
     if str(l.get("capture_method", "")).startswith("no-selection") and not l.get("image"): probs.append("no_selection_method_without_image")
     if l.get("capture_method") == "none" and l.get("image"): probs.append("capture_none_but_image_used")
+    if l.get("streamed") is True and isinstance(l.get("llm_first_token_ms"), NUM) and isinstance(l.get("first_sentence_ms"), NUM) and l["first_sentence_ms"] < l["llm_first_token_ms"]: probs.append("first_sentence_before_first_token")
     g = l.get("vision_gate")
     if g not in (None, "auto-skip-prose", "auto-use", "forced", "never"): probs.append(f"bad_vision_gate:{g}")
     if g in ("auto-skip-prose", "never") and (l.get("image") or l.get("vision_ms") or l.get("image_px") or l.get("capture_path")): probs.append("gate_skip_but_image_fields_set")
