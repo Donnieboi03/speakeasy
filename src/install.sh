@@ -77,6 +77,10 @@ else
 fi
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 set_cfg SPEAKEASY_VISION auto
+set_cfg SPEAKEASY_FOCUS on
+set_cfg SPEAKEASY_FOCUS_TAGS off
+set_cfg SPEAKEASY_FOCUS_COLOR "#3B82F6"
+set_cfg SPEAKEASY_FOCUS_OPACITY 0.22
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
 
 cat <<MSG
@@ -113,6 +117,60 @@ local function cfg(key, default)
 end
 -- What to capture when NOTHING is selected: window (default) | screen | none
 local NO_SEL = cfg("SPEAKEASY_NO_SELECTION_CAPTURE", "window")
+local FOCUS_ON = cfg("SPEAKEASY_FOCUS", "on") ~= "off"
+local LINES = "/tmp/speakeasy_cap_lines.json"
+
+-- Focus highlight: speakeasy writes ~/.speakeasy/focus.json as each sentence starts playing;
+-- draw a translucent, click-through rounded box over the part of the selection being read.
+local focusCanvas, focusTimer, focusKey = nil, nil, nil
+local function focusClear()
+  if focusTimer then focusTimer:stop(); focusTimer = nil end
+  if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
+end
+local function hexColor(h, a)
+  local r, g, b = tostring(h or ""):match("^#?(%x%x)(%x%x)(%x%x)")
+  if not r then r, g, b = "3B", "82", "F6" end
+  return { red = tonumber(r, 16) / 255, green = tonumber(g, 16) / 255, blue = tonumber(b, 16) / 255, alpha = a }
+end
+local function focusShow(e)
+  local r = e.rect
+  if type(r) ~= "table" or #r ~= 4 then return end
+  local f = { x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 }
+  local op = tonumber(e.opacity) or 0.22
+  if not focusCanvas then
+    focusCanvas = hs.canvas.new(f)
+    focusCanvas:level(hs.canvas.windowLevels.overlay)
+    focusCanvas:behaviorAsLabels({ "canJoinAllSpaces", "stationary", "ignoresCycle" })
+    focusCanvas:clickActivating(false)          -- never takes focus; no mouse callback = clicks pass through
+    focusCanvas[1] = { type = "rectangle", action = "strokeAndFill", roundedRectRadii = { xRadius = 6, yRadius = 6 } }
+    focusCanvas:show()
+  else
+    focusCanvas:frame(f)
+  end
+  focusCanvas[1].fillColor = hexColor(e.color, op)
+  focusCanvas[1].strokeColor = hexColor(e.color, e.border == false and 0 or math.min(1, op * 3))
+  focusCanvas[1].strokeWidth = 1.5
+  if focusTimer then focusTimer:stop() end
+  local left = (tonumber(e.expires) or (os.time() + 20)) - os.time()
+  focusTimer = hs.timer.doAfter(math.max(1, left), focusClear)   -- watchdog if speakeasy dies
+end
+local function focusRead()
+  local f = io.open(os.getenv("HOME") .. "/.speakeasy/focus.json", "r")
+  if not f then return end
+  local raw = f:read("*a"); f:close()
+  local ok, e = pcall(hs.json.decode, raw)
+  if not ok or type(e) ~= "table" then return end
+  local key = tostring(e.pid) .. ":" .. tostring(e.seq)
+  if key == focusKey then return end
+  focusKey = key
+  if e.state == "show" and FOCUS_ON then focusShow(e) else focusClear() end
+end
+if speakeasyFocusWatcher then speakeasyFocusWatcher:stop() end
+speakeasyFocusWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.speakeasy/", function(paths)
+  for _, p in ipairs(paths) do
+    if p:match("focus%.json") then focusRead(); return end
+  end
+end):start()
 
 -- Is any text selected? Copy with Cmd-C and see if the pasteboard changed; restore it afterwards.
 local function hasTextSelection()
@@ -141,12 +199,40 @@ local function goodRect(b) return b and b.w and b.h and b.w > 4 and b.h > 4 end
 local function pad(b) return { x = b.x - 16, y = b.y - 16, w = b.w + 32, h = b.h + 32 } end
 
 -- Try every AX route to the selection bounds on one element.
+-- Per visual line bounds of the selection (for the focus highlight), written to LINES as JSON.
+local function writeLineBounds(el, range)
+  pcall(function()
+    local first = el:parameterizedAttributeValue("AXLineForIndex", range.location)
+    local last = el:parameterizedAttributeValue("AXLineForIndex", range.location + range.length - 1)
+    if not first or not last or last < first or last - first > 300 then return end
+    local out = {}
+    for ln = first, last do
+      local lr = el:parameterizedAttributeValue("AXRangeForLine", ln)
+      if lr then
+        local s0 = math.max(lr.location, range.location)
+        local s1 = math.min(lr.location + lr.length, range.location + range.length)
+        if s1 > s0 then
+          local b = el:parameterizedAttributeValue("AXBoundsForRange", { location = s0, length = s1 - s0 })
+          if goodRect(b) then table.insert(out, { loc = s0 - range.location, len = s1 - s0, rect = { b.x, b.y, b.w, b.h } }) end
+        end
+      end
+    end
+    if #out > 0 then
+      local f = io.open(LINES, "w")
+      if f then f:write(hs.json.encode(out)); f:close() end
+    end
+  end)
+end
+
 local function boundsOf(el)
   local ok, r = pcall(function()
     local range = el:attributeValue("AXSelectedTextRange")
     if range and (range.length or 0) > 0 then
       local b = el:parameterizedAttributeValue("AXBoundsForRange", range)
-      if goodRect(b) then return b end
+      if goodRect(b) then
+        if FOCUS_ON then writeLineBounds(el, range) end
+        return b
+      end
     end
     local tm = el:attributeValue("AXSelectedTextMarkerRange")          -- WebKit / Chromium
     if tm then
@@ -183,6 +269,7 @@ end
 local function run(args, method, rect, t0)
   table.insert(args, "--capture-method"); table.insert(args, method)
   if rect then table.insert(args, "--capture-rect"); table.insert(args, string.format("%d,%d,%d,%d", rect.x, rect.y, rect.w, rect.h)) end
+  if method == "bounds" and hs.fs.attributes(LINES) then table.insert(args, "--line-bounds"); table.insert(args, LINES) end
   table.insert(args, "--capture-ms"); table.insert(args, tostring(math.floor((hs.timer.secondsSinceEpoch() - t0) * 1000)))
   hs.task.new(SPEAKEASY, nil, args):start()
 end
@@ -214,7 +301,8 @@ end
 hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   os.remove("/tmp/speakeasy_sel.png"); os.remove("/tmp/speakeasy_win.png")   -- legacy capture files
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
-  if hs.fs.attributes(pidf) then hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return end
+  if hs.fs.attributes(pidf) then focusClear(); hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return end
+  focusClear(); os.remove(LINES)
   local t0 = hs.timer.secondsSinceEpoch()
   if CAPTURE == "off" then return run({ "selection" }, "none", nil, t0) end
   if CAPTURE == "select" then return interactive(t0) end
