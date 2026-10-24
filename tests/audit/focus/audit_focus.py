@@ -19,6 +19,7 @@ def audit(events, rect=None):
                 if rect:
                     x, y, w, h = rect
                     if r[0] < x - 1 or r[1] < y - 1 or r[0] + r[2] > x + w + 1 or r[1] + r[3] > y + h + 1: probs.append(f"#{i} rect {r} outside capture {rect}")
+            if "range" not in e: probs.append(f"#{i} show missing range field")
             if (e.get("expires") or 0) <= (e.get("ts") or 0): probs.append(f"#{i} expires before ts")
             if not last_map or last_map.get("pid") != pid: probs.append(f"#{i} show without map")
             if "[" in str(e.get("text", "")) or "]" in str(e.get("text", "")): probs.append(f"#{i} bracket in focus text")

@@ -49,6 +49,7 @@ REQUIRED = {
     "focus_tags": ((bool,), _spoken, "SPEAKEASY_FOCUS_TAGS on"),
     "focus_fallback": ((str, type(None)), _spoken, "focus mapping fallback/method summary"),
     "focus_tag_hit_rate": (NUM + (type(None),), lambda l: l.get("focus_tags") is True and (l.get("focus_events") or 0) > 0, "share of sentences mapped via tags"),
+    "verbatim_blocks": ((list, type(None)), lambda l: l.get("command") in ("rewrite", "speak", "selection") and l.get("backend") != "none", "kinds of verbatim blocks read near word-for-word"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
