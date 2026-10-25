@@ -253,7 +253,8 @@ STOP = _threading.Event()   # set by SIGTERM (stop / hotkey toggle)
 SINK = None            # callable(sentence) while streaming to TTS, else None
 
 def keep_alive():
-    return os.environ.get("SPEAKEASY_KEEP_ALIVE", "2h")
+    # idle unload: Ollama frees the model this long after the last read (the hotkey pre-warms it again)
+    return os.environ.get("SPEAKEASY_KEEP_ALIVE", "10m")
 
 def _ollama_base():
     from urllib.parse import urlsplit
@@ -582,7 +583,9 @@ class Grounder:
         for f in list(self.pending.values()): f.done.set()
     def mode(self):
         m = os.environ.get("SPEAKEASY_GROUND", "auto").lower()
-        if m == "auto": return "vlm" if "qwen3-vl" in vision_model() else "florence"
+        florence_ok = os.environ.get("SPEAKEASY_FLORENCE", "off").lower() in ("on", "1", "true", "yes")
+        if m == "florence" and not florence_ok: return "vlm"     # Florence-2 needs torch (~2 GB RAM): opt-in only
+        if m == "auto": return "vlm"
         return m
     def _vlm(self, f, pdf, page, clip, text):
         """Grounding with the vision model itself (Qwen3-VL answers bbox_2d in 0..1000 of the crop); Florence-2 stays optional."""

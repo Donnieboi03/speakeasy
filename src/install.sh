@@ -101,6 +101,13 @@ set_cfg SPEAKEASY_FOCUS_TAGS off
 set_cfg SPEAKEASY_TRACK on
 set_cfg SPEAKEASY_DOC_READ local
 set_cfg SPEAKEASY_GROUND auto
+set_cfg SPEAKEASY_FLORENCE off
+set_cfg SPEAKEASY_KEEP_ALIVE 10m
+# RAM: the 4-bit (Q4_K_M) build of the model is what fits next to Kokoro on 16-18 GB Macs
+if command -v ollama >/dev/null; then
+  Q="$(ollama show "${SPEAKEASY_MODEL:-qwen3-vl:4b-instruct}" 2>/dev/null | awk '/quantization/{print $2}')"
+  case "$Q" in Q4_K_M|"") ;; *) echo "NOTE: ${SPEAKEASY_MODEL:-qwen3-vl:4b-instruct} is $Q, not Q4_K_M; a Q4_K_M tag uses less RAM." ;; esac
+fi
 set_cfg SPEAKEASY_TRACK_FPS 5
 # old default (3) -> 5 scans/s while speaking
 if grep -qx 'SPEAKEASY_TRACK_FPS=3' "$CONFIG" 2>/dev/null; then sed -i '' 's/^SPEAKEASY_TRACK_FPS=3$/SPEAKEASY_TRACK_FPS=5/' "$CONFIG"; fi

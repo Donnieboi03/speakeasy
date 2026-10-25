@@ -29,7 +29,8 @@ cd src && ./install.sh
 | `SPEAKEASY_KEEP_CAPTURE` | `1` | Keep the last crop at `~/.speakeasy/last_capture.png` for auditing (`0` deletes it) |
 | `SPEAKEASY_VISION` | `auto` | Vision gate: `auto` (only send the screenshot when it likely adds info, e.g. tables or figures), `always`, or `never` |
 | `SPEAKEASY_STREAM` | `1` | Stream the LLM output and start speaking the first sentence while the rest is still generating (`0` waits for the full rewrite) |
-| `SPEAKEASY_KEEP_ALIVE` | `30m` | How long Ollama keeps the models loaded after use |
+| `SPEAKEASY_KEEP_ALIVE` | `10m` | Idle unload: Ollama frees the model this long after the last read (the hotkey pre-warms it) |
+| `SPEAKEASY_FLORENCE` | `off` | Florence-2 phrase grounding (needs torch, ~2 GB RAM); off uses the vision model for grounding |
 | `SPEAKEASY_PREWARM` | `1` | On hotkey, load the text/vision models in the background so the first call isn't cold (`0` disables) |
 | `SPEAKEASY_VISION_MAX_PX` | `768` | Longest side the screenshot is downscaled to before it goes to the vision model |
 | `SPEAKEASY_MODEL` | `qwen3-vl:4b-instruct` | Text model (same as the vision model by default) |
