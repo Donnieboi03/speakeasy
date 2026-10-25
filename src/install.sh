@@ -140,6 +140,7 @@ local FOCUS_ON = cfg("SPEAKEASY_FOCUS", "on") ~= "off"
 local LINES = "/tmp/speakeasy_cap_lines.json"
 local TRACK_ON = FOCUS_ON and cfg("SPEAKEASY_TRACK", "on") ~= "off"
 local TRACKER = os.getenv("HOME") .. "/.speakeasy/bin/speakeasy-track"
+NATIVE_OVERLAY = TRACK_ON and cfg("SPEAKEASY_OVERLAY", "native") ~= "hammerspoon"
 pcall(require, "hs.ipc")        -- lets the 'hs' command-line tool talk to Hammerspoon (e.g. hs -c 'hs.reload()')
 -- speakeasy's own Hammerspoon log: ~/.speakeasy/logs/hs.log (also printed to the Hammerspoon console)
 local function hslog(fmt, ...)
@@ -205,6 +206,11 @@ local function shapeFrame(r)
   return { x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 }
 end
 local function focusShow(e)
+  -- the tracker draws the box itself (native panel, moved by scroll/AX events in-process); Hammerspoon only draws without it
+  if NATIVE_OVERLAY and speakeasyTracker and speakeasyTracker:isRunning() then
+    if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
+    return
+  end
   local r = e.rect
   if type(r) ~= "table" or #r ~= 4 then return end
   focusShape = (e.shape == "ellipse") and "ellipse" or "rect"
@@ -356,7 +362,8 @@ local function startTracker(win)
   if not hs.fs.attributes(TRACKER) then hslog("tracker not started: %s missing (re-run install.sh)", TRACKER); return end
   local app = win:application()
   local args = { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
-    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5") }
+    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5"),
+    "--overlay", NATIVE_OVERLAY and "native" or "hammerspoon" }
   speakeasyTracker = hs.task.new(TRACKER, function(code, out, err)
     hslog("tracker exited code=%s %s", tostring(code), ((err or "") .. (out or "")):gsub("%s+$", ""):sub(1, 300))
   end, args)

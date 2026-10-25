@@ -5,7 +5,9 @@
 //      current sentence's source lines among the recognised lines (token overlap) and box them tightly.
 // Hides the box when the window is not frontmost, the content changed (tab switch), or the text scrolled off.
 // Reads  ~/.speakeasy/focus.json (written by speakeasy as each sentence starts playing)
-// Writes ~/.speakeasy/track.json (read by the Hammerspoon overlay) and appends stats to ~/.speakeasy/logs/tracker.jsonl
+// Draws the box itself (native click-through panel, --overlay native, default): scroll / key / app-switch / AX events move or
+// hide it in-process; OCR scans correct drift. Still writes ~/.speakeasy/track.json (Hammerspoon fallback overlay) and
+// appends stats and per-event lag to ~/.speakeasy/logs/tracker.jsonl
 // Everything is local (Vision + ScreenCaptureKit are part of macOS). Build: swiftc -O -parse-as-library tracker.swift
 import Foundation
 import AppKit
@@ -98,6 +100,198 @@ func focusedElement(_ pid: pid_t) -> AXUIElement? {
     var v: CFTypeRef?
     guard AXUIElementCopyAttributeValue(app, kAXFocusedUIElementAttribute as CFString, &v) == .success, let e = v else { return nil }
     return (e as! AXUIElement)
+}
+
+
+// ---------------- native overlay + event-driven following (main thread) ----------------
+// The box is drawn here (a borderless, click-through, non-activating panel) so scroll / AX / app-switch events move or hide
+// it in the same process, without a file relay. Scroll: AX re-query of the sentence range when the app answers it, else the
+// scroll delta times a calibrated scale; text recognition scans correct drift. Lag (event -> frame applied) is logged.
+func uptimeNs() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
+final class Live: NSObject {
+    static let shared = Live()
+    var home = ""
+    var panel: NSPanel? = nil
+    var shape = CAShapeLayer()
+    var rect: CGRect? = nil              // target box, global top-left coordinates
+    var isEllipse = false
+    var front = true, hiddenByKey = false, scanVisible = false
+    var winFrame: CGRect? = nil
+    var srcPid: pid_t = 0
+    var axEl: AXUIElement? = nil
+    var range: [Int]? = nil
+    var axGood = false                   // the app answers tight AXBoundsForRange for this sentence
+    var lastMove = 0.0                   // epoch of the last scroll / tab key: older scans are stale
+    var kCont = 1.0, kLine = 1.0, pred = 0.0, predCont = true
+    var pendingEv: [UInt64] = []         // event timestamps waiting for the next display refresh
+    var lagN = 0, lagSum = 0.0, lagMax = 0.0, lagLast = 0.0
+    var link: AnyObject? = nil
+    var dirty = false
+    var lagLogN = 0
+    var off = CGPoint.zero               // scrolling since the hotkey: speakeasy's own boxes predate it
+    var observer: AXObserver? = nil
+
+    func setup(home: String, pid: pid_t, el: AXUIElement?) {
+        self.home = home; srcPid = pid; axEl = el
+        let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+        p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false; p.ignoresMouseEvents = true
+        p.level = .statusBar; p.hidesOnDeactivate = false; p.isReleasedWhenClosed = false
+        p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+        let v = NSView(frame: p.contentView!.bounds); v.wantsLayer = true; v.autoresizingMask = [.width, .height]
+        shape.lineWidth = 1.5
+        v.layer!.addSublayer(shape)
+        p.contentView = v
+        panel = p
+        // instant hide / show on app switches
+        NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
+            guard let s = self, let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+            s.front = app.processIdentifier == s.srcPid; s.apply(event: nil)
+        }
+        startTap()
+        startAXObserver()
+        if #available(macOS 14.0, *) {
+            let l = p.contentView!.displayLink(target: self, selector: #selector(tickLink(_:)))
+            l.add(to: .main, forMode: .common); link = l
+        }
+    }
+    func style(color: String?, opacity: Double, ellipse: Bool) {
+        var r = 0.23, g = 0.51, b = 0.96
+        if let c = color, c.count == 7, let v = Int(c.dropFirst(), radix: 16) { r = Double((v >> 16) & 255) / 255; g = Double((v >> 8) & 255) / 255; b = Double(v & 255) / 255 }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: opacity)
+        shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: min(1, opacity * 3))
+        CATransaction.commit()
+        isEllipse = ellipse
+    }
+    // ---- drawing ----
+    func frameFor(_ r: CGRect) -> NSRect {
+        let H = NSScreen.screens.first?.frame.height ?? 0
+        let (dx, dy): (CGFloat, CGFloat) = isEllipse ? (r.width * 0.12 + 6, r.height * 0.12 + 6) : (4, 2)
+        let g = r.insetBy(dx: -dx, dy: -dy)
+        return NSRect(x: g.minX, y: H - g.maxY, width: g.width, height: g.height)
+    }
+    func apply(event ts: UInt64?) {
+        if let t = ts { pendingEv.append(t) }
+        dirty = true
+        if link == nil { flush() }               // no display link (older macOS): apply now
+    }
+    @objc func tickLink(_ l: AnyObject) { if dirty { flush() } }
+    func flush() {
+        dirty = false
+        guard let p = panel else { return }
+        let show = rect != nil && front && !hiddenByKey && scanVisible
+        if show, let r = rect {
+            let f = frameFor(r)
+            CATransaction.begin(); CATransaction.setDisableActions(true)
+            p.setFrame(f, display: false)
+            let b = CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2)
+            shape.frame = p.contentView!.bounds
+            shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: 6, cornerHeight: 6, transform: nil)
+            CATransaction.commit()
+            if !p.isVisible { p.orderFrontRegardless() }
+        } else if p.isVisible { p.orderOut(nil) }
+        let n = uptimeNs()
+        for t in pendingEv where t > 0 && n > t {
+            let ms = Double(n - t) / 1e6
+            if ms < 5000 { lagN += 1; lagSum += ms; lagMax = max(lagMax, ms); lagLast = ms }
+        }
+        if !pendingEv.isEmpty && lagLogN < 3000 && lagLast > 0 {
+            lagLogN += 1
+            appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "lag", "ms": (lagLast * 10).rounded() / 10, "n": pendingEv.count,
+                        "via": axGood ? "ax" : "delta", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
+        }
+        pendingEv.removeAll()
+    }
+    // ---- scans from the tracker loop ----
+    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, win: CGRect?) {
+        if let w = win { winFrame = w }
+        if capTs > 0 && capTs < lastMove { return }               // screenshot taken before the last scroll: stale
+        if visible, let r = r {
+            if let old = rect, abs(pred) >= 20, method != "ax" {    // calibrate the scroll scale from where the text really went
+                let actual = pred + (r.minY - old.minY)
+                let k = (predCont ? kCont : kLine) * actual / pred
+                if k > 0.2 && k < 5 { if predCont { kCont = 0.5 * kCont + 0.5 * k } else { kLine = 0.5 * kLine + 0.5 * k } }
+            }
+            pred = 0; rect = r; scanVisible = true; hiddenByKey = false
+        } else { scanVisible = false }
+        apply(event: nil)
+    }
+    func event(rect r: CGRect?, range rg: [Int]?, color: String?, opacity: Double, ellipse: Bool) {
+        style(color: color, opacity: opacity, ellipse: ellipse)
+        range = rg; axGood = false
+        if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true }
+        _ = requeryAX()
+        apply(event: nil)
+    }
+    func requeryAX() -> Bool {
+        guard let el = axEl, let rg = range, rg.count == 2, let r = axBounds(el, rg[0], rg[1]) else { axGood = false; return false }
+        if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axGood = false; return false }
+        if let w = winFrame, !w.intersects(r) { scanVisible = false; axGood = true; return true }
+        rect = r; axGood = true; scanVisible = true; return true
+    }
+    // ---- events ----
+    func startTap() {
+        let mask = (1 << CGEventType.scrollWheel.rawValue) | (1 << CGEventType.keyDown.rawValue)
+        let cb: CGEventTapCallBack = { _, type, ev, _ in
+            Live.shared.handle(type, ev)
+            return Unmanaged.passUnretained(ev)
+        }
+        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
+                                          eventsOfInterest: CGEventMask(mask), callback: cb, userInfo: nil) else {
+            appendLine(["ts": now(), "event": "tap-failed"], home + "/logs/tracker.jsonl"); return
+        }
+        let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
+        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
+        CGEvent.tapEnable(tap: tap, enable: true)
+    }
+    func handle(_ type: CGEventType, _ ev: CGEvent) {
+        guard front, rect != nil else { return }
+        if type == .keyDown {
+            let f = ev.flags, kc = ev.getIntegerValueField(.keyboardEventKeycode)
+            let digit: Set<Int64> = [18, 19, 20, 21, 23, 22, 26, 28, 25]
+            let cmd = f.contains(.maskCommand), ctrl = f.contains(.maskControl), sh = f.contains(.maskShift), alt = f.contains(.maskAlternate)
+            let tabSwitch = (cmd && !alt && digit.contains(kc)) || (ctrl && kc == 48) || (cmd && sh && (kc == 33 || kc == 30))
+                || (cmd && alt && (kc == 123 || kc == 124)) || (cmd && (kc == 17 || kc == 13)) || [116, 121, 115, 119].contains(kc)
+            if tabSwitch { hiddenByKey = true; lastMove = now(); apply(event: ev.timestamp) }
+            return
+        }
+        // scroll: only when the pointer is over the source window
+        guard let w = winFrame else { return }
+        let m = ev.location
+        guard w.contains(m) else { return }
+        let dy = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
+        let dx = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
+        if dx == 0 && dy == 0 { return }
+        lastMove = now()
+        if range != nil && axGood && requeryAX() { apply(event: ev.timestamp); return }   // exact: the app moved the text, ask where
+        let cont = ev.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
+        let k = cont ? kCont : kLine
+        if let r = rect { rect = r.offsetBy(dx: dx * k, dy: dy * k) }
+        off.x += dx * k; off.y += dy * k
+        pred += dy * k; predCont = cont
+        apply(event: ev.timestamp)
+    }
+    func startAXObserver() {
+        guard srcPid > 0, AXIsProcessTrusted() else { return }
+        var obs: AXObserver?
+        let cb: AXObserverCallback = { _, _, _, _ in
+            let s = Live.shared
+            if s.range != nil && s.requeryAX() { s.apply(event: uptimeNs()) }
+        }
+        guard AXObserverCreate(srcPid, cb, &obs) == .success, let o = obs else { return }
+        let app = AXUIElementCreateApplication(srcPid)
+        for n in [kAXValueChangedNotification, kAXSelectedTextChangedNotification, kAXWindowMovedNotification, kAXWindowResizedNotification,
+                  kAXFocusedUIElementChangedNotification, kAXLayoutChangedNotification] {
+            AXObserverAddNotification(o, app, n as CFString, nil)
+            if let el = axEl { AXObserverAddNotification(o, el, n as CFString, nil) }
+        }
+        CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .commonModes)
+        observer = o
+    }
+    func lagStats() -> [String: Any] {
+        ["scroll_events": lagN, "lag_ms_avg": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(),
+         "lag_ms_max": (lagMax * 10).rounded() / 10, "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
+    }
 }
 
 // ---------------- OCR ----------------
@@ -225,7 +419,7 @@ struct Tracker {
         var it = CommandLine.arguments.dropFirst().makeIterator()
         while let k = it.next() { if k.hasPrefix("--") { a[String(k.dropFirst(2))] = it.next() ?? "" } }
         let app = NSApplication.shared
-        app.setActivationPolicy(.prohibited)          // no Dock icon, never steals focus
+        app.setActivationPolicy(.accessory)           // no Dock icon; the overlay panel never activates
         _ = CGMainDisplayID()
         let args = a
         Task.detached { await Tracker.run(args); exit(0) }
@@ -285,6 +479,8 @@ struct Tracker {
         try? FileManager.default.createDirectory(atPath: home + "/logs", withIntermediateDirectories: true)
         // element focused at hotkey time; only when already trusted (launched by Hammerspoon), never prompt
         let axEl = pid > 0 && AXIsProcessTrusted() ? focusedElement(pid) : nil
+        let native = (a["overlay"] ?? "native") == "native"
+        if native { await MainActor.run { Live.shared.setup(home: home, pid: pid, el: axEl) } }
 
         // ScreenCaptureKit: find our window once
         var filter: SCContentFilter? = nil
@@ -334,19 +530,36 @@ struct Tracker {
             if epid > 0 && lastPid > 0 && epid != lastPid { exitReason = "newer-run"; break }                   // a newer speakeasy run took over
             if epid > 0 && kill(pid_t(epid), 0) != 0 && state == "show" && (fresh || lastSeq >= 0) && tick - t0 > 2 { exitReason = "speaker-died"; break }   // speaker died
             let showing = state == "show" && (fresh || lastSeq >= 0)
-            if showing && (seq != lastSeq || epid != lastPid) { lastSeq = seq; lastPid = epid; missRun = 0 }
+            if showing && (seq != lastSeq || epid != lastPid) {
+                lastSeq = seq; lastPid = epid; missRun = 0
+                if native {
+                    let rr = (ev["rect"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                    let rg = ev["range"] as? [Int], col = ev["color"] as? String, op = ev["opacity"] as? Double ?? 0.22
+                    let ell = (ev["shape"] as? String) == "ellipse"
+                    await MainActor.run { Live.shared.event(rect: rr, range: rg, color: col, opacity: op, ellipse: ell) }
+                }
+            }
+            if native && !showing && lastSeq >= 0 { await MainActor.run { Live.shared.rect = nil; Live.shared.apply(event: nil) } }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
             var scanned = false
             var winFrame: CGRect? = nil
             if showing {
                 activeS += tick - prevTick
                 let ws = windowState(wid)
+                var liveAx = false
+                if native, let w = ws {
+                    let fr = w.front && w.onScreen
+                    liveAx = await MainActor.run { () -> Bool in
+                        let L = Live.shared; L.winFrame = w.frame
+                        if L.front != fr { L.front = fr; L.apply(event: nil) }
+                        return L.axGood }
+                }
                 let seqChanged = (lastOut["seq"] as? Int) != seq
                 let wasHiddenForFront = (lastOut["reason"] as? String).map { ["not-frontmost", "not-on-screen", "window-gone"].contains($0) } ?? false
                 if ws == nil || !ws!.onScreen || !ws!.front {
                     // hide at once (checked every tick, no debounce)
                     out["visible"] = false; out["reason"] = ws == nil ? "window-gone" : (ws!.onScreen ? "not-frontmost" : "not-on-screen"); hidden += 1
-                } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= 1.0 / fps) {
+                } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= (liveAx ? 2.0 : 1.0 / fps)) {   // AX follows events; OCR is a slow drift check
                     out = lastOut                                        // between scans: keep the last answer
                 } else {
                     scanned = true; frames += 1; lastScan = tick
@@ -401,6 +614,11 @@ struct Tracker {
                             }
                         } else { errNote = "capture failed (Screen Recording permission?)" }
                     }
+                    if native {
+                        let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method, wf = frame
+                        let hide = fnd == nil && (out["reason"] as? String) == "content-changed" || (fnd == nil && missRun >= 1 && out["reason"] != nil)
+                        if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, win: wf) } }
+                    }
                     if let r = found {
                         missRun = 0; lastBox = r
                         if method == "ax" { axHits += 1 } else if method == "doc" { docHits += 1 } else { ocrHits += 1 }
@@ -443,6 +661,8 @@ struct Tracker {
             let wait = max(0.01, tickS - dt)
             try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
         }
+        if native { await MainActor.run { Live.shared.rect = nil; Live.shared.flush() } }
+        let lagSt: [String: Any] = native ? await MainActor.run { Live.shared.lagStats() } : [:]
         writeJSONAtomic(["visible": false, "reason": "tracker-exit", "seq": lastSeq, "focus_pid": lastPid, "ts": now()], trackPath)
         let wall = max(0.001, now() - t0), active = frames
         let hits = axHits + ocrHits + docHits
@@ -455,6 +675,8 @@ struct Tracker {
                                  "cpu_s": ((cpu_s() - cpu0) * 100).rounded() / 100, "cpu_pct": ((cpu_s() - cpu0) / wall * 1000).rounded() / 10,
                                  "rss_mb_peak": maxRss.rounded(), "ocr_level": accurate ? "accurate" : "fast"]
         if let e = errNote { st["error"] = e }
+        for (k, v) in lagSt { st[k] = v }
+        st["overlay"] = native ? "native" : "hammerspoon"
         appendLine(st, home + "/logs/tracker.jsonl")
     }
 }
