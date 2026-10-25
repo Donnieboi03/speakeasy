@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """speakeasy: rewrite selected text into listenable prose and speak it with macOS `say`."""
-import argparse, json, os, re, signal, subprocess, sys, time, urllib.request, urllib.error
+import argparse, base64, json, os, re, signal, subprocess, sys, tempfile, time, urllib.request, urllib.error
 
 DEFAULT_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "qwen2.5:3b-instruct"
+DEFAULT_MODEL = "qwen3-vl:4b-instruct"     # one model for text, vision and grounding
 CHUNK = 6000
 
 SYSTEM_PROMPT = """You turn written text (usually AI chat output) into a short script that will be READ ALOUD by a text-to-speech voice. The listener cannot see the screen.
@@ -505,7 +505,41 @@ class Grounder:
             if f: f.boxes, f.labels, f.ms = m.get("boxes") or [], m.get("labels") or [], m.get("ms"); f.done.set()
         self.failed = True; self.ready.set()
         for f in list(self.pending.values()): f.done.set()
+    def mode(self):
+        m = os.environ.get("SPEAKEASY_GROUND", "auto").lower()
+        if m == "auto": return "vlm" if "qwen3-vl" in vision_model() else "florence"
+        return m
+    def _vlm(self, f, pdf, page, clip, text):
+        """Grounding with the vision model itself (Qwen3-VL answers bbox_2d in 0..1000 of the crop); Florence-2 stays optional."""
+        t0 = time.time()
+        png = os.path.join(tempfile.gettempdir(), f"speakeasy_cap_ground_{os.getpid()}_{id(f)}.png")
+        try:
+            code = ("import pymupdf,sys;d=pymupdf.open(sys.argv[1]);c=[float(v) for v in sys.argv[3].split(',')];"
+                    "d[int(sys.argv[2])-1].get_pixmap(clip=pymupdf.Rect(*c),matrix=pymupdf.Matrix(2,2)).save(sys.argv[4])")
+            subprocess.run([docmap.venv_python(), "-c", code, pdf, str(page), ",".join(str(v) for v in clip), png], timeout=10, capture_output=True)
+            b64 = base64.b64encode(open(png, "rb").read()).decode()
+            url = os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/") + "/chat/completions"
+            body = {"model": vision_model(), "temperature": 0, "max_tokens": 40, "stream": False,
+                    "messages": [{"role": "user", "content": [
+                        {"type": "text", "text": 'Locate ' + re.sub(r"[\"{}]", "", text)[:120] + ' in the image. Answer only JSON {"bbox_2d":[x1,y1,x2,y2]} with coordinates 0-1000.'},
+                        {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]}
+            r = json.load(urllib.request.urlopen(urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"}), timeout=20))
+            m = re.search(r"\[\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\]", r["choices"][0]["message"]["content"] or "")
+            if m:
+                v = [float(x) / 1000 for x in m.groups()]; w, h = clip[2] - clip[0], clip[3] - clip[1]
+                if v[2] > v[0] and v[3] > v[1]:
+                    f.boxes = [[clip[0] + v[0] * w, clip[1] + v[1] * h, clip[0] + v[2] * w, clip[1] + v[3] * h]]; f.labels = [text[:60]]
+        except Exception:
+            pass
+        finally:
+            f.ms = int((time.time() - t0) * 1000); f.done.set()
+            try: os.remove(png)
+            except OSError: pass
     def submit(self, pdf, page, clip, text):
+        if self.mode() == "vlm":
+            f = _GFuture(clip)
+            _threading.Thread(target=self._vlm, args=(f, pdf, page, clip, text), daemon=True).start()
+            return f
         self.start()
         f = _GFuture(clip)
         if self.p is None: f.done.set(); return f
@@ -1623,7 +1657,7 @@ def _fallback(text):
     return " ".join(out).strip()
 
 # ---------------- vision ----------------
-DEFAULT_VISION = "qwen2.5vl:3b"
+DEFAULT_VISION = "qwen3-vl:4b-instruct"
 MAX_PX = int(os.environ.get("SPEAKEASY_VISION_MAX_PX", "768") or 768)
 
 VISION_PROMPT = """You explain visual content (plus any copied text) to a listener who cannot see it. Your words are READ ALOUD.

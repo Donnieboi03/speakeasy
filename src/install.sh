@@ -3,8 +3,8 @@
 set -e
 SRC="$(cd "$(dirname "$0")" && pwd)"
 HOME_DIR="${SPEAKEASY_HOME:-$HOME/.speakeasy}"
-MODEL="${SPEAKEASY_MODEL:-qwen2.5:3b-instruct}"
-VMODEL="${SPEAKEASY_VISION_MODEL:-qwen2.5vl:3b}"
+MODEL="${SPEAKEASY_MODEL:-qwen3-vl:4b-instruct}"
+VMODEL="${SPEAKEASY_VISION_MODEL:-qwen3-vl:4b-instruct}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
 cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.

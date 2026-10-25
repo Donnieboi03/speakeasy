@@ -5,7 +5,7 @@ Wispr Flow in reverse: highlight text on your Mac, press **Ctrl+Option+S**, and 
 ## How it works
 1. **Hotkey (Hammerspoon)** copies the selection and takes a screenshot cropped to the full bounding box of the highlighted area (AX selection bounds, then highlight-colour detection, then an optional drag-select).
 2. **Nothing highlighted?** It captures the **focused window** (configurable) and the vision model sums it up in 2 to 4 spoken sentences. If the window can't be found, it captures nothing and logs why. It never silently falls back to full screen.
-3. **Local LLM rewrite (Ollama):** `qwen2.5:3b-instruct` for text, `qwen2.5vl:3b` for images. Includes prompt-injection delimiters, grounding checks and a superlative check. Fallback chain: vision, then text LLM, then deterministic cleanup.
+3. **Local LLM rewrite (Ollama):** one model, `qwen3-vl:4b-instruct` (Apache-2.0), for text, images and figure grounding (Florence-2 optional with `SPEAKEASY_GROUND=florence`). Includes prompt-injection delimiters, grounding checks and a superlative check. Fallback chain: vision, then text LLM, then deterministic cleanup.
 4. **TTS:** [Kokoro-82M](https://huggingface.co/mlx-community/Kokoro-82M-bf16) through [mlx-audio](https://github.com/Blaizzy/mlx-audio). It runs as a local OpenAI-compatible server (`127.0.0.1:8000/v1/audio/speech`) under a LaunchAgent and synthesizes the next sentence while the current one plays. If the server is down, it falls back to macOS `say`.
 5. **Streaming:** the rewrite is streamed token by token and handed to TTS sentence by sentence, so speech starts after the first sentence instead of after the whole rewrite. Meta phrases like "in this screenshot" or "the image shows" are removed from the output (counted as `meta_refs_removed` in the log).
 6. Press the hotkey again to stop. Any playback and temp WAVs are cleaned up.
@@ -32,7 +32,7 @@ cd src && ./install.sh
 | `SPEAKEASY_KEEP_ALIVE` | `30m` | How long Ollama keeps the models loaded after use |
 | `SPEAKEASY_PREWARM` | `1` | On hotkey, load the text/vision models in the background so the first call isn't cold (`0` disables) |
 | `SPEAKEASY_VISION_MAX_PX` | `768` | Longest side the screenshot is downscaled to before it goes to the vision model |
-| `SPEAKEASY_MODEL` | `qwen2.5:3b-instruct` | Text model |
+| `SPEAKEASY_MODEL` | `qwen3-vl:4b-instruct` | Text model (same as the vision model by default) |
 
 The `CAPTURE` variable in the Hammerspoon block can be `auto`, `select`, `mouse`, or `off`.
 
