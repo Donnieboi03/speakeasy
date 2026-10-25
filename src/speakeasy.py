@@ -152,6 +152,15 @@ def _home_rel(p):
     h = os.path.expanduser("~")
     return "~" + p[len(h):] if p.startswith(h + os.sep) else p
 
+def set_state(state):
+    """~/.speakeasy/state.json: thinking | speaking | idle, for the menu-bar pill (no text)."""
+    if os.environ.get("SPEAKEASY_APP") != "menubar" and RUN_META.get("app") != "menubar": return
+    try:
+        path = os.path.join(home(), "state.json"); tmp = path + ".tmp"
+        with open(tmp, "w") as f: json.dump({"state": state, "run_id": RUN_META.get("run_id"), "t": time.time()}, f)
+        os.replace(tmp, path)
+    except OSError: pass
+
 def log_run(rec, inp, out):
     try:
         d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
@@ -159,6 +168,14 @@ def log_run(rec, inp, out):
         rec.setdefault("doc_source", None)
         if rec.get("capture_path"): rec["capture_path"] = _home_rel(rec["capture_path"])      # never an absolute /Users path
         if rec.get("command") in ("speak", "selection"): rec["ram_total_mb"] = _ram_total_mb()
+        if rec.get("command") in ("rewrite", "speak", "selection"):          # counts only, never the text
+            import stats as _st
+            rec["words_in"] = _st.words(inp)
+            spoke = rec.get("command") != "rewrite" and not rec.get("dry_run")
+            rec["words_spoken"] = _st.words(out) if spoke else 0
+            sm = (rec.get("timings") or {}).get("speak_ms")
+            rec["audio_s"] = round(sm / 1000, 1) if spoke and isinstance(sm, (int, float)) else 0
+            rec["kind"] = _st.kind_of(rec)
         if os.environ.get("SPEAKEASY_LOG_TEXT") == "1":
             rec["input"] = inp; rec["output"] = out
         with open(os.path.join(d, "runs.jsonl"), "a", encoding="utf-8") as f:
@@ -2697,6 +2714,7 @@ def speak_kokoro(text, rate, timing, t_start, state):
             remaining = batches[val:]; break
         if timing.get("tts_first_audio_ms") is None:
             timing["tts_first_audio_ms"] = int((time.time() - t_start) * 1000)
+            set_state("speaking")
         state["proc"] = subprocess.Popen(["afplay", val], start_new_session=True)
         state["proc"].wait()
         try: os.remove(val)
@@ -2749,6 +2767,7 @@ def speak(text, rate=None, voice=None, timing=None, t_start=None):
                                          text=True if stdin_text is not None else None)
             if timing is not None and timing.get("tts_first_audio_ms") is None:
                 timing["tts_first_audio_ms"] = int((time.time() - (t_start or t_speak)) * 1000)
+                set_state("speaking")
             if stdin_text is not None:
                 try: proc["p"].communicate(stdin_text)
                 except BrokenPipeError: pass
@@ -2814,6 +2833,7 @@ class Speaker:
             return
         if self.timing.get("tts_first_audio_ms") is None:
             self.timing["tts_first_audio_ms"] = int((time.time() - self.t0) * 1000)
+            set_state("speaking")
     def _run(self, args, **kw):
         self.proc = subprocess.Popen(args, start_new_session=True, **kw)
         self.proc.wait()
@@ -3120,8 +3140,11 @@ def cmd_last(as_json=False):
             print(f"{k.ljust(w)}  {v}")
     return 0
 
-def cmd_stats(n=50):
+def cmd_stats(n=50, as_json=False):
     import statistics
+    if as_json:
+        import stats as _st
+        print(json.dumps(_st.compute(read_runs()))); return 0
     runs = [r for r in read_runs() if r.get("command") in ("rewrite", "speak", "selection")][-n:]
     if not runs:
         print("No runs logged yet."); return 0
@@ -3167,7 +3190,7 @@ def main(argv=None):
     sp = sub.add_parser("highlight", help="crop a window screenshot to the bounding box of all selection-highlight pixels")
     sp.add_argument("src"); sp.add_argument("dst")
     sp = sub.add_parser("last"); sp.add_argument("--json", action="store_true")
-    sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50)
+    sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50); sp.add_argument("--json", action="store_true")
     a = p.parse_args(argv)
     import uuid
     track = os.environ.get("SPEAKEASY_TRACK", "on").lower() not in ("off", "0", "false", "no")
@@ -3186,7 +3209,7 @@ def main(argv=None):
             except OSError: pass
 
     if a.cmd == "stop":
-        stop(); clear_focus_file(); return 0
+        stop(); clear_focus_file(); set_state("idle"); return 0
     if a.cmd == "highlight":
         sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
         import highlight
@@ -3197,8 +3220,9 @@ def main(argv=None):
     if a.cmd == "last":
         return cmd_last(a.json)
     if a.cmd == "stats":
-        return cmd_stats(a.n)
+        return cmd_stats(a.n, a.json)
     t0 = time.time()
+    if a.cmd in ("speak", "selection"): set_state("thinking")
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": a.cmd, "verbatim_blocks": [],
            "doc_source": None, "doc_path_hash": None, "page": None, "figures_found": None, "doc_map_method": None}
     timing = {"copy_ms": None, "capture_ms": a.capture_ms, "vision_ms": None, "llm_ms": None,
@@ -3424,6 +3448,7 @@ def main(argv=None):
     rec["ollama_models"] = ollama_ps()
     if DOC is not None: DOC.done.wait(1.0)                       # document fields for the log (speech is already done)
     GROUNDER.close()
+    set_state("idle")
     log_run(rec, text, out)
     return 0
 

@@ -20,16 +20,23 @@ struct SpeakeasyMain {
     }
 }
 
-final class AppDelegate: NSObject, NSApplicationDelegate {
+final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var item: NSStatusItem!
     var onboarding: NSWindow?
     var settings: NSWindow?
+    var statsWin: NSWindow?
     let reader = Reader()
+    let pill = Pill()
+    let statsLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ n: Notification) {
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "Speakeasy")
         let m = NSMenu()
+        m.delegate = self
+        statsLine.isEnabled = false; m.addItem(statsLine)
+        m.addItem(withTitle: "Stats…", action: #selector(showStats), keyEquivalent: "").target = self
+        m.addItem(.separator())
         m.addItem(withTitle: "Read selection", action: #selector(read), keyEquivalent: "").target = self
         m.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: "").target = self
         m.addItem(.separator())
@@ -44,12 +51,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(withTitle: "Quit Speakeasy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = m
         handOverFromHammerspoon()
+        reader.onState = { [weak self] s in DispatchQueue.main.async { self?.pill.set(s) } }
+        pill.model.onStop = { [weak self] in self?.reader.stop() }
         KeyboardShortcuts.onKeyUp(for: .readSelection) { [weak self] in self?.reader.toggle() }
         if !Permissions.accessibility || !Permissions.screenRecording { showOnboarding() }   // shows a window; prompts only on click
     }
     @objc func toggleCue(_ it: NSMenuItem) {
         guard let key = it.representedObject as? String else { return }
         let on = !Config.on(key); Config.set(key, on ? "on" : "off"); it.state = on ? .on : .off
+        pill.model.textHighlight = Config.on("SPEAKEASY_TEXT_HIGHLIGHT"); pill.model.figureCues = Config.on("SPEAKEASY_FIGURE_CUES")
+    }
+    @objc func showStats() {
+        let w = statsWin ?? NSWindow(contentRect: NSRect(x: 0, y: 0, width: 520, height: 320), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.title = "Speakeasy stats"; w.isReleasedWhenClosed = false
+        w.contentView = NSHostingView(rootView: StatsView(s: StatsData.load(reader.backendPath)))
+        if statsWin == nil { w.center() }; statsWin = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
     }
     /// The app owns the hotkey: tell an old Hammerspoon speakeasy block to let go (it deletes its hotkey when
     /// SPEAKEASY_HOTKEY=app) and reload it headlessly if the hs CLI is installed.
@@ -57,8 +74,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         guard Config.value("SPEAKEASY_HOTKEY") != "app" else { return }
         Config.set("SPEAKEASY_HOTKEY", "app")
         for hs in ["/opt/homebrew/bin/hs", "/usr/local/bin/hs"] where FileManager.default.isExecutableFile(atPath: hs) {
-            reader.run(hs, ["-t", "5", "-c", "hs.reload()"], stdin: nil); break
+            _ = reader.run(hs, ["-t", "5", "-c", "hs.reload()"], stdin: nil); break
         }
+    }
+    func menuWillOpen(_ menu: NSMenu) {
+        let b = reader.backendPath
+        DispatchQueue.global().async { let s = StatsData.load(b); DispatchQueue.main.async { self.statsLine.title = s.menuLine } }
+        for it in menu.items { if let k = it.representedObject as? String { it.state = Config.on(k) ? .on : .off } }
     }
     @objc func read() { reader.toggle() }
     @objc func stop() { reader.stop() }
