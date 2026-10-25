@@ -105,7 +105,7 @@ struct OLine { let text: String; let toks: Set<String>; let box: CGRect }   // b
 
 // Document-aware focus: speakeasy sends a target in PDF page space plus text anchors (page lines with their page rects).
 // Match anchors to recognised lines, fit page->screen (uniform scale + offset), map the target (exact line / figure / panel).
-func docMap(_ lines: [OLine], _ doc: [String: Any]) -> (CGRect, Int, Double)? {
+func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CGRect, Int, Double)? {
     guard let tg = doc["target"] as? [Double], tg.count == 4, let anc = doc["anchors"] as? [[Any]] else { return nil }
     var P: [(Double, Double)] = [], S: [(Double, Double)] = []
     for a in anc {
@@ -118,8 +118,26 @@ func docMap(_ lines: [OLine], _ doc: [String: Any]) -> (CGRect, Int, Double)? {
             return inter / Double(max(1, at.count)) >= 0.75 && inter / Double(max(1, l.toks.count)) >= 0.6 }
         if cands.count != 1 { continue }
         let b = cands[0].box
+        // a line cut by the window/capture edge starts mid-word: its left edge is not the page line's left edge
+        if let f = frame, b.minX <= f.minX + 3 || b.maxX >= f.maxX - 3 { continue }
         // OCR line boxes start at the first glyph: use the left edge and vertical centre
         P.append((c[0], (c[1] + c[3]) / 2)); S.append((Double(b.minX), Double(b.midY)))
+    }
+    // fit, drop the worst outliers (wrongly matched lines), refit
+    func fitPS(_ P: [(Double, Double)], _ S: [(Double, Double)]) -> (Double, Double, Double)? {
+        let n = Double(P.count); if P.count < 2 { return nil }
+        let mpx = P.map { $0.0 }.reduce(0, +) / n, mpy = P.map { $0.1 }.reduce(0, +) / n
+        let msx = S.map { $0.0 }.reduce(0, +) / n, msy = S.map { $0.1 }.reduce(0, +) / n
+        var num = 0.0, den = 0.0
+        for (p, q) in zip(P, S) { num += (p.0 - mpx) * (q.0 - msx) + (p.1 - mpy) * (q.1 - msy); den += pow(p.0 - mpx, 2) + pow(p.1 - mpy, 2) }
+        if den < 100 { return nil }
+        let sc = num / den; return (sc, msx - sc * mpx, msy - sc * mpy)
+    }
+    if P.count >= 4, let (s0, x0, y0) = fitPS(P, S) {
+        let res = zip(P, S).map { (p, q) in hypot(s0 * p.0 + x0 - q.0, s0 * p.1 + y0 - q.1) }
+        let med = res.sorted()[res.count / 2]
+        let keep = res.indices.filter { res[$0] <= max(6, 2.5 * med) }
+        if keep.count >= 2 && keep.count < P.count { P = keep.map { P[$0] }; S = keep.map { S[$0] } }
     }
     let n = Double(P.count); if P.count < 2 { return nil }
     let mpx = P.map { $0.0 }.reduce(0, +) / n, mpy = P.map { $0.1 }.reduce(0, +) / n
@@ -235,7 +253,7 @@ struct Tracker {
                 let t0 = now(); let lines = recognise(img, frame: frame, accurate: acc); let ms = (now() - t0) * 1000
                 let hit = refind(lines, target: (a["find"] ?? "").components(separatedBy: "\n"), near: nil)
                 if let dp = a["doc"], let d = readJSON(dp) {
-                    if let (r, k, e) = docMap(lines, d) { print("{\"level\":\"\(acc ? "accurate" : "fast")\",\"doc_rect\":[\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))],\"anchors\":\(k),\"rms\":\(String(format: "%.1f", e))}") }
+                    if let (r, k, e) = docMap(lines, d, frame: frame) { print("{\"level\":\"\(acc ? "accurate" : "fast")\",\"doc_rect\":[\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))],\"anchors\":\(k),\"rms\":\(String(format: "%.1f", e))}") }
                     else { print("{\"doc_rect\":null}") }
                 }
                 if a["debug"] != nil { for l in lines { print("  \(Int(l.box.minY)) \(Int(l.box.height)) \(l.text)") } }
@@ -352,7 +370,7 @@ struct Tracker {
                             let o0 = now()
                             var lines = recognise(img, frame: frame, accurate: accurate)
                             var hit: CGRect? = nil
-                            if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm) {
+                            if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm, frame: frame) {
                                 let vis = r.intersection(frame)
                                 // sanity: the mapped box must lie mostly in the window, and a text line must agree with where its words are
                                 var ok = !vis.isNull && vis.width * vis.height >= 0.5 * r.width * r.height
@@ -364,7 +382,13 @@ struct Tracker {
                             if hit == nil { hit = refind(lines, target: target, near: lastBox) }
                             if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
                                 lastAccurate = tick
-                                lines = recognise(img, frame: frame, accurate: true); hit = refind(lines, target: target, near: lastBox)
+                                lines = recognise(img, frame: frame, accurate: true)
+                                if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm, frame: frame) {
+                                    let vis = r.intersection(frame)
+                                    if !vis.isNull && vis.width * vis.height >= 0.5 * r.width * r.height {
+                                        hit = vis; method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
+                                }
+                                if hit == nil { hit = refind(lines, target: target, near: lastBox) }
                             }
                             ocrMs += (now() - o0) * 1000; ocrN += 1
                             let all = Set(lines.flatMap { $0.toks })
