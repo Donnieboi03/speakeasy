@@ -98,7 +98,7 @@ def _objects(page, fb):
 
 def _ocr_labels(page, fb, tmpdir=None):
     """Raster figures carry no PDF text: render the figure and read its labels with the tracker's text recognition."""
-    trk = os.environ.get("SPEAKEASY_TRACKER") or os.path.join(os.environ.get("SPEAKEASY_HOME") or os.path.expanduser("~/.speakeasy"), "bin", "speakeasy-track")
+    trk = tracker_bin()
     if not os.path.exists(trk): return []
     import pymupdf
     png = os.path.join(tmpdir or tempfile.gettempdir(), f"speakeasy_cap_fig_{os.getpid()}.png")
@@ -524,6 +524,50 @@ def fit(pairs):
     ox, oy = msx - sc * mpx, msy - sc * mpy
     rms = (sum((sc * p[0] + ox - s[0]) ** 2 + (sc * p[1] + oy - s[1]) ** 2 for p, s in zip(P, S)) / n) ** 0.5
     return sc, ox, oy, rms
+
+def tracker_bin():
+    return os.environ.get("SPEAKEASY_TRACKER") or os.path.join(os.environ.get("SPEAKEASY_HOME") or os.path.expanduser("~/.speakeasy"), "bin", "speakeasy-track")
+
+def ocr_capture(png, frame, timeout=15):
+    """Recognised text lines of a screenshot, boxes in screen points: [[x0, y0, x1, y1, text], ...]."""
+    trk = tracker_bin()
+    if not os.path.exists(trk) or not os.path.exists(png): return []
+    try:
+        r = subprocess.run([trk, "--ocr-lines", png, "--frame", ",".join(str(v) for v in frame)], capture_output=True, timeout=timeout)
+        return [[float(v) for v in o["r"]] + [o.get("t", "")] for o in json.loads(r.stdout.decode() or "[]")]
+    except Exception:
+        return []
+
+def anchor_fit(ocr, anchors, frame=None):
+    """The tracker's page->screen fit: unique token matches of page lines to recognised lines (left edge, vertical centre),
+    skipping lines cut by the capture edge, one outlier-rejection pass. Returns (s, ox, oy, rms, n) or None."""
+    ol = [(set(_toks(o[4])), o) for o in ocr]
+    P, S = [], []
+    for a in anchors:
+        at = set(_toks(a[4]))
+        if len(at) < 3: continue
+        c = [o for ot, o in ol if len(ot & at) / len(at) >= 0.75 and len(ot & at) / max(1, len(ot)) >= 0.6]
+        if len(c) != 1: continue
+        b = c[0]
+        if frame and (b[0] <= frame[0] + 3 or b[2] >= frame[0] + frame[2] - 3): continue
+        P.append((a[0], (a[1] + a[3]) / 2)); S.append((b[0], (b[1] + b[3]) / 2))
+    def f(P, S):
+        n = len(P)
+        if n < 2: return None
+        mpx = sum(p[0] for p in P) / n; mpy = sum(p[1] for p in P) / n; msx = sum(q[0] for q in S) / n; msy = sum(q[1] for q in S) / n
+        num = sum((p[0] - mpx) * (q[0] - msx) + (p[1] - mpy) * (q[1] - msy) for p, q in zip(P, S))
+        den = sum((p[0] - mpx) ** 2 + (p[1] - mpy) ** 2 for p in P)
+        if den < 100: return None
+        sc = num / den; return sc, msx - sc * mpx, msy - sc * mpy
+    t = f(P, S)
+    if t and len(P) >= 4:
+        res = [((t[0] * p[0] + t[1] - q[0]) ** 2 + (t[0] * p[1] + t[2] - q[1]) ** 2) ** 0.5 for p, q in zip(P, S)]
+        med = sorted(res)[len(res) // 2]
+        keep = [i for i, v in enumerate(res) if v <= max(6, 2.5 * med)]
+        if 2 <= len(keep) < len(P): P = [P[i] for i in keep]; S = [S[i] for i in keep]; t = f(P, S)
+    if not t or not (0.3 <= t[0] <= 6): return None
+    rms = (sum((t[0] * p[0] + t[1] - q[0]) ** 2 + (t[0] * p[1] + t[2] - q[1]) ** 2 for p, q in zip(P, S)) / len(P)) ** 0.5
+    return (t[0], t[1], t[2], rms, len(P)) if rms <= 10 else None
 
 def apply(t, r):
     s, ox, oy = t[:3]

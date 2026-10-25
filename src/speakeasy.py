@@ -846,8 +846,36 @@ class Focus:
         self._fm_done = vision or self.rec.get("vision_gate") is not None   # decided once the vision choice is known
         self.rec["doc_figure_mode"] = bool(self._fm)
         return self._fm
+    def start_capture_fit(self, png, frame):
+        """Screenshot taken: fit page->screen from text recognition on it, alongside the LLM (AX rects in Preview are unreliable)."""
+        self._cf, self._cf_done = None, _threading.Event()
+        def run():
+            t0 = time.time()
+            try:
+                ocr = docmap.ocr_capture(png, frame)
+                d = DOC.get(wait=20) if (ocr and DOC is not None) else None
+                if d and d.get("page"):
+                    seen, anc = set(), []
+                    for l in d["page"]["lines"]:
+                        k = re.sub(r"\s+", " ", l[4].strip().lower())
+                        if len(k) >= 14 and k not in seen: seen.add(k); anc.append(l)
+                    t = docmap.anchor_fit(ocr, anc, frame)
+                    if t:
+                        self._cf = (t[0], t[1], t[2], t[3])
+                        self.rec.update(doc_transform="capture-ocr", capture_fit_anchors=t[4], capture_fit_rms=round(t[3], 1))
+                self.rec["capture_fit_ms"] = int((time.time() - t0) * 1000)
+            except Exception as e:
+                self.rec["doc_note"] = f"capture fit: {type(e).__name__}"[:160]
+            finally:
+                self._cf_done.set()
+        _threading.Thread(target=run, daemon=True).start()
     def _doc_transform(self):
-        """Page -> screen: from the hotkey's per-line AX rects of the selected lines, else from the selection rect."""
+        """Page -> screen: capture OCR fit when a screenshot exists; else the hotkey's per-line AX rects, else the selection rect.
+        Returns "pending" while the capture fit is still running."""
+        cf = getattr(self, "_cf_done", None)
+        if cf is not None:
+            if not cf.is_set(): return "pending"
+            if self._cf: return self._cf
         if hasattr(self, "_dt"): return self._dt
         self._dt = None
         d = DOC.get()
@@ -934,7 +962,9 @@ class Focus:
         if not tgt: return r, method
         nr = FRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.pending = getattr(r, "pending", None)
         t = self._doc_transform()
-        if t:
+        if t == "pending":
+            nr.hold = tgt; t = None                                     # no box until the capture fit lands (never a wrong one)
+        elif t:
             nr[:] = [round(v, 1) for v in docmap.apply(t, tgt)]
         nr.shape = shape
         anc = d.get("anchors") or []
@@ -948,7 +978,7 @@ class Focus:
         if kind == "line": nr.doc["lines"] = [[round(v, 1) for v in d["page"]["lines"][i][:4]] for i in self._doc_lines(*self.last_lines)]
         if kind != "line" and f and f.get("caption"):
             nr.src = [re.sub(r"\s+", " ", f["caption"])[:100]]          # tracker finds the caption when anchors fail
-        return nr, ("doc-" + kind) if (t or kind != "line") else method
+        return nr, ("doc-" + kind) if (t or kind != "line" or getattr(nr, "hold", None) is not None) else method
     def _locate(self, sentence, tag):
         """Return (screen rect, method) for one spoken sentence."""
         self.n += 1
@@ -1040,6 +1070,24 @@ class Focus:
         if getattr(rect, "doc", None): ev["doc"] = rect.doc          # page-space target + text anchors for the tracker
         if getattr(rect, "shape", None): ev["shape"] = rect.shape
         fut = getattr(rect, "pending", None)
+        hold = getattr(rect, "hold", None)
+        if hold is not None:
+            seq = self.events
+            self._write({"state": "clear", "seq": seq, "hold": True})       # hide the previous box; nothing wrong is shown
+            def after_fit():
+                if self._cf_done.wait(8.0) and self.events == seq and not STOP.is_set():
+                    t = self._doc_transform()
+                    if t and t != "pending":
+                        ev["rect"] = [round(v, 1) for v in docmap.apply(t, hold)]; ev["late_fit"] = True
+                        self.events += 1; ev["seq"] = self.events                # new key: the overlay saw this seq as the hold clear
+                        if fut is not None and fut.done.is_set(): self._apply_ground(rect, fut, ev)
+                        self._write(ev)
+                    elif t is None or t == "pending": pass
+                    if not ev.get("late_fit"):
+                        self.methods["fit-miss"] = self.methods.get("fit-miss", 0) + 1
+                        self.events += 1; ev["seq"] = self.events; self._write(ev)                                  # fit failed: fall back to the AX-based box
+            _threading.Thread(target=after_fit, daemon=True).start()
+            return
         if fut is not None and fut.done.is_set() and self._apply_ground(rect, fut, ev): pass
         self._write(ev)
         if fut is not None and not fut.done.is_set():
@@ -1056,7 +1104,7 @@ class Focus:
         ev["doc"]["target"] = [round(v, 1) for v in b]; ev["doc"]["kind"] = "object"; ev["shape"] = "ellipse"
         ev["doc"]["label"] = (ev["doc"].get("label") or "") + " (grounded)"
         t = self._doc_transform()
-        if t: ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]
+        if t and t != "pending": ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]
         self.methods["ground-florence"] = self.methods.get("ground-florence", 0) + 1
         self.rec["ground_ms"] = fut.ms
         return True
@@ -2950,6 +2998,10 @@ def main(argv=None):
             except OSError: pass
         img = None
         rec.update(image=False, image_px=None, image_sent_px=None, vision_model=None, vision_ms=None)
+    if img and FOCUS is not None and DOC is not None and a.capture_rect \
+            and os.environ.get("SPEAKEASY_CAPTURE_FIT", "on").lower() not in ("off", "0", "false", "no"):
+        try: FOCUS.start_capture_fit(img, [float(v) for v in a.capture_rect.split(",")])   # alongside the LLM
+        except ValueError: pass
     if img:
         if (a.capture_method or "").startswith("no-selection") and text.strip():
             # something WAS selected after all: never ship a whole-window/screen image with it
@@ -2974,8 +3026,12 @@ def main(argv=None):
                 out = rewrite_with_image(text, img, rec, a.capture_method)
             else:
                 if is_owned_capture(img):          # temp-file rules: only our own captures are deleted
-                    try: os.remove(img)
-                    except OSError: pass
+                    def _rm(p=img, ev=getattr(FOCUS, "_cf_done", None)):
+                        if ev is not None: ev.wait(30)              # the capture fit is still reading it
+                        try: os.remove(p)
+                        except OSError: pass
+                    if getattr(FOCUS, "_cf_done", None) is not None: _threading.Thread(target=_rm, daemon=True).start()
+                    else: _rm()
                 img = None
                 rec.update(image=False, image_px=None, image_sent_px=None, vision_model=None, vision_ms=None)
                 out = rewrite(text, rec) if text.strip() else ""
