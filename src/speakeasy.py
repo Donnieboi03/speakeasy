@@ -609,9 +609,10 @@ class Grounder:
         t0 = time.time()
         png = os.path.join(tempfile.gettempdir(), f"speakeasy_cap_ground_{os.getpid()}_{id(f)}.png")
         try:
-            code = ("import pymupdf,sys;d=pymupdf.open(sys.argv[1]);c=[float(v) for v in sys.argv[3].split(',')];"
-                    "d[int(sys.argv[2])-1].get_pixmap(clip=pymupdf.Rect(*c),matrix=pymupdf.Matrix(2,2)).save(sys.argv[4])")
-            subprocess.run([docmap.venv_python(), "-c", code, pdf, str(page), ",".join(str(v) for v in clip), png], timeout=10, capture_output=True)
+            code = ("import sys;sys.path.insert(0,sys.argv[5]);import pdfpage;c=[float(v) for v in sys.argv[3].split(',')];"
+                    "pdfpage.open_pdf(sys.argv[1])[int(sys.argv[2])-1].render(c,2,sys.argv[4])")
+            subprocess.run([docmap.venv_python(), "-c", code, pdf, str(page), ",".join(str(v) for v in clip), png,
+                            os.path.dirname(os.path.realpath(__file__))], timeout=10, capture_output=True)
             b64 = base64.b64encode(open(png, "rb").read()).decode()
             url = os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/") + "/chat/completions"
             body = {"model": vision_model(), "temperature": 0, "max_tokens": 40, "stream": False,

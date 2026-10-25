@@ -60,17 +60,8 @@ here there which where while what how also then next each both all some data res
 first second third finally using used use uses into onto over under between""".split())
 
 def _text_lines(page):
-    d = page.get_text("dict")
-    lines, blocks = [], []
-    for b in d.get("blocks", []):
-        if b.get("type") != 0: continue
-        bl = []
-        for l in b.get("lines", []):
-            t = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
-            if t:
-                lines.append([*[round(v, 1) for v in l["bbox"]], t]); bl.append(len(lines) - 1)
-        if bl: blocks.append(bl)
-    return lines, blocks
+    lines, blocks = page.text_lines()
+    return [[*[round(v, 1) for v in bb], t] for bb, t in lines], blocks
 
 def _overlap(a, b):
     return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
@@ -82,16 +73,13 @@ def _objects(page, fb):
     """Graphic sub-objects inside a figure: raster images and small drawing clusters (page space)."""
     area = max(1.0, (fb[2] - fb[0]) * (fb[3] - fb[1])); out = []
     try:
-        for im in page.get_image_info():
-            r = list(im.get("bbox") or [])
+        for r in page.images():
             if len(r) == 4 and _inside(r, fb, 4) and (r[2] - r[0]) * (r[3] - r[1]) < 0.7 * area and r[2] - r[0] > 12 and r[3] - r[1] > 12:
                 out.append([round(v, 1) for v in r] + ["image"])
-    except Exception: pass
+    except (RuntimeError, ValueError, OSError): pass
     try:                                              # individual vector paths (boxes, plots, outlines)
-        for d in page.get_drawings():
-            r = d.get("rect")
-            if r is None: continue
-            rr = [r.x0, r.y0, r.x1, r.y1]
+        for r in page.drawings():
+            rr = list(r)
             if _inside(rr, fb, 2) and r.width > 10 and r.height > 10 and 150 < r.width * r.height < 0.35 * area:
                 out.append([round(v, 1) for v in rr] + ["drawing"])
     except Exception: pass
@@ -102,10 +90,9 @@ def _ocr_labels(page, fb, tmpdir=None):
     """Raster figures carry no PDF text: render the figure and read its labels with the tracker's text recognition."""
     trk = tracker_bin()
     if not os.path.exists(trk): return []
-    import pymupdf
     png = os.path.join(tmpdir or tempfile.gettempdir(), f"speakeasy_cap_fig_{os.getpid()}.png")
     try:
-        page.get_pixmap(clip=pymupdf.Rect(*fb), matrix=pymupdf.Matrix(3, 3)).save(png)
+        page.render(fb, 3, png)
         r = subprocess.run([trk, "--ocr-lines", png, "--frame", ",".join(str(v) for v in [fb[0], fb[1], fb[2] - fb[0], fb[3] - fb[1]])],
                            capture_output=True, timeout=20)
         out = json.loads(r.stdout.decode() or "[]")
@@ -133,8 +120,8 @@ def _guess_panels(fb, caption):
 def parse_pdf(path, fig_pages=None, prev=None):
     """Text lines for every page; figures (bbox, caption, panels, text labels, graphic objects) for fig_pages (None = all).
     prev: an earlier partial parse whose figure pages are kept."""
-    import pymupdf
-    doc = pymupdf.open(path)
+    import pdfpage
+    doc = pdfpage.open_pdf(path)
     pages = []
     old = {p["n"]: p for p in (prev or {}).get("pages", []) if p.get("figs_done")}
     for pno, page in enumerate(doc):
@@ -147,8 +134,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
         lines, blocks = _text_lines(page)
         gfx = []
         try:
-            for im in page.get_image_info():
-                r = im.get("bbox")
+            for r in page.images():
                 if r and (r[2] - r[0]) > 20 and (r[3] - r[1]) > 20: gfx.append(list(r))
         except Exception: pass
         try:
@@ -598,8 +584,8 @@ if __name__ == "__main__":
         prev = json.load(open(opt["--prev"])) if opt.get("--prev") and os.path.exists(opt["--prev"]) else None
         sel = open(opt["--sel"]).read() if opt.get("--sel") else ""
         if sel.strip():
-            import pymupdf
-            d0 = pymupdf.open(sys.argv[2])
+            import pdfpage
+            d0 = pdfpage.open_pdf(sys.argv[2])
             txt = {"pages": [{"n": i + 1, "lines": _text_lines(pg)[0]} for i, pg in enumerate(d0)]}
             pg, _ = match_page(txt, sel)
             want = {pg["n"] - 1, pg["n"], pg["n"] + 1} if pg else {1}

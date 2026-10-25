@@ -61,7 +61,7 @@ box targets the exact line, figure or panel; the live tracker maps page coordina
 - `SPEAKEASY_DOC_READ=local|all|off` (default `local`). Parsed documents are cached in `~/.speakeasy/cache/doc/`.
   The lookup runs alongside the audio; the prompt waits at most `SPEAKEASY_DOC_WAIT_MS` (80 ms) and never for a first-time parse.
 - Logged per run: `doc_source`, `doc_path_hash` (never the path), `page`, `figures_found`, `doc_map_method`, `doc_ms`, `doc_cache`.
-- PDF parsing uses [PyMuPDF](https://pymupdf.readthedocs.io/), installed into the Kokoro venv by `install.sh`.
+- PDF parsing uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (PDFium; Apache-2.0/BSD, replacing the AGPL PyMuPDF), installed into the Kokoro venv by `install.sh`.
   PyMuPDF is licensed under **AGPL-3.0** (or a commercial licence); that is fine for local personal use, but keep it in
   mind before redistributing a bundle that includes it. Markdown parsing is stdlib only.
 

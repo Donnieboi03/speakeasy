@@ -6,7 +6,7 @@ HOME_DIR="${SPEAKEASY_HOME:-$HOME/.speakeasy}"
 MODEL="${SPEAKEASY_MODEL:-qwen3-vl:4b-instruct}"
 VMODEL="${SPEAKEASY_VISION_MODEL:-qwen3-vl:4b-instruct}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
-cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/stats.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
+cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/stats.py" "$SRC/pdfpage.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then
@@ -91,8 +91,8 @@ else
 fi
 # Document-aware focus (PDF parsing): PyMuPDF in the Kokoro venv (AGPL-3.0; fine for local personal use)
 if [ -x "$TTS_VENV/bin/python" ]; then
-  "$TTS_VENV/bin/python" -c 'import pymupdf, PIL' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pymupdf pillow >/dev/null 2>&1 \
-    && echo "PyMuPDF ready for document-aware focus" || echo "NOTE: PyMuPDF not installed; PDF figure mapping off (Markdown still works)"
+  "$TTS_VENV/bin/python" -c 'import pypdfium2, PIL' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pypdfium2 pillow >/dev/null 2>&1 \
+    && echo "pypdfium2 ready for document-aware focus" || echo "NOTE: pypdfium2 not installed; PDF figure mapping off (Markdown still works)"
 fi
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 set_cfg SPEAKEASY_VISION auto

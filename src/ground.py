@@ -10,7 +10,7 @@ os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
 
 def main():
     t0 = time.time()
-    import torch, pymupdf
+    import torch, pdfpage
     from PIL import Image
     import transformers
     dev = "mps" if torch.backends.mps.is_available() else "cpu"
@@ -37,11 +37,10 @@ def main():
             q = json.loads(line); t1 = time.time()
             key = (q["pdf"], q["page"], tuple(q["clip"]))
             if key not in crops:
-                d = docs.get(q["pdf"]) or docs.setdefault(q["pdf"], pymupdf.open(q["pdf"]))
+                d = docs.get(q["pdf"]) or docs.setdefault(q["pdf"], pdfpage.open_pdf(q["pdf"]))
                 pg = d[q["page"] - 1]; c = q["clip"]
                 z = min(3.0, max(1.0, 768.0 / max(1.0, max(c[2] - c[0], c[3] - c[1]))))
-                pix = pg.get_pixmap(clip=pymupdf.Rect(*c), matrix=pymupdf.Matrix(z, z))
-                crops[key] = (Image.frombytes("RGB", (pix.width, pix.height), pix.samples), z)
+                crops[key] = (pg.image(c, z), z)
             img, z = crops[key]
             inputs = proc(text=task + q["text"], images=img, return_tensors="pt").to(dev)
             with torch.no_grad():
