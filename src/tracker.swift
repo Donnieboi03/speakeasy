@@ -157,6 +157,8 @@ final class Live: NSObject {
     var lagN = 0, lagSum = 0.0, lagMax = 0.0
     var hideN = 0, hideSum = 0.0, hideMax = 0.0
     var logN = 0
+    var drawnSeq = -2
+    var axFail = ""
 
     func rec(_ o: [String: Any]) {
         if logN > 6000 { return }
@@ -193,10 +195,8 @@ final class Live: NSObject {
         }
         startTap()
         startAXObserver()
-        if #available(macOS 14.0, *) {
-            let l = p.contentView!.displayLink(target: self, selector: #selector(tickLink(_:)))
-            l.add(to: .main, forMode: .common); link = l
-        }
+        // No view display link: it only ticks while the panel is on screen, so a hidden panel was never shown (draws: 0).
+        // Coalesce instead: apply at most once per main-loop turn.
     }
     func style(color: String?, opacity: Double, ellipse: Bool) {
         var r = 0.23, g = 0.51, b = 0.96
@@ -215,8 +215,9 @@ final class Live: NSObject {
     }
     func apply(scrollTs: UInt64? = nil) {
         if let t = scrollTs { pendingScroll.append(t) }
+        if dirty { return }
         dirty = true
-        if link == nil { flush() }
+        if Thread.isMainThread { flush() } else { DispatchQueue.main.async { self.flush() } }
     }
     @objc func tickLink(_ l: AnyObject) { if dirty { flush() } }
     func hideReason() -> String {
@@ -248,6 +249,7 @@ final class Live: NSObject {
                      "on_screen": p.isVisible])
                 shown = true; lastDrawn = f
             }
+            if drawnSeq != seq { drawnSeq = seq; writeJSONAtomic(["seq": seq, "tracker_pid": Int(getpid()), "drawn": true, "ts": now()], home + "/overlay.json") }
             hideTrigger = nil
         } else {
             if p.isVisible { p.orderOut(nil) }
@@ -306,13 +308,18 @@ final class Live: NSObject {
         }
         axGood = false
         if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" }
-        if requeryAX() { axHits += 1 }
+        let ok = requeryAX()
+        if ok { axHits += 1 }
+        rec(["event": "ax-range", "seq": s, "range": range ?? NSNull(), "hit": ok, "why": ok ? NSNull() : axFail])
         apply()
     }
     @discardableResult
     func requeryAX() -> Bool {
-        guard let el = axEl, let rg = range, rg.count == 2, let r = axBounds(el, rg[0], rg[1]) else { axGood = false; return false }
-        if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axGood = false; return false }
+        guard let el = axEl else { axFail = "no-element"; axGood = false; return false }
+        guard let rg = range, rg.count == 2 else { axFail = "no-range"; axGood = false; return false }
+        guard let r = axBounds(el, rg[0], rg[1]) else { axFail = "no-bounds"; axGood = false; return false }
+        if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axFail = "too-wide \(Int(r.width))"; axGood = false; return false }
+        axFail = ""
         if let w = winFrame, !w.intersects(r) { if scanVisible { hideTrigger = ("scrolled-off", now()) }; scanVisible = false; axGood = true; return true }
         rect = r; axGood = true; scanVisible = true; src = "ax"; return true
     }
@@ -366,6 +373,7 @@ final class Live: NSObject {
         var obs: AXObserver?
         let cb: AXObserverCallback = { _, _, note, _ in
             let s = Live.shared
+            if s.range == nil || !s.axGood && s.axEvents > 5 && s.axFail != "" { s.axEvents += 1; return }   // nothing to re-query
             s.axEvents += 1
             let t0 = now()
             let ok = s.range != nil && s.requeryAX()
@@ -375,11 +383,10 @@ final class Live: NSObject {
         guard AXObserverCreate(srcPid, cb, &obs) == .success, let o = obs else { rec(["event": "ax-observer", "ok": false, "why": "create failed"]); return }
         let app = AXUIElementCreateApplication(srcPid)
         var added = 0
-        for n in [kAXValueChangedNotification, kAXSelectedTextChangedNotification, kAXWindowMovedNotification, kAXWindowResizedNotification,
-                  kAXFocusedUIElementChangedNotification, kAXLayoutChangedNotification] {
-            if AXObserverAddNotification(o, app, n as CFString, nil) == .success { added += 1 }
+        for n in [kAXValueChangedNotification, kAXSelectedTextChangedNotification, kAXLayoutChangedNotification] {
             if let el = axEl, AXObserverAddNotification(o, el, n as CFString, nil) == .success { added += 1 }
         }
+        _ = app
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .commonModes)
         observer = o
         rec(["event": "ax-observer", "ok": true, "notifications": added])

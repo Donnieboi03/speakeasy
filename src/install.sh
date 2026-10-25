@@ -211,12 +211,44 @@ local function shapeFrame(r)
   end
   return { x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 }
 end
+-- The tracker runs detached (nohup) so a Hammerspoon reload never kills an active read; its pid lives in tracker.pid.
+local TRACKER_PID = os.getenv("HOME") .. "/.speakeasy/tracker.pid"
+function speakeasyTrackerPid()
+  local f = io.open(TRACKER_PID, "r"); if not f then return nil end
+  local p = tonumber((f:read("*l") or ""):match("%d+")); f:close()
+  if p and os.execute("/bin/kill -0 " .. p .. " 2>/dev/null") then return p end
+  return nil
+end
+function speakeasyTrackerKill()
+  local p = speakeasyTrackerPid()
+  if p then os.execute("/bin/kill " .. p .. " 2>/dev/null") end
+  os.remove(TRACKER_PID)
+end
+-- did the tracker's native panel draw this sentence? (it writes overlay.json on its first draw of each seq)
+local function nativeDrew(e)
+  local f = io.open(os.getenv("HOME") .. "/.speakeasy/overlay.json", "r"); if not f then return false end
+  local ok, o = pcall(hs.json.decode, f:read("*a") or ""); f:close()
+  return ok and type(o) == "table" and o.drawn == true and tonumber(o.seq) == tonumber(e.seq) and tonumber(o.tracker_pid) == speakeasyTrackerPid()
+end
+local focusShowCanvas
 local function focusShow(e)
-  -- the tracker draws the box itself (native panel, moved by scroll/AX events in-process); Hammerspoon only draws without it
-  if NATIVE_OVERLAY and speakeasyTracker and speakeasyTracker:isRunning() then
-    if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
+  -- the tracker draws the box itself (native panel); if it has not drawn within 300 ms, Hammerspoon draws it instead
+  if NATIVE_OVERLAY and speakeasyTrackerPid() and not e.native_checked then
+    if speakeasyNativeTimer then speakeasyNativeTimer:stop() end
+    speakeasyNativeTimer = hs.timer.doAfter(0.3, function()
+      if focusCur == nil or focusCur.seq ~= e.seq or focusCur.pid ~= e.pid then return end
+      if nativeDrew(e) then
+        if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
+      else
+        hslog("native panel did not draw seq %s within 300 ms: Hammerspoon box", tostring(e.seq))
+        e.native_checked = true; focusShowCanvas(e)
+      end
+    end)
     return
   end
+  focusShowCanvas(e)
+end
+focusShowCanvas = function(e)
   local r = e.rect
   if type(r) ~= "table" or #r ~= 4 then return end
   focusShape = (e.shape == "ellipse") and "ellipse" or "rect"
@@ -359,7 +391,7 @@ speakeasyKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(
 end)
 speakeasyKeyTap:start()
 local function startTracker(win)
-  if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
+  speakeasyTrackerKill()
   srcWinId = win and win:id() or nil
   speakeasyScrollOff = { 0, 0 }
   srcPid = win and win:application() and win:application():pid() or nil
@@ -370,11 +402,11 @@ local function startTracker(win)
   local args = { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
     "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5"),
     "--overlay", NATIVE_OVERLAY and "native" or "hammerspoon", "--run-id", tostring(speakeasyRunId) }
-  speakeasyTracker = hs.task.new(TRACKER, function(code, out, err)
-    hslog("tracker exited code=%s %s", tostring(code), ((err or "") .. (out or "")):gsub("%s+$", ""):sub(1, 300))
-  end, args)
-  if not speakeasyTracker then hslog("tracker not started: hs.task.new failed for %s", TRACKER); return end
-  local ok = speakeasyTracker:start()
+  local q = {}
+  for _, a in ipairs(args) do q[#q + 1] = "'" .. tostring(a):gsub("'", "'\\''") .. "'" end
+  local cmd = string.format("/usr/bin/nohup '%s' %s >/dev/null 2>&1 & echo $! > '%s'", TRACKER, table.concat(q, " "), TRACKER_PID)
+  hs.execute(cmd)
+  local ok = speakeasyTrackerPid() ~= nil
   hslog("tracker start %s: window %s pid %s run %s", ok and "ok" or "FAILED", tostring(win:id()), tostring(app and app:pid()), tostring(speakeasyRunId))
 end
 if speakeasyFocusWatcher then speakeasyFocusWatcher:stop() end
@@ -544,7 +576,7 @@ speakeasyHotkey = hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
   if hs.fs.attributes(pidf) then
     focusClear()
-    if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
+    speakeasyTrackerKill()
     hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return
   end
   focusClear(); os.remove(LINES)
