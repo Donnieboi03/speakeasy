@@ -73,3 +73,18 @@ boxes that panel; anything else boxes the whole figure. The vision prompt lists 
 says "In Figure 4a, ...". When no label matches, Florence-2 (`microsoft/Florence-2-base` family, local, MPS when available,
 loaded lazily in the Kokoro venv while vision runs) grounds the phrase on the figure crop and the box moves when it answers.
 `SPEAKEASY_GROUND=auto|off` (default auto). The model is downloaded once from Hugging Face (about 0.5 GB).
+
+## Logs (observability)
+
+`~/.speakeasy/logs/tracker.jsonl`, one JSON object per line, written as each event happens:
+
+- `start` {ts, tracker_pid, pid, window_id, accessibility, screen_recording, fps, run_id, build, overlay}
+- `draw` {ts, tracker_pid, seq, rect (panel), text_rect, src: ax|ocr|doc|scroll-delta|event, overlay: swift-panel|hammerspoon}
+- `hide` {ts, tracker_pid, seq, trigger: app-switch|tab-switch|window-switch|not-frontmost|scrolled-off|content-changed|speech-finished, hide_ms}
+- `scroll` {ts, tracker_pid, scroll_lag_ms, src}; `ax` {ts, tracker_pid, notif, ax_ms, hit}
+- `tap`, `ax-observer`, `ax-selection` (setup status), `frame` (per OCR scan)
+- `exit` (also on SIGTERM) {ts, tracker_pid, run_id, reason, draws, hides, scroll_events, ax_events, ax_hits, ocr_hits, scroll_delta_hits,
+  scroll_lag_avg_ms, scroll_lag_max_ms, hide_ms_avg, hide_ms_max, rss_mb_peak, cpu_pct, build}
+
+`runs.jsonl` carries the same `run_id`, plus `app` (menubar|cli), `overlay`, `ram_total_mb` and always `doc_source`.
+Paths are home-relative (`~/...`) or hashed (`doc_path_hash`); window titles are never logged.

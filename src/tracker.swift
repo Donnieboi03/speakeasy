@@ -19,6 +19,7 @@ import Darwin
 
 // ---------------- small utils ----------------
 func now() -> Double { Date().timeIntervalSince1970 }
+let BUILD = "dev"                     // replaced with the git sha / source hash by install.sh
 func readJSON(_ path: String) -> [String: Any]? {
     guard let d = FileManager.default.contents(atPath: path) else { return nil }
     return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
@@ -117,39 +118,64 @@ func focusedElement(_ pid: pid_t) -> AXUIElement? {
 
 
 // ---------------- native overlay + event-driven following (main thread) ----------------
-// The box is drawn here (a borderless, click-through, non-activating panel) so scroll / AX / app-switch events move or hide
-// it in the same process, without a file relay. Scroll: AX re-query of the sentence range when the app answers it, else the
-// scroll delta times a calibrated scale; text recognition scans correct drift. Lag (event -> frame applied) is logged.
+// The box is drawn here (a borderless, click-through, non-activating panel) so scroll / AX / app-switch events move or
+// hide it in-process, without a file relay. Scroll: AX re-query of the sentence range when the app answers it, else the
+// scroll delta times a calibrated scale; text-recognition scans correct drift. Every draw / hide / scroll / ax event is
+// appended to tracker.jsonl at once (schema in the README).
 func uptimeNs() -> UInt64 { clock_gettime_nsec_np(CLOCK_UPTIME_RAW) }
 final class Live: NSObject {
     static let shared = Live()
     var home = ""
+    var log = ""
     var panel: NSPanel? = nil
     var shape = CAShapeLayer()
-    var rect: CGRect? = nil              // target box, global top-left coordinates
+    var rect: CGRect? = nil              // target text box, global top-left coordinates
     var isEllipse = false
-    var front = true, hiddenByKey = false, scanVisible = false
+    var front = true, winFront = true, hiddenByKey = false, scanVisible = false
     var winFrame: CGRect? = nil
     var srcPid: pid_t = 0
     var axEl: AXUIElement? = nil
     var range: [Int]? = nil
-    var axGood = false                   // the app answers tight AXBoundsForRange for this sentence
-    var lastMove = 0.0                   // epoch of the last scroll / tab key: older scans are stale
+    var selBase: Int? = nil              // AX offset of the selection at hotkey time
+    var selText = ""                     // the selected text (to place each sentence's source line inside it)
+    var axGood = false
+    var lastMove = 0.0
     var kCont = 1.0, kLine = 1.0, pred = 0.0, predCont = true
-    var pendingEv: [UInt64] = []         // event timestamps waiting for the next display refresh
-    var lagN = 0, lagSum = 0.0, lagMax = 0.0, lagLast = 0.0
+    var off = CGPoint.zero               // scrolling since the hotkey: speakeasy's own boxes predate it
     var link: AnyObject? = nil
     var dirty = false
-    var lagLogN = 0
-    var panelLogN = 0, shownLogged = false, lastLogged = NSRect.zero
-    var via = "event"                    // where the current rect came from: event / ax / ocr / doc / delta
-    var scrollSeen = 0
-    var tap: CFMachPort? = nil
-    var off = CGPoint.zero               // scrolling since the hotkey: speakeasy's own boxes predate it
     var observer: AXObserver? = nil
+    var tap: CFMachPort? = nil
+    var src = "event"                    // where the current rect came from: event / ax / ocr / doc / scroll-delta
+    var seq = -1
+    // pending event timing
+    var pendingScroll: [UInt64] = []
+    var hideTrigger: (String, Double)? = nil
+    var shown = false, lastDrawn = NSRect.zero
+    // counters for the exit record
+    var draws = 0, hides = 0, scrollEvents = 0, axEvents = 0, axHits = 0, ocrHits = 0, deltaHits = 0
+    var lagN = 0, lagSum = 0.0, lagMax = 0.0
+    var hideN = 0, hideSum = 0.0, hideMax = 0.0
+    var logN = 0
 
+    func rec(_ o: [String: Any]) {
+        if logN > 6000 { return }
+        logN += 1
+        var d = o; d["ts"] = (now() * 1000).rounded() / 1000; d["tracker_pid"] = Int(getpid())
+        appendLine(d, log)
+    }
     func setup(home: String, pid: pid_t, el: AXUIElement?) {
-        self.home = home; srcPid = pid; axEl = el
+        self.home = home; log = home + "/logs/tracker.jsonl"; srcPid = pid; axEl = el
+        if let e = el {                                          // the selection at hotkey time: anchors the sentence ranges
+            var v: CFTypeRef?
+            if AXUIElementCopyAttributeValue(e, kAXSelectedTextRangeAttribute as CFString, &v) == .success, let x = v, CFGetTypeID(x) == AXValueGetTypeID() {
+                var r = CFRange(location: 0, length: 0)
+                if AXValueGetValue(x as! AXValue, .cfRange, &r), r.length > 0 { selBase = r.location }
+            }
+            var t: CFTypeRef?
+            if AXUIElementCopyAttributeValue(e, kAXSelectedTextAttribute as CFString, &t) == .success, let s = t as? String { selText = s }
+        }
+        rec(["event": "ax-selection", "has_element": el != nil, "has_range": selBase != nil, "sel_chars": selText.count])
         let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false; p.ignoresMouseEvents = true
         p.level = .statusBar; p.hidesOnDeactivate = false; p.isReleasedWhenClosed = false
@@ -159,10 +185,11 @@ final class Live: NSObject {
         v.layer!.addSublayer(shape)
         p.contentView = v
         panel = p
-        // instant hide / show on app switches
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             guard let s = self, let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
-            s.front = app.processIdentifier == s.srcPid; s.apply(event: nil)
+            let f = app.processIdentifier == s.srcPid
+            if !f && s.front { s.hideTrigger = ("app-switch", now()) }
+            s.front = f; s.apply()
         }
         startTap()
         startAXObserver()
@@ -180,23 +207,30 @@ final class Live: NSObject {
         CATransaction.commit()
         isEllipse = ellipse
     }
-    // ---- drawing ----
     func frameFor(_ r: CGRect) -> NSRect {
         let H = NSScreen.screens.first?.frame.height ?? 0
         let (dx, dy): (CGFloat, CGFloat) = isEllipse ? (r.width * 0.12 + 6, r.height * 0.12 + 6) : (4, 2)
         let g = r.insetBy(dx: -dx, dy: -dy)
         return NSRect(x: g.minX, y: H - g.maxY, width: g.width, height: g.height)
     }
-    func apply(event ts: UInt64?) {
-        if let t = ts { pendingEv.append(t) }
+    func apply(scrollTs: UInt64? = nil) {
+        if let t = scrollTs { pendingScroll.append(t) }
         dirty = true
-        if link == nil { flush() }               // no display link (older macOS): apply now
+        if link == nil { flush() }
     }
     @objc func tickLink(_ l: AnyObject) { if dirty { flush() } }
+    func hideReason() -> String {
+        if let t = hideTrigger { return t.0 }
+        if rect == nil { return "speech-finished" }
+        if !front { return "app-switch" }
+        if !winFront { return "not-frontmost" }
+        if hiddenByKey { return "tab-switch" }
+        return "scrolled-off"
+    }
     func flush() {
         dirty = false
         guard let p = panel else { return }
-        let show = rect != nil && front && !hiddenByKey && scanVisible
+        let show = rect != nil && front && winFront && !hiddenByKey && scanVisible
         if show, let r = rect {
             let f = frameFor(r)
             CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -206,81 +240,101 @@ final class Live: NSObject {
             shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: 6, cornerHeight: 6, transform: nil)
             CATransaction.commit()
             if !p.isVisible { p.orderFrontRegardless() }
-            if !shownLogged || abs(f.minY - lastLogged.minY) > 2 || abs(f.minX - lastLogged.minX) > 2 || abs(f.width - lastLogged.width) > 2 {
-                if panelLogN < 3000 {
-                    panelLogN += 1
-                    appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "panel", "shown": true, "via": via, "visible_on_screen": p.isVisible,
-                                "rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
-                }
-                shownLogged = true; lastLogged = f
+            if !shown || abs(f.minY - lastDrawn.minY) > 2 || abs(f.minX - lastDrawn.minX) > 2 || abs(f.width - lastDrawn.width) > 2 || abs(f.height - lastDrawn.height) > 2 {
+                draws += 1
+                let H = NSScreen.screens.first?.frame.height ?? 0
+                rec(["event": "draw", "seq": seq, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
+                     "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
+                     "on_screen": p.isVisible])
+                shown = true; lastDrawn = f
             }
-        } else if p.isVisible || shownLogged {
-            p.orderOut(nil)
-            if shownLogged {
-                shownLogged = false
-                appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "panel", "shown": false,
-                            "why": rect == nil ? "no-rect" : (!front ? "not-front" : (hiddenByKey ? "tab-key" : "not-visible")), "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
+            hideTrigger = nil
+        } else {
+            if p.isVisible { p.orderOut(nil) }
+            if shown {
+                shown = false; hides += 1
+                let trig = hideReason()
+                var ms: Double? = nil
+                if let t = hideTrigger { ms = (now() - t.1) * 1000; hideN += 1; hideSum += ms!; hideMax = max(hideMax, ms!) }
+                rec(["event": "hide", "seq": seq, "trigger": trig, "hide_ms": ms.map { ($0 * 10).rounded() / 10 } ?? NSNull()])
             }
+            hideTrigger = nil
         }
         let n = uptimeNs()
-        for t in pendingEv where t > 0 && n > t {
+        for t in pendingScroll where t > 0 && n > t {
             let ms = Double(n - t) / 1e6
-            if ms < 5000 { lagN += 1; lagSum += ms; lagMax = max(lagMax, ms); lagLast = ms }
+            if ms < 5000 {
+                lagN += 1; lagSum += ms; lagMax = max(lagMax, ms)
+                rec(["event": "scroll", "scroll_lag_ms": (ms * 10).rounded() / 10, "src": src])
+            }
         }
-        if !pendingEv.isEmpty && lagLogN < 3000 && lagLast > 0 {
-            lagLogN += 1
-            appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "lag", "ms": (lagLast * 10).rounded() / 10, "n": pendingEv.count,
-                        "via": axGood ? "ax" : "delta", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
-        }
-        pendingEv.removeAll()
+        pendingScroll.removeAll()
     }
     // ---- scans from the tracker loop ----
-    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, win: CGRect?) {
-        if let w = win { winFrame = w }
+    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?) {
         if capTs > 0 && capTs < lastMove { return }               // screenshot taken before the last scroll: stale
         if visible, let r = r {
-            if let old = rect, abs(pred) >= 20, method != "ax" {    // calibrate the scroll scale from where the text really went
+            if let old = rect, abs(pred) >= 20, method != "ax" {
                 let actual = pred + (r.minY - old.minY)
                 let k = (predCont ? kCont : kLine) * actual / pred
                 if k > 0.2 && k < 5 { if predCont { kCont = 0.5 * kCont + 0.5 * k } else { kLine = 0.5 * kLine + 0.5 * k } }
             }
-            pred = 0; rect = r; scanVisible = true; hiddenByKey = false; via = method
-        } else { scanVisible = false }
-        apply(event: nil)
+            if method == "ocr" || method == "doc" { ocrHits += 1 } else if method == "ax" { axHits += 1 }
+            pred = 0; rect = r; scanVisible = true; hiddenByKey = false; src = method
+        } else {
+            if scanVisible { hideTrigger = (reason ?? "scrolled-off", now()) }
+            scanVisible = false
+        }
+        apply()
     }
-    func event(rect r: CGRect?, range rg: [Int]?, color: String?, opacity: Double, ellipse: Bool) {
+    func event(seq s: Int, rect r: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool) {
+        seq = s
         style(color: color, opacity: opacity, ellipse: ellipse)
-        range = rg; axGood = false
-        if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; via = "event" }
-        _ = requeryAX()
-        apply(event: nil)
+        range = rg
+        if range == nil, let base = selBase, let first = srcLines.first, !first.isEmpty {
+            // place the sentence's source lines inside the selected text -> an absolute AX range
+            let all = srcLines.joined(separator: "\n")
+            if let lo = selText.range(of: first) {
+                let start = selText.distance(from: selText.startIndex, to: lo.lowerBound)
+                let lastLine = srcLines.last ?? first
+                var len = first.count
+                if let hi = selText.range(of: lastLine, range: lo.lowerBound..<selText.endIndex) {
+                    len = selText.distance(from: lo.lowerBound, to: hi.upperBound)
+                }
+                range = [base + start, max(1, min(len, all.count + 40))]
+            }
+        }
+        axGood = false
+        if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" }
+        if requeryAX() { axHits += 1 }
+        apply()
     }
+    @discardableResult
     func requeryAX() -> Bool {
         guard let el = axEl, let rg = range, rg.count == 2, let r = axBounds(el, rg[0], rg[1]) else { axGood = false; return false }
         if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axGood = false; return false }
-        if let w = winFrame, !w.intersects(r) { scanVisible = false; axGood = true; return true }
-        rect = r; axGood = true; scanVisible = true; via = "ax"; return true
+        if let w = winFrame, !w.intersects(r) { if scanVisible { hideTrigger = ("scrolled-off", now()) }; scanVisible = false; axGood = true; return true }
+        rect = r; axGood = true; scanVisible = true; src = "ax"; return true
     }
     // ---- events ----
     func startTap() {
         let mask = (1 << CGEventType.scrollWheel.rawValue) | (1 << CGEventType.keyDown.rawValue)
         let cb: CGEventTapCallBack = { _, type, ev, _ in
-            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {     // macOS turns slow taps off: turn it back on
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
                 if let t = Live.shared.tap { CGEvent.tapEnable(tap: t, enable: true) }
                 return Unmanaged.passUnretained(ev)
             }
             Live.shared.handle(type, ev)
             return Unmanaged.passUnretained(ev)
         }
-        guard let tap = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
-                                          eventsOfInterest: CGEventMask(mask), callback: cb, userInfo: nil) else {
-            appendLine(["ts": now(), "event": "tap-failed"], home + "/logs/tracker.jsonl"); return
+        guard let t = CGEvent.tapCreate(tap: .cgSessionEventTap, place: .tailAppendEventTap, options: .listenOnly,
+                                        eventsOfInterest: CGEventMask(mask), callback: cb, userInfo: nil) else {
+            rec(["event": "tap", "ok": false]); return
         }
-        self.tap = tap
-        let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
-        CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
-        CGEvent.tapEnable(tap: tap, enable: true)
-        appendLine(["ts": now(), "event": "tap-ok", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
+        tap = t
+        CFRunLoopAddSource(CFRunLoopGetMain(), CFMachPortCreateRunLoopSource(nil, t, 0), .commonModes)
+        CGEvent.tapEnable(tap: t, enable: true)
+        rec(["event": "tap", "ok": true])
     }
     func handle(_ type: CGEventType, _ ev: CGEvent) {
         guard front, rect != nil else { return }
@@ -290,48 +344,52 @@ final class Live: NSObject {
             let cmd = f.contains(.maskCommand), ctrl = f.contains(.maskControl), sh = f.contains(.maskShift), alt = f.contains(.maskAlternate)
             let tabSwitch = (cmd && !alt && digit.contains(kc)) || (ctrl && kc == 48) || (cmd && sh && (kc == 33 || kc == 30))
                 || (cmd && alt && (kc == 123 || kc == 124)) || (cmd && (kc == 17 || kc == 13)) || [116, 121, 115, 119].contains(kc)
-            if tabSwitch { hiddenByKey = true; lastMove = now(); apply(event: ev.timestamp) }
+            if tabSwitch { hiddenByKey = true; lastMove = now(); hideTrigger = ("tab-switch", now()); apply() }
             return
         }
-        // scroll: only when the pointer is over the source window
-        guard let w = winFrame else { return }
-        let m = ev.location
-        guard w.contains(m) else { return }
+        guard let w = winFrame, w.contains(ev.location) else { return }
         let dy = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
         let dx = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
         if dx == 0 && dy == 0 { return }
+        scrollEvents += 1
         lastMove = now()
-        if range != nil && axGood && requeryAX() { apply(event: ev.timestamp); return }   // exact: the app moved the text, ask where
         let cont = ev.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
         let k = cont ? kCont : kLine
-        if let r = rect { rect = r.offsetBy(dx: dx * k, dy: dy * k); via = "delta" }
-        scrollSeen += 1
-        if scrollSeen == 1 { appendLine(["ts": now(), "event": "scroll-seen", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl") }
         off.x += dx * k; off.y += dy * k
+        if range != nil && axGood && requeryAX() { axHits += 1; apply(scrollTs: ev.timestamp); return }   // exact: ask the app
+        if let r = rect { rect = r.offsetBy(dx: dx * k, dy: dy * k); src = "scroll-delta"; deltaHits += 1 }
         pred += dy * k; predCont = cont
-        apply(event: ev.timestamp)
+        apply(scrollTs: ev.timestamp)
     }
     func startAXObserver() {
-        guard srcPid > 0, AXIsProcessTrusted() else { return }
+        guard srcPid > 0, AXIsProcessTrusted() else { rec(["event": "ax-observer", "ok": false, "why": "not trusted"]); return }
         var obs: AXObserver?
-        let cb: AXObserverCallback = { _, _, _, _ in
+        let cb: AXObserverCallback = { _, _, note, _ in
             let s = Live.shared
-            if s.range != nil && s.requeryAX() { s.apply(event: uptimeNs()) }
+            s.axEvents += 1
+            let t0 = now()
+            let ok = s.range != nil && s.requeryAX()
+            if ok { s.axHits += 1; s.apply() }
+            s.rec(["event": "ax", "notif": note as String, "ax_ms": ((now() - t0) * 10000).rounded() / 10, "hit": ok])
         }
-        guard AXObserverCreate(srcPid, cb, &obs) == .success, let o = obs else {
-            appendLine(["ts": now(), "event": "ax-observer-failed", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl"); return }
+        guard AXObserverCreate(srcPid, cb, &obs) == .success, let o = obs else { rec(["event": "ax-observer", "ok": false, "why": "create failed"]); return }
         let app = AXUIElementCreateApplication(srcPid)
+        var added = 0
         for n in [kAXValueChangedNotification, kAXSelectedTextChangedNotification, kAXWindowMovedNotification, kAXWindowResizedNotification,
                   kAXFocusedUIElementChangedNotification, kAXLayoutChangedNotification] {
-            AXObserverAddNotification(o, app, n as CFString, nil)
-            if let el = axEl { AXObserverAddNotification(o, el, n as CFString, nil) }
+            if AXObserverAddNotification(o, app, n as CFString, nil) == .success { added += 1 }
+            if let el = axEl, AXObserverAddNotification(o, el, n as CFString, nil) == .success { added += 1 }
         }
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(o), .commonModes)
         observer = o
+        rec(["event": "ax-observer", "ok": true, "notifications": added])
     }
-    func lagStats() -> [String: Any] {
-        ["scroll_events": lagN, "lag_ms_avg": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(),
-         "lag_ms_max": (lagMax * 10).rounded() / 10, "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
+    func stats() -> [String: Any] {
+        ["draws": draws, "hides": hides, "scroll_events": scrollEvents, "ax_events": axEvents, "ax_hits": axHits, "ocr_hits": ocrHits,
+         "scroll_delta_hits": deltaHits,
+         "scroll_lag_avg_ms": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(), "scroll_lag_max_ms": (lagMax * 10).rounded() / 10,
+         "hide_ms_avg": hideN > 0 ? (hideSum / Double(hideN) * 10).rounded() / 10 : NSNull(), "hide_ms_max": (hideMax * 10).rounded() / 10,
+         "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
     }
 }
 
@@ -525,7 +583,8 @@ struct Tracker {
         let axAllowed = AXIsProcessTrusted()
         appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "start", "window_id": Int(a["window-id"] ?? "") ?? NSNull(),
                     "pid": Int(a["pid"] ?? "") ?? NSNull(), "fps": a["fps"] ?? "3", "screen_recording": srAllowed, "accessibility": axAllowed,
-                    "tracker_pid": Int(getpid())], h0 + "/logs/tracker.jsonl")
+                    "tracker_pid": Int(getpid()), "run_id": a["run-id"] ?? NSNull(), "build": BUILD,
+                    "overlay": (a["overlay"] ?? "native") == "native" ? "swift-panel" : "hammerspoon"], h0 + "/logs/tracker.jsonl")
         // Never prompt: without Screen Recording permission, log and exit before any ScreenCaptureKit/CGWindowList call.
         if !srAllowed {
             appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0], h0 + "/logs/tracker.jsonl")
@@ -608,10 +667,11 @@ struct Tracker {
                     let rr = (ev["rect"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
                     let rg = ev["range"] as? [Int], col = ev["color"] as? String, op = ev["opacity"] as? Double ?? 0.22
                     let ell = (ev["shape"] as? String) == "ellipse"
-                    await MainActor.run { Live.shared.event(rect: rr, range: rg, color: col, opacity: op, ellipse: ell) }
+                    let sl = ev["src"] as? [String] ?? [], sq = seq
+                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell) }
                 }
             }
-            if native && !showing && lastSeq >= 0 { await MainActor.run { Live.shared.rect = nil; Live.shared.apply(event: nil) } }
+            if native && !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
             var scanned = false
             var winFrame: CGRect? = nil
@@ -621,9 +681,13 @@ struct Tracker {
                 var liveAx = false
                 if native, let w = ws {
                     let fr = w.front && w.onScreen
+                    let appFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
                     liveAx = await MainActor.run { () -> Bool in
                         let L = Live.shared; L.winFrame = w.frame
-                        if L.front != fr { L.front = fr; L.apply(event: nil) }
+                        if L.winFront != fr {
+                            if !fr && L.shown { L.hideTrigger = (appFront ? (w.onScreen ? "window-switch" : "not-frontmost") : "app-switch", now()) }
+                            L.winFront = fr; L.apply()
+                        }
                         return L.axGood }
                 }
                 let seqChanged = (lastOut["seq"] as? Int) != seq
@@ -690,7 +754,9 @@ struct Tracker {
                     if native {
                         let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method, wf = frame
                         let hide = fnd == nil && (out["reason"] as? String) == "content-changed" || (fnd == nil && missRun >= 1 && out["reason"] != nil)
-                        if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, win: wf) } }
+                        let rsn = out["reason"] as? String
+                        _ = wf
+                        if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn) } }
                     }
                     if let r = found {
                         missRun = 0; lastBox = r
@@ -735,13 +801,14 @@ struct Tracker {
             let wait = max(0.01, tickS - dt)
             try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
         }
-        if native { await MainActor.run { Live.shared.rect = nil; Live.shared.flush() } }
-        let lagSt: [String: Any] = native ? await MainActor.run { Live.shared.lagStats() } : [:]
+        if native { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.flush() } }
+        let lagSt: [String: Any] = native ? await MainActor.run { Live.shared.stats() } : [:]
         writeJSONAtomic(["visible": false, "reason": "tracker-exit", "seq": lastSeq, "focus_pid": lastPid, "ts": now()], trackPath)
         let wall = max(0.001, now() - t0), active = frames
         let hits = axHits + ocrHits + docHits
         var st: [String: Any] = ["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": exitReason, "focus_pid": lastPid, "window_id": Int(wid), "wall_s": (wall * 10).rounded() / 10,
                                  "frames": active, "fps": (Double(active) / max(0.001, activeS) * 100).rounded() / 100, "active_s": (activeS * 10).rounded() / 10,
+                                 "run_id": a["run-id"] ?? NSNull(), "build": BUILD, "tracker_pid": Int(getpid()),
                                  "ax_hits": axHits, "ocr_hits": ocrHits, "doc_hits": docHits, "misses": misses, "hidden_frames": hidden,
                                  "refind_hit_rate": hits + misses > 0 ? (Double(hits) / Double(hits + misses) * 100).rounded() / 100 : NSNull(),
                                  "ocr_ms_avg": ocrN > 0 ? (ocrMs / Double(ocrN)).rounded() : NSNull(),
@@ -750,7 +817,7 @@ struct Tracker {
                                  "rss_mb_peak": maxRss.rounded(), "ocr_level": accurate ? "accurate" : "fast"]
         if let e = errNote { st["error"] = e }
         for (k, v) in lagSt { st[k] = v }
-        st["overlay"] = native ? "native" : "hammerspoon"
+        st["overlay"] = native ? "swift-panel" : "hammerspoon"
         appendLine(st, home + "/logs/tracker.jsonl")
     }
 }

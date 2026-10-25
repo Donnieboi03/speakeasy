@@ -369,12 +369,18 @@ def public_host(url):
         if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified: return False
     return bool(addrs)
 
+def clean_tmp(tmpdir, max_age=86400):
+    """Delete our own old downloads (speakeasy_doc_*, > 1 day). Only files this tool created."""
+    for f in os.listdir(tmpdir):
+        if f.startswith("speakeasy_doc_"):
+            q = os.path.join(tmpdir, f)
+            try:
+                if time.time() - os.path.getmtime(q) > max_age: os.remove(q)
+            except OSError: pass
+
 def fetch_pdf(url, tmpdir, max_mb=40, timeout=8):
     """Public PDFs only: no cookies, no auth, refuse redirects to other hosts or non-PDF answers."""
-    for f in os.listdir(tmpdir):                     # clean our own old downloads (>1 day)
-        if f.startswith("speakeasy_doc_") and time.time() - os.path.getmtime(os.path.join(tmpdir, f)) > 86400:
-            try: os.remove(os.path.join(tmpdir, f))
-            except OSError: pass
+    clean_tmp(tmpdir)
     if not public_host(url): raise ValueError("not a public host")
     dst = os.path.join(tmpdir, "speakeasy_doc_" + hashlib.sha256(url.encode()).hexdigest()[:16] + ".pdf")
     if os.path.exists(dst): return dst

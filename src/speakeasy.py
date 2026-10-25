@@ -127,9 +127,35 @@ def load_config():
 def pidfile():
     return os.path.join(home(), "speak.pid")
 
+RUN_META = {}
+
+def _ram_total_mb():
+    """Resident memory of the whole stack right now: this process, Ollama (model runners) and the Kokoro server."""
+    try:
+        out = subprocess.run(["ps", "-axo", "rss=,pid=,command="], capture_output=True, text=True, timeout=3).stdout
+        tot = 0
+        for l in out.splitlines():
+            parts = l.strip().split(None, 2)
+            if len(parts) < 3: continue
+            rss, pid, cmd = parts
+            if int(pid) == os.getpid() or "ollama" in cmd or "kokoro" in cmd.lower() or "speakeasy-track" in cmd or "/tts-venv/" in cmd:
+                tot += int(rss)
+        return round(tot / 1024)
+    except Exception:
+        return None
+
+def _home_rel(p):
+    if not p: return p
+    h = os.path.expanduser("~")
+    return "~" + p[len(h):] if p.startswith(h + os.sep) else p
+
 def log_run(rec, inp, out):
     try:
         d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
+        for k, v in RUN_META.items(): rec.setdefault(k, v)
+        rec.setdefault("doc_source", None)
+        if rec.get("capture_path"): rec["capture_path"] = _home_rel(rec["capture_path"])      # never an absolute /Users path
+        if rec.get("command") in ("speak", "selection"): rec["ram_total_mb"] = _ram_total_mb()
         if os.environ.get("SPEAKEASY_LOG_TEXT") == "1":
             rec["input"] = inp; rec["output"] = out
         with open(os.path.join(d, "runs.jsonl"), "a", encoding="utf-8") as f:
@@ -940,9 +966,15 @@ class Focus:
         if not d: return r, method
         f, panel = docmap.find_ref(sentence, d.get("figures") or [], getattr(self, "last_fig", None))
         if d["kind"] == "md":
-            if not f:                                                   # the selection is (next to) a figure caption: box it
-                rel = DOC.relevant()
-                if rel and rel[0].get("caption"): f = rel[0]
+            sel = self.text_all.strip()
+            # table rows ("| Figure skaters | 24 |") and code / heading lines ("# Figure 9 ...") are text, not figures
+            if re.match(r"^\s*(\||#|```|~~~|    \S)", sel) or (f and not any(x.get("label") == f.get("label") for x in d.get("figures") or [])):
+                return r, method
+            if not f:                                                   # only when the selection IS a figure's caption
+                st = set(docmap._toks(sel))
+                for x in d.get("figures") or []:
+                    cap = set(docmap._toks(x.get("caption") or ""))
+                    if cap and st and len(st & cap) >= 0.6 * len(cap) and len(st & cap) >= 0.5 * len(st): f = x; break
             if f:
                 self.last_fig = f
                 cap = f.get("caption") or ""
@@ -2894,6 +2926,8 @@ def main(argv=None):
         sp.add_argument("--capture-method", choices=["bounds", "highlight", "select", "mouse", "no-selection-window", "no-selection-screen", "none"], help="how the image was captured (set by the hotkey script)")
         sp.add_argument("--capture-rect", help="x,y,w,h of the captured region in screen points")
         sp.add_argument("--capture-ms", type=int, help="time the hotkey script spent capturing")
+        sp.add_argument("--run-id", help="id shared with the tracker's log records")
+        sp.add_argument("--app", choices=["menubar", "cli"], default=None, help="what launched this run")
         sp.add_argument("--line-bounds", help="JSON file: per-line [x,y,w,h] screen rects of the selected text (from the hotkey)")
         sp.add_argument("--doc-hint", help="JSON file: {app, bundle, title, ax_document, url} of the source window (from the hotkey)")
         if name != "rewrite":
@@ -2905,6 +2939,16 @@ def main(argv=None):
     sp = sub.add_parser("last"); sp.add_argument("--json", action="store_true")
     sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50)
     a = p.parse_args(argv)
+    import uuid
+    ov = os.environ.get("SPEAKEASY_OVERLAY", "native").lower()
+    track = os.environ.get("SPEAKEASY_TRACK", "on").lower() not in ("off", "0", "false", "no")
+    RUN_META.update(run_id=getattr(a, "run_id", None) or uuid.uuid4().hex[:12],
+                    app=getattr(a, "app", None) or os.environ.get("SPEAKEASY_APP", "cli"),
+                    overlay=("swift-panel" if track and ov != "hammerspoon" else "hammerspoon")
+                            if os.environ.get("SPEAKEASY_FOCUS", "on").lower() not in ("off", "0", "false", "no") else "off")
+    if docmap is not None:
+        try: docmap.clean_tmp(tempfile.gettempdir())          # our own old downloads, every run (not only download runs)
+        except Exception: pass
     load_config()
     for legacy in ("/tmp/speakeasy_sel.png", "/tmp/speakeasy_win.png"):   # pre-prefix capture files
         if a.cmd in ("selection", "speak", "rewrite") and os.path.isfile(legacy) and not (a.cmd != "selection" and getattr(a, "image", None) and os.path.realpath(a.image) == os.path.realpath(legacy)):

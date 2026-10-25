@@ -8,6 +8,7 @@ final class Reader {
     let home = NSHomeDirectory() + "/.speakeasy"
     var backend: Process?
     var tracker: Process?
+    var runId = ""
 
     var backendPath: String {
         let cli = NSHomeDirectory() + "/.local/bin/speakeasy"
@@ -28,6 +29,7 @@ final class Reader {
 
     func start() {
         let t0 = Date()
+        runId = String(format: "%llx%04x", UInt64(t0.timeIntervalSince1970 * 1000), UInt32.random(in: 0...0xffff))
         guard AXIsProcessTrusted() else { (NSApp.delegate as? AppDelegate)?.showOnboarding(); return }
         guard let front = NSWorkspace.shared.frontmostApplication else { return }
         let pid = front.processIdentifier
@@ -74,7 +76,7 @@ final class Reader {
                 args += ["--image", shot, "--capture-method", "bounds", "--capture-rect", "\(Int(p.minX)),\(Int(p.minY)),\(Int(p.width)),\(Int(p.height))"]
             }
         }
-        args += ["--capture-ms", String(Int(Date().timeIntervalSince(t0) * 1000))]
+        args += ["--capture-ms", String(Int(Date().timeIntervalSince(t0) * 1000)), "--run-id", runId, "--app", "menubar"]
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && args.firstIndex(of: "--image") == nil { NSSound.beep(); return }
         backend = run(backendPath, args, stdin: text)
         startTracker(pid: pid)
@@ -85,7 +87,7 @@ final class Reader {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
               let w = list.first(where: { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }),
               let wid = w[kCGWindowNumber as String] as? Int else { return }
-        tracker = run(trackerPath, ["--window-id", String(wid), "--pid", String(pid), "--home", home, "--fps", "5", "--overlay", "native"], stdin: nil)
+        tracker = run(trackerPath, ["--window-id", String(wid), "--pid", String(pid), "--home", home, "--fps", "5", "--overlay", "native", "--run-id", runId], stdin: nil)
     }
 
     @discardableResult

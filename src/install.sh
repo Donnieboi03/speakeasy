@@ -10,9 +10,15 @@ cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$S
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then
-    if swiftc -O -parse-as-library -swift-version 5 "$SRC/tracker.swift" -o "$HOME_DIR/bin/speakeasy-track.new" 2>"$HOME_DIR/logs/tracker_build.log"; then
-      mv "$HOME_DIR/bin/speakeasy-track.new" "$HOME_DIR/bin/speakeasy-track"; echo "Built live focus tracker: $HOME_DIR/bin/speakeasy-track"
+    # stamp the build: git sha of the source repo when known, else a hash of tracker.swift
+    BUILD_ID="$(git -C "${SPEAKEASY_REPO:-$HOME/speakeasy-repo}" rev-parse --short HEAD 2>/dev/null || true)"
+    BUILD_ID="${BUILD_ID:-src}-$(shasum -a 256 "$SRC/tracker.swift" | cut -c1-8)"
+    TSRC="$(mktemp -t speakeasy_track_src).swift"
+    sed "s/^let BUILD = \"dev\"/let BUILD = \"$BUILD_ID\"/" "$SRC/tracker.swift" > "$TSRC"
+    if swiftc -O -parse-as-library -swift-version 5 "$TSRC" -o "$HOME_DIR/bin/speakeasy-track.new" 2>"$HOME_DIR/logs/tracker_build.log"; then
+      mv "$HOME_DIR/bin/speakeasy-track.new" "$HOME_DIR/bin/speakeasy-track"; echo "Built live focus tracker: $HOME_DIR/bin/speakeasy-track (build $BUILD_ID)"
     else echo "WARNING: tracker build failed (see $HOME_DIR/logs/tracker_build.log); focus box will not follow scrolling."; fi
+    rm -f "$TSRC" "${TSRC%.swift}"
   else echo "NOTE: swiftc not found (xcode-select --install) - focus box will not follow scrolling."; fi
 fi
 chmod +x "$HOME_DIR/bin/speakeasy" "$HOME_DIR/bin/speakeasy.py"
@@ -363,14 +369,13 @@ local function startTracker(win)
   local app = win:application()
   local args = { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
     "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5"),
-    "--overlay", NATIVE_OVERLAY and "native" or "hammerspoon" }
+    "--overlay", NATIVE_OVERLAY and "native" or "hammerspoon", "--run-id", tostring(speakeasyRunId) }
   speakeasyTracker = hs.task.new(TRACKER, function(code, out, err)
     hslog("tracker exited code=%s %s", tostring(code), ((err or "") .. (out or "")):gsub("%s+$", ""):sub(1, 300))
   end, args)
   if not speakeasyTracker then hslog("tracker not started: hs.task.new failed for %s", TRACKER); return end
   local ok = speakeasyTracker:start()
-  hslog("tracker start %s: window %s (%s) pid %s", ok and "ok" or "FAILED", tostring(win:id()),
-        tostring(app and app:name()), tostring(app and app:pid()))
+  hslog("tracker start %s: window %s pid %s run %s", ok and "ok" or "FAILED", tostring(win:id()), tostring(app and app:pid()), tostring(speakeasyRunId))
 end
 if speakeasyFocusWatcher then speakeasyFocusWatcher:stop() end
 speakeasyFocusWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.speakeasy/", function(paths)
@@ -504,6 +509,7 @@ local function run(args, method, rect, t0)
   if rect then table.insert(args, "--capture-rect"); table.insert(args, string.format("%d,%d,%d,%d", rect.x, rect.y, rect.w, rect.h)) end
   if method == "bounds" and hs.fs.attributes(LINES) then table.insert(args, "--line-bounds"); table.insert(args, LINES) end
   table.insert(args, "--capture-ms"); table.insert(args, tostring(math.floor((hs.timer.secondsSinceEpoch() - t0) * 1000)))
+  table.insert(args, "--run-id"); table.insert(args, tostring(speakeasyRunId)); table.insert(args, "--app"); table.insert(args, "cli")
   hs.task.new(SPEAKEASY, nil, args):start()
 end
 
@@ -533,6 +539,7 @@ end
 
 if speakeasyHotkey then speakeasyHotkey:delete() end
 speakeasyHotkey = hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
+  speakeasyRunId = string.format("%x%04x", math.floor(hs.timer.secondsSinceEpoch() * 1000), math.random(0, 65535))
   os.remove("/tmp/speakeasy_sel.png"); os.remove("/tmp/speakeasy_win.png")   -- legacy capture files
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
   if hs.fs.attributes(pidf) then
