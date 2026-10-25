@@ -26,9 +26,32 @@ def cache_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
+PARSE_VERSION = 3          # bump when parse_pdf output changes, so cached parses are rebuilt
+
 def _key(path):
     st = os.stat(path)
-    return hashlib.sha256(f"{os.path.realpath(path)}|{st.st_size}|{int(st.st_mtime)}".encode()).hexdigest()[:20]
+    return hashlib.sha256(f"{os.path.realpath(path)}|{st.st_size}|{int(st.st_mtime)}|v{PARSE_VERSION}".encode()).hexdigest()[:20]
+
+def _split_overlaps(figs):
+    """A table's body grows over graphics below its caption; when that swallows a figure on the same page
+    (Table 1 directly above Fig. 5), the table ends where the figure starts, and the figure keeps its own box."""
+    for t in figs:
+        if t.get("kind") != "table": continue
+        for f in figs:
+            if f.get("kind") != "figure": continue
+            a, b = t["bbox"], f["bbox"]
+            ix = max(0, min(a[2], b[2]) - max(a[0], b[0])); iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
+            fa = max(1.0, (b[2] - b[0]) * (b[3] - b[1]))
+            if ix * iy < 0.3 * fa: continue
+            cap = t["caption_bbox"]
+            if b[1] >= cap[3] - 2:                                   # figure below the table caption: cut the table there
+                a[3] = max(cap[3], b[1] - 2)
+            elif b[3] <= cap[1] + 2:                                 # figure above it: the table starts below the figure
+                a[1] = min(cap[1], b[3] + 2)
+            t["bbox"] = [round(v, 1) for v in [min(a[0], cap[0]), min(a[1], cap[1]), max(a[2], cap[2]), max(a[3], cap[3])]]
+            t["labels"] = [l for l in t.get("labels", []) if _inside(l[:4], t["bbox"])]
+            t["split_from"] = f["label"]
+    return figs
 
 def _toks(s):
     import unicodedata
@@ -192,7 +215,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
                          "page": pno + 1, "bbox": fb, "caption_bbox": cap, "caption": text[:300],
                          "panels": _panels(fb, labels) or (_guess_panels(fb, text) if body and kind == "figure" else []), "labels": tl[:200], "labels_src": src_l,
                          "objects": _objects(page, fb) if body and kind == "figure" else []})
-        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs, "figs_done": True})
+        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": _split_overlaps(figs), "figs_done": True})
     return {"kind": "pdf", "pages": pages, "n_pages": len(pages)}
 
 # ---------------- Markdown (stdlib) ----------------

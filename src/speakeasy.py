@@ -1166,6 +1166,14 @@ class Focus:
             os.replace(tmp, path)
         except OSError: pass
     def show(self, rect, text):
+        clip = getattr(self, "area_clip", None)
+        if clip and rect:                       # Read area: the user drew the region; cues never leave it (12 pt slack)
+            x0, y0 = max(rect[0], clip[0] - 12), max(rect[1], clip[1] - 12)
+            x1, y1 = min(rect[0] + rect[2], clip[0] + clip[2] + 12), min(rect[1] + rect[3], clip[1] + clip[3] + 12)
+            if x1 - x0 < 8 or y1 - y0 < 8: x0, y0, x1, y1 = clip[0], clip[1], clip[0] + clip[2], clip[1] + clip[3]
+            if [x0, y0, x1 - x0, y1 - y0] != list(rect):
+                self.rec["area_clamped"] = self.rec.get("area_clamped", 0) + 1
+                rect = [x0, y0, x1 - x0, y1 - y0]
         self.events += 1
         est = 2.0 + len(text) / 13.0                                # seconds of speech, for the overlay's watchdog
         ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect],
@@ -3031,6 +3039,7 @@ def main(argv=None):
                         if is_owned_capture(a.line_bounds): os.remove(a.line_bounds)
                     except (OSError, ValueError): lb = None
                 FOCUS = Focus(text, fr, lb, bool(img), bool(a.dry_run), rec)
+                if cm == "area": FOCUS.area_clip = fr
             except ValueError:
                 rec["focus_fallback"] = "bad-rect"
     if streaming:
