@@ -22,12 +22,16 @@ cat > "$APP/Contents/Info.plist" <<PL
 <key>CFBundleName</key><string>Speakeasy</string>
 <key>CFBundleExecutable</key><string>Speakeasy</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>${SPEAKEASY_VERSION:-0.2.0}</string>
+<key>CFBundleVersion</key><string>$(git rev-list --count HEAD 2>/dev/null || echo 1)</string>
 <key>LSMinimumSystemVersion</key><string>14.0</string>
 <key>LSUIElement</key><true/>
+<key>SUFeedURL</key><string>${SPEAKEASY_APPCAST_URL:-https://github.com/Donnieboi03/speakeasy/releases/latest/download/appcast.xml}</string>
+<key>SUPublicEDKey</key><string>${SPEAKEASY_SPARKLE_PUBLIC_KEY:-}</string>
+<key>SUEnableAutomaticChecks</key><false/>
 <key>NSAccessibilityUsageDescription</key><string>Speakeasy reads the selected text and where it is on screen.</string>
 </dict></plist>
 PL
+[ "${BUNDLE_PYTHON:-0}" = 1 ] && bash bundle_python.sh "$APP" ${BUNDLE_TTS:+--with-tts}
 codesign --force --deep -s - "$APP"
 echo "built $APP"

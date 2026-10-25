@@ -48,6 +48,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(withTitle: "Permissions…", action: #selector(showOnboarding), keyEquivalent: "").target = self
         m.addItem(withTitle: "Hotkey…", action: #selector(showSettings), keyEquivalent: "").target = self
         m.addItem(.separator())
+        m.addItem(withTitle: "Check for Updates…", action: #selector(checkUpdates), keyEquivalent: "").target = self
         m.addItem(withTitle: "Quit Speakeasy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = m
         handOverFromHammerspoon()
@@ -82,6 +83,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         DispatchQueue.global().async { let s = StatsData.load(b); DispatchQueue.main.async { self.statsLine.title = s.menuLine } }
         for it in menu.items { if let k = it.representedObject as? String { it.state = Config.on(k) ? .on : .off } }
     }
+    @objc func checkUpdates() { Updater.check() }
     @objc func read() { reader.toggle() }
     @objc func stop() { reader.stop() }
     @objc func showOnboarding() {
