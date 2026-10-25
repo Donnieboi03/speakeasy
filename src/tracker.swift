@@ -61,22 +61,34 @@ func cpu_s() -> Double {
 }
 
 // ---------------- window state ----------------
-struct WinState { var frame: CGRect; var onScreen: Bool; var front: Bool }
+struct WinState { var frame: CGRect; var onScreen: Bool; var front: Bool; var frontOwner: String = ""; var frontId: Int = 0 }
 func windowState(_ wid: CGWindowID) -> WinState? {
     guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] else { return nil }
     var frontWid: CGWindowID? = nil
     var mine: CGRect? = nil
+    var frontOwner = ""
+    let me = Int32(getpid())
+    var srcPid: Int32? = nil, srcArea = 0.0
+    for w in list where CGWindowID(w[kCGWindowNumber as String] as? Int ?? 0) == wid {
+        srcPid = w[kCGWindowOwnerPID as String] as? Int32
+        if let b = w[kCGWindowBounds as String] as? NSDictionary, let rr = CGRect(dictionaryRepresentation: b as CFDictionary) { srcArea = Double(rr.width * rr.height) }
+    }
     for w in list {
+        let owner = w[kCGWindowOwnerPID as String] as? Int32 ?? 0
+        if owner == me { continue }                                       // our own overlay panel
+        if let sp = srcPid, owner == sp, CGWindowID(w[kCGWindowNumber as String] as? Int ?? 0) != wid,
+           let b = w[kCGWindowBounds as String] as? NSDictionary, let rr = CGRect(dictionaryRepresentation: b as CFDictionary),
+           Double(rr.width * rr.height) < 0.6 * srcArea { continue }     // the app's own popups / bubbles / helper layers
         let layer = w[kCGWindowLayer as String] as? Int ?? 0
         let id = CGWindowID(w[kCGWindowNumber as String] as? Int ?? 0)
         let alpha = w[kCGWindowAlpha as String] as? Double ?? 1
         var r = CGRect.zero
         if let b = w[kCGWindowBounds as String] as? NSDictionary, let rr = CGRect(dictionaryRepresentation: b as CFDictionary) { r = rr }
         // the frontmost real window: skip invisible and tiny strips (toolbars, status items)
-        if layer == 0 && alpha > 0.01 && r.width >= 80 && r.height >= 80 && frontWid == nil { frontWid = id }
+        if layer == 0 && alpha > 0.01 && r.width >= 80 && r.height >= 80 && frontWid == nil { frontWid = id; frontOwner = w[kCGWindowOwnerName as String] as? String ?? "" }
         if id == wid { mine = r }
     }
-    if let f = mine { return WinState(frame: f, onScreen: true, front: frontWid == wid) }
+    if let f = mine { return WinState(frame: f, onScreen: true, front: frontWid == wid, frontOwner: frontOwner, frontId: Int(frontWid ?? 0)) }
     // not on screen (minimised / other Space): still report the frame if we can
     if let all = CGWindowListCopyWindowInfo([.optionIncludingWindow], wid) as? [[String: Any]], let w = all.first,
        let b = w[kCGWindowBounds as String] as? NSDictionary, let f = CGRect(dictionaryRepresentation: b as CFDictionary) {
@@ -129,6 +141,10 @@ final class Live: NSObject {
     var link: AnyObject? = nil
     var dirty = false
     var lagLogN = 0
+    var panelLogN = 0, shownLogged = false, lastLogged = NSRect.zero
+    var via = "event"                    // where the current rect came from: event / ax / ocr / doc / delta
+    var scrollSeen = 0
+    var tap: CFMachPort? = nil
     var off = CGPoint.zero               // scrolling since the hotkey: speakeasy's own boxes predate it
     var observer: AXObserver? = nil
 
@@ -190,7 +206,22 @@ final class Live: NSObject {
             shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: 6, cornerHeight: 6, transform: nil)
             CATransaction.commit()
             if !p.isVisible { p.orderFrontRegardless() }
-        } else if p.isVisible { p.orderOut(nil) }
+            if !shownLogged || abs(f.minY - lastLogged.minY) > 2 || abs(f.minX - lastLogged.minX) > 2 || abs(f.width - lastLogged.width) > 2 {
+                if panelLogN < 3000 {
+                    panelLogN += 1
+                    appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "panel", "shown": true, "via": via, "visible_on_screen": p.isVisible,
+                                "rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
+                }
+                shownLogged = true; lastLogged = f
+            }
+        } else if p.isVisible || shownLogged {
+            p.orderOut(nil)
+            if shownLogged {
+                shownLogged = false
+                appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "panel", "shown": false,
+                            "why": rect == nil ? "no-rect" : (!front ? "not-front" : (hiddenByKey ? "tab-key" : "not-visible")), "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
+            }
+        }
         let n = uptimeNs()
         for t in pendingEv where t > 0 && n > t {
             let ms = Double(n - t) / 1e6
@@ -213,14 +244,14 @@ final class Live: NSObject {
                 let k = (predCont ? kCont : kLine) * actual / pred
                 if k > 0.2 && k < 5 { if predCont { kCont = 0.5 * kCont + 0.5 * k } else { kLine = 0.5 * kLine + 0.5 * k } }
             }
-            pred = 0; rect = r; scanVisible = true; hiddenByKey = false
+            pred = 0; rect = r; scanVisible = true; hiddenByKey = false; via = method
         } else { scanVisible = false }
         apply(event: nil)
     }
     func event(rect r: CGRect?, range rg: [Int]?, color: String?, opacity: Double, ellipse: Bool) {
         style(color: color, opacity: opacity, ellipse: ellipse)
         range = rg; axGood = false
-        if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true }
+        if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; via = "event" }
         _ = requeryAX()
         apply(event: nil)
     }
@@ -228,12 +259,16 @@ final class Live: NSObject {
         guard let el = axEl, let rg = range, rg.count == 2, let r = axBounds(el, rg[0], rg[1]) else { axGood = false; return false }
         if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axGood = false; return false }
         if let w = winFrame, !w.intersects(r) { scanVisible = false; axGood = true; return true }
-        rect = r; axGood = true; scanVisible = true; return true
+        rect = r; axGood = true; scanVisible = true; via = "ax"; return true
     }
     // ---- events ----
     func startTap() {
         let mask = (1 << CGEventType.scrollWheel.rawValue) | (1 << CGEventType.keyDown.rawValue)
         let cb: CGEventTapCallBack = { _, type, ev, _ in
+            if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {     // macOS turns slow taps off: turn it back on
+                if let t = Live.shared.tap { CGEvent.tapEnable(tap: t, enable: true) }
+                return Unmanaged.passUnretained(ev)
+            }
             Live.shared.handle(type, ev)
             return Unmanaged.passUnretained(ev)
         }
@@ -241,9 +276,11 @@ final class Live: NSObject {
                                           eventsOfInterest: CGEventMask(mask), callback: cb, userInfo: nil) else {
             appendLine(["ts": now(), "event": "tap-failed"], home + "/logs/tracker.jsonl"); return
         }
+        self.tap = tap
         let src = CFMachPortCreateRunLoopSource(nil, tap, 0)
         CFRunLoopAddSource(CFRunLoopGetMain(), src, .commonModes)
         CGEvent.tapEnable(tap: tap, enable: true)
+        appendLine(["ts": now(), "event": "tap-ok", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl")
     }
     func handle(_ type: CGEventType, _ ev: CGEvent) {
         guard front, rect != nil else { return }
@@ -267,7 +304,9 @@ final class Live: NSObject {
         if range != nil && axGood && requeryAX() { apply(event: ev.timestamp); return }   // exact: the app moved the text, ask where
         let cont = ev.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
         let k = cont ? kCont : kLine
-        if let r = rect { rect = r.offsetBy(dx: dx * k, dy: dy * k) }
+        if let r = rect { rect = r.offsetBy(dx: dx * k, dy: dy * k); via = "delta" }
+        scrollSeen += 1
+        if scrollSeen == 1 { appendLine(["ts": now(), "event": "scroll-seen", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl") }
         off.x += dx * k; off.y += dy * k
         pred += dy * k; predCont = cont
         apply(event: ev.timestamp)
@@ -279,7 +318,8 @@ final class Live: NSObject {
             let s = Live.shared
             if s.range != nil && s.requeryAX() { s.apply(event: uptimeNs()) }
         }
-        guard AXObserverCreate(srcPid, cb, &obs) == .success, let o = obs else { return }
+        guard AXObserverCreate(srcPid, cb, &obs) == .success, let o = obs else {
+            appendLine(["ts": now(), "event": "ax-observer-failed", "tracker_pid": Int(getpid())], home + "/logs/tracker.jsonl"); return }
         let app = AXUIElementCreateApplication(srcPid)
         for n in [kAXValueChangedNotification, kAXSelectedTextChangedNotification, kAXWindowMovedNotification, kAXWindowResizedNotification,
                   kAXFocusedUIElementChangedNotification, kAXLayoutChangedNotification] {
@@ -526,7 +566,16 @@ struct Tracker {
         var errNote: String? = filter == nil ? "window not shareable (Screen Recording permission?)" : nil
 
         var exitReason = "max-time"
+        signal(SIGTERM, SIG_IGN); signal(SIGINT, SIG_IGN)
+        final class Flag: @unchecked Sendable { var v = false }
+        let term = Flag()
+        var sigSrcs: [DispatchSourceSignal] = []
+        for sg in [SIGTERM, SIGINT] {
+            let src = DispatchSource.makeSignalSource(signal: sg, queue: .global())
+            src.setEventHandler { term.v = true }; src.resume(); sigSrcs.append(src)
+        }
         while true {
+            if term.v { exitReason = "sigterm"; break }
             let tick = now()
             if tick - t0 > 900 { break }
             let prevTick = lastTick; lastTick = tick
@@ -582,6 +631,7 @@ struct Tracker {
                 if ws == nil || !ws!.onScreen || !ws!.front {
                     // hide at once (checked every tick, no debounce)
                     out["visible"] = false; out["reason"] = ws == nil ? "window-gone" : (ws!.onScreen ? "not-frontmost" : "not-on-screen"); hidden += 1
+                    if let w = ws, w.onScreen { out["front_owner"] = w.frontOwner; out["front_id"] = w.frontId }
                 } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= (liveAx ? 2.0 : 1.0 / fps)) {   // AX follows events; OCR is a slow drift check
                     out = lastOut                                        // between scans: keep the last answer
                 } else {
@@ -675,6 +725,7 @@ struct Tracker {
                 if let m = out["method"] { fr["method"] = m }
                 if let r = out["rect"] { fr["rect"] = r }
                 if let r = out["reason"] { fr["reason"] = r }
+                if let r = out["front_owner"] { fr["front_owner"] = r; fr["front_id"] = out["front_id"] ?? 0 }
                 if scanned, let w = winFrame { fr["win"] = [Int(w.minX), Int(w.minY), Int(w.width), Int(w.height)] }
                 appendLine(fr, home + "/logs/tracker.jsonl")
             }
