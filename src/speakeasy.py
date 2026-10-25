@@ -2,8 +2,8 @@
 """speakeasy: rewrite selected text into listenable prose and speak it with macOS `say`."""
 import argparse, base64, json, os, re, signal, subprocess, sys, tempfile, time, urllib.request, urllib.error
 
-DEFAULT_URL = "http://localhost:11434/v1"
-DEFAULT_MODEL = "qwen3-vl:4b-instruct"     # one model for text, vision and grounding
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from selog import DEFAULT_URL, DEFAULT_MODEL
 CHUNK = 6000
 
 SYSTEM_PROMPT = """You turn written text (usually AI chat output) into a short script that will be READ ALOUD by a text-to-speech voice. The listener cannot see the screen.
@@ -107,82 +107,9 @@ OUTPUT:
 Setup takes three steps. First install the dependencies with pip from the requirements file. Then put your API key in the env file. Finally run make dev.
 """
 
-# ---------------- paths / logging ----------------
-def home():
-    return os.path.expanduser(os.environ.get("SPEAKEASY_HOME") or "~/.speakeasy")
-
-def _on(key, default="on"):
-    return os.environ.get(key, default).strip().lower() not in ("off", "0", "false", "no")
-
-def load_config():
-    """Defaults from $SPEAKEASY_HOME/config (KEY=VALUE lines). Real env vars win."""
-    try:
-        for line in open(os.path.join(home(), "config"), encoding="utf-8"):
-            line = line.strip()
-            if not line or line.startswith("#") or "=" not in line: continue
-            k, v = line.split("=", 1)
-            k = k.strip(); v = v.strip().strip('"').strip("'")
-            if k.startswith("SPEAKEASY_") and k != "SPEAKEASY_HOME":
-                os.environ.setdefault(k, v)
-    except OSError:
-        pass
-
-def pidfile():
-    return os.path.join(home(), "speak.pid")
-
-RUN_META = {}
-
-def _ram_total_mb():
-    """Resident memory of the whole stack right now: this process, Ollama (model runners) and the Kokoro server."""
-    try:
-        out = subprocess.run(["ps", "-axo", "rss=,pid=,command="], capture_output=True, text=True, timeout=3).stdout
-        tot = 0
-        for l in out.splitlines():
-            parts = l.strip().split(None, 2)
-            if len(parts) < 3: continue
-            rss, pid, cmd = parts
-            if int(pid) == os.getpid() or "ollama" in cmd or "kokoro" in cmd.lower() or "speakeasy-track" in cmd or "/tts-venv/" in cmd:
-                tot += int(rss)
-        return round(tot / 1024)
-    except Exception:
-        return None
-
-def _home_rel(p):
-    if not p: return p
-    h = os.path.expanduser("~")
-    return "~" + p[len(h):] if p.startswith(h + os.sep) else p
-
-def set_state(state):
-    """~/.speakeasy/state.json: thinking | speaking | idle, for the menu-bar pill (no text)."""
-    if os.environ.get("SPEAKEASY_APP") != "menubar" and RUN_META.get("app") != "menubar": return
-    try:
-        path = os.path.join(home(), "state.json"); tmp = path + ".tmp"
-        with open(tmp, "w") as f: json.dump({"state": state, "run_id": RUN_META.get("run_id"), "t": time.time()}, f)
-        os.replace(tmp, path)
-    except OSError: pass
-
-def log_run(rec, inp, out):
-    try:
-        d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
-        for k, v in RUN_META.items(): rec.setdefault(k, v)
-        rec.setdefault("doc_source", None)
-        if rec.get("capture_path"): rec["capture_path"] = _home_rel(rec["capture_path"])      # never an absolute /Users path
-        if rec.get("command") in ("speak", "selection"): rec["ram_total_mb"] = _ram_total_mb()
-        if rec.get("command") in ("rewrite", "speak", "selection"):          # counts only, never the text
-            import stats as _st
-            rec["words_in"] = _st.words(inp)
-            spoke = rec.get("command") != "rewrite" and not rec.get("dry_run")
-            rec["words_spoken"] = _st.words(out) if spoke else 0
-            sm = (rec.get("timings") or {}).get("speak_ms")
-            rec["audio_s"] = round(sm / 1000, 1) if spoke and isinstance(sm, (int, float)) else 0
-            rec["kind"] = _st.kind_of(rec)
-        if os.environ.get("SPEAKEASY_LOG_TEXT") == "1":
-            rec["input"] = inp; rec["output"] = out
-        with open(os.path.join(d, "runs.jsonl"), "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
-    except Exception as e:
-        print(f"speakeasy: warning: could not write log: {e}", file=sys.stderr)
-
+# ---------------- paths / logging: selog.py ----------------
+sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
+from selog import rotate_logs, home, _on, load_config, pidfile, RUN_META, _ram_total_mb, _home_rel, set_state, log_run
 # ---------------- chunking ----------------
 def chunk_text(text, size=CHUNK):
     if len(text) <= size:
@@ -289,7 +216,7 @@ def prewarm(models):
                                          json.dumps({"model": m, "keep_alive": keep_alive()}).encode(),
                                          {"Content-Type": "application/json"})
             urllib.request.urlopen(req, timeout=120).read()
-        except Exception:
+        except (OSError, ValueError):
             pass
     for m in models:
         if m: threading.Thread(target=go, args=(m,), daemon=True).start()
@@ -340,7 +267,7 @@ def chat_stream(model, system, content, timeout, rec, t_req):
                 yield d
     finally:
         try: resp.close()
-        except Exception: pass
+        except OSError: pass
 
 _MN = r"(?:screen\s?shot|screen\s?capture|screen\s?grab|image|picture|photo(?:graph)?|capture|crop|snapshot|screen|visual)"
 _MV = r"(?:shows?|showing|displays?|displaying|depicts?|depicting|contains?|presents?|features?|illustrates?|includes?|captures?|has)"
@@ -1693,9 +1620,7 @@ def validate(inp, out):
     return None
 
 # ---------------- deterministic fallback ----------------
-def _cells(line):
-    return [_inline(c) for c in line.strip().strip("|").split("|")]
-
+# (_table uses the verbatim-block _cells below; an older shadowed copy was removed)
 def _is_sep(line):
     return bool(re.fullmatch(r"\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*", line)) or \
         bool(re.fullmatch(r"\s*[+\-=]{3,}[+\-=\s]*", line))
@@ -1836,30 +1761,12 @@ Rules:
 def vision_model():
     return os.environ.get("SPEAKEASY_VISION_MODEL", DEFAULT_VISION)
 
-def image_size(data):
-    """(w, h) from PNG/JPEG/GIF header bytes, stdlib only; None if unknown."""
-    import struct
-    if data[:8] == b"\x89PNG\r\n\x1a\n" and len(data) >= 24:
-        return struct.unpack(">II", data[16:24])
-    if data[:6] in (b"GIF87a", b"GIF89a"):
-        return struct.unpack("<HH", data[6:10])
-    if data[:2] == b"\xff\xd8":
-        i = 2
-        while i + 9 < len(data):
-            if data[i] != 0xFF: i += 1; continue
-            m = data[i + 1]
-            if m in (0xC0, 0xC1, 0xC2, 0xC3, 0xC5, 0xC6, 0xC7, 0xC9, 0xCA, 0xCB, 0xCD, 0xCE, 0xCF):
-                h, w = struct.unpack(">HH", data[i + 5:i + 9]); return (w, h)
-            if m in (0xD8, 0x01) or 0xD0 <= m <= 0xD7: i += 2; continue
-            i += 2 + struct.unpack(">H", data[i + 2:i + 4])[0]
-    return None
-
 def _check_decodable(data):
     """Raise ValueError if the image can't be decoded. Pillow if available, else structural checks."""
     try:
         from PIL import Image
         import io
-    except Exception:
+    except ImportError:
         Image = None
     if Image is not None:
         try:
@@ -2675,7 +2582,7 @@ def tts_server_rss_mb():
             pids = [p for p in pids if not any(p in subprocess.run([pgrep, "-P", q], capture_output=True, text=True, timeout=2).stdout.split() for q in pids if q != p)]
         kb = sum(_rss_tree_kb(p, ps, pgrep) for p in pids)
         return round(kb / 1024, 1) if kb else None
-    except Exception:
+    except (OSError, ValueError, subprocess.SubprocessError):
         return None
 
 def speak_kokoro(text, rate, timing, t_start, state):
@@ -2967,7 +2874,7 @@ def self_capture(mode, path):
             subprocess.run([sc, "-x", "-o", "-l", str(int(wid)), path], capture_output=True, timeout=10)
             if os.path.exists(path) and os.path.getsize(path) > 0:
                 return "no-selection-window", f"{int(x)},{int(y)},{int(w)},{int(h)}"
-        except Exception:
+        except (OSError, ValueError, subprocess.SubprocessError):
             pass
         try: os.remove(path)
         except OSError: pass
@@ -2991,185 +2898,8 @@ def get_selection():
     subprocess.run(["pbcopy"], input=old, text=True)
     return sel
 
-# ---------------- observability helpers ----------------
-def peak_rss_mb():
-    import resource
-    r = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-    return round(r / (1024 * 1024 if sys.platform == "darwin" else 1024), 1)
-
-def ollama_ps():
-    """Loaded Ollama models and their memory, or None if not an Ollama endpoint / unreachable."""
-    from urllib.parse import urlsplit
-    u = urlsplit(os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL))
-    try:
-        req = urllib.request.Request(f"{u.scheme}://{u.netloc}/api/ps")
-        with urllib.request.urlopen(req, timeout=1) as r:
-            data = json.loads(r.read().decode())
-        return [{"name": m.get("name"), "size_mb": round(m.get("size", 0) / 1048576),
-                 "size_vram_mb": round(m.get("size_vram", 0) / 1048576)} for m in data.get("models", [])]
-    except Exception:
-        return None
-
-def capture_keep_path():
-    return os.path.expanduser(os.environ.get("SPEAKEASY_CAPTURE_PATH") or os.path.join(home(), "last_capture.png"))
-
-def crop_to_rect(img, rect, rec, owned):
-    """Crop img to --capture-rect before it is sent or saved. rect is x,y,w,h in screen points.
-    If the image already has the rect's size (x1/x2/x3 Retina scale) it is already a crop and is left alone.
-    Otherwise rect is applied as image coordinates (times SPEAKEASY_CAPTURE_SCALE, default 1).
-    Returns the path to use; the uncropped original is deleted when we own it (selection)."""
-    import tempfile
-    try:
-        x, y, w, h = [int(round(float(v))) for v in rect.split(",")]
-        assert w > 0 and h > 0
-    except Exception:
-        raise ValueError(f"bad --capture-rect {rect!r}")
-    data = open(img, "rb").read()
-    size = image_size(data)
-    if not size:
-        return img
-    W, H = size
-    rec["capture_original_px"] = f"{W}x{H}"
-    for sc in (1, 2, 3):
-        if abs(W - w * sc) <= 2 * sc and abs(H - h * sc) <= 2 * sc:
-            rec["capture_cropped_px"] = f"{W}x{H}"; rec["capture_crop"] = "already-cropped"
-            return img
-    r1, r2 = W / w, H / h
-    if 1 <= r1 <= 3.5 and abs(r1 - r2) / r1 < 0.02:     # same aspect, uniform scale: already this rect
-        rec["capture_cropped_px"] = f"{W}x{H}"; rec["capture_crop"] = "already-cropped"
-        return img
-    sc = float(os.environ.get("SPEAKEASY_CAPTURE_SCALE", "1"))
-    x0, y0 = max(0, int(x * sc)), max(0, int(y * sc))
-    x1, y1 = min(W, int((x + w) * sc)), min(H, int((y + h) * sc))
-    if x1 <= x0 or y1 <= y0:
-        raise ValueError(f"capture rect {rect} is outside the {W}x{H} image")
-    fd, out = tempfile.mkstemp(prefix=CAP_PREFIX + "crop_", suffix=".png", dir=tempfile_dir()); os.close(fd)
-    try:
-        from PIL import Image
-        Image.open(img).crop((x0, y0, x1, y1)).save(out, "PNG")
-    except ImportError:
-        r = subprocess.run(["sips", "-c", str(y1 - y0), str(x1 - x0), "--cropOffset", str(y0), str(x0), img, "--out", out], capture_output=True)
-        if r.returncode != 0:
-            os.remove(out); raise ValueError("cannot crop (no Pillow/sips)")
-    rec["capture_cropped_px"] = f"{x1 - x0}x{y1 - y0}"; rec["capture_crop"] = "cropped"
-    if owned and is_owned_capture(img):
-        try: os.remove(img)
-        except OSError: pass
-    return out
-
-def tempfile_dir():
-    import tempfile
-    return "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()
-
-CAP_PREFIX = "speakeasy_cap_"
-
-def is_owned_capture(p):
-    """True only for files this tool or the hotkey created: <tempdir>/speakeasy_cap_*. Everything else is copied, never moved/deleted."""
-    import tempfile
-    if not p: return False
-    rp = os.path.realpath(p)
-    if not os.path.basename(rp).startswith(CAP_PREFIX): return False
-    roots = {os.path.realpath(r) for r in ("/tmp", "/private/tmp", tempfile.gettempdir())}
-    return os.path.dirname(rp) in roots
-
-def is_temp_path(p):
-    import tempfile
-    rp = os.path.realpath(p)
-    roots = {os.path.realpath(r) for r in ("/tmp", "/private/tmp", tempfile.gettempdir())}
-    return any(rp.startswith(r.rstrip("/") + "/") for r in roots)
-
-def handle_capture_file(img, owned=False):
-    """Keep a copy of the screenshot for review (default) or delete it (SPEAKEASY_KEEP_CAPTURE=0)."""
-    import shutil
-    if not img or not os.path.exists(img):
-        return None
-    if os.environ.get("SPEAKEASY_KEEP_CAPTURE", "1") == "0":
-        if owned and is_owned_capture(img):
-            try: os.remove(img)
-            except OSError: pass
-        try: os.remove(capture_keep_path())
-        except OSError: pass
-        return None
-    dst = capture_keep_path()
-    try:
-        os.makedirs(os.path.dirname(dst), exist_ok=True)
-        if os.path.abspath(img) != os.path.abspath(dst):
-            if owned and is_owned_capture(img):
-                shutil.move(img, dst)      # only the final image survives
-            else:
-                shutil.copyfile(img, dst)
-        return dst
-    except OSError:
-        return None
-
-def read_runs():
-    path = os.path.join(home(), "logs", "runs.jsonl")
-    runs = []
-    try:
-        for line in open(path, encoding="utf-8"):
-            try: runs.append(json.loads(line))
-            except ValueError: pass
-    except OSError:
-        pass
-    return runs
-
-def cmd_last(as_json=False):
-    runs = [r for r in read_runs() if r.get("command") not in ("last", "stats", "stop")]
-    if not runs:
-        print("No runs logged yet (" + os.path.join(home(), "logs", "runs.jsonl") + ")"); return 0
-    r = runs[-1]
-    if as_json:
-        print(json.dumps(r, indent=2, ensure_ascii=False)); return 0
-    t = r.get("timings") or {}
-    rows = [("time", r.get("ts")), ("command", r.get("command")), ("backend", r.get("backend")),
-            ("text model", r.get("model")), ("vision model", r.get("vision_model") if r.get("image") else None),
-            ("input/output chars", f"{r.get('input_chars')} -> {r.get('output_chars')}"),
-            ("capture", f"{r.get('capture_method')} rect={r.get('capture_rect')}"),
-            ("image", f"{r.get('image_px')} (sent {r.get('image_sent_px')})" if r.get("image") else "none"),
-            ("capture file", r.get("capture_path") or "(not kept)"),
-            ("total ms", r.get("total_ms"))]
-    rows += [(k, v) for k, v in t.items()]
-    rows += [("dry run", r.get("dry_run")), ("tts", r.get("tts")), ("tts voice", r.get("tts_voice")),
-             ("tts synth ms", r.get("tts_synth_ms")), ("tts server RSS MB", r.get("tts_server_rss_mb"))]
-    rows += [("peak RSS MB", r.get("peak_rss_mb"))]
-    for m in r.get("ollama_models") or []:
-        rows.append(("ollama " + str(m.get("name")), f"{m.get('size_mb')} MB ({m.get('size_vram_mb')} MB GPU)"))
-    rows.append(("error", r.get("error")))
-    w = max(len(k) for k, _ in rows)
-    for k, v in rows:
-        if v is not None and v != "None rect=None":
-            print(f"{k.ljust(w)}  {v}")
-    return 0
-
-def cmd_stats(n=50, as_json=False):
-    import statistics
-    if as_json:
-        import stats as _st
-        print(json.dumps(_st.compute(read_runs()))); return 0
-    runs = [r for r in read_runs() if r.get("command") in ("rewrite", "speak", "selection")][-n:]
-    if not runs:
-        print("No runs logged yet."); return 0
-    print(f"Last {len(runs)} runs")
-    def med(vals):
-        vals = [v for v in vals if isinstance(v, (int, float))]
-        return f"{statistics.median(vals):.0f} ms (n={len(vals)})" if vals else "-"
-    keys = ["total_ms", "copy_ms", "capture_ms", "vision_ms", "llm_ms", "tts_first_audio_ms", "speak_ms"]
-    for k in keys:
-        vals = [(r.get("timings") or {}).get(k, r.get(k)) for r in runs]
-        if k in ("vision_ms", "llm_ms"): vals = [v for v in vals if v]
-        print(f"  median {k:<20} {med(vals)}")
-    from collections import Counter
-    print("  backend mix: " + ", ".join(f"{k}={v}" for k, v in Counter(r.get("backend") for r in runs).items()))
-    print("  capture mix: " + ", ".join(f"{k}={v}" for k, v in Counter(r.get("capture_method") or "none" for r in runs).items()))
-    print(f"  with image: {sum(1 for r in runs if r.get('image'))}")
-    rss = [r.get("peak_rss_mb") for r in runs if r.get("peak_rss_mb")]
-    if rss: print(f"  peak RSS max: {max(rss)} MB")
-    errs = Counter(re.sub(r"\d+", "N", str(r.get("error")))[:90] for r in runs if r.get("error"))
-    print(f"  errors: {sum(errs.values())}")
-    for e, c in errs.most_common(5):
-        print(f"    {c}x {e}")
-    return 0
-
+# ---------------- observability helpers: observe.py ----------------
+from observe import peak_rss_mb, ollama_ps, capture_keep_path, crop_to_rect, tempfile_dir, CAP_PREFIX, is_owned_capture, is_temp_path, handle_capture_file, read_runs, cmd_last, cmd_stats, image_size
 # ---------------- main ----------------
 def main(argv=None):
     p = argparse.ArgumentParser(prog="speakeasy", description="Rewrite text for listening and speak it.")
@@ -3200,9 +2930,10 @@ def main(argv=None):
                     text_highlight=_on("SPEAKEASY_TEXT_HIGHLIGHT"), figure_cues=_on("SPEAKEASY_FIGURE_CUES"),
                     overlay=("swift-panel" if track else "off")
                             if os.environ.get("SPEAKEASY_FOCUS", "on").lower() not in ("off", "0", "false", "no") else "off")
+    rotate_logs()
     if docmap is not None:
         try: docmap.clean_tmp(tempfile.gettempdir())          # our own old downloads, every run (not only download runs)
-        except Exception: pass
+        except OSError: pass
     load_config()
     for legacy in ("/tmp/speakeasy_sel.png", "/tmp/speakeasy_win.png"):   # pre-prefix capture files
         if a.cmd in ("selection", "speak", "rewrite") and os.path.isfile(legacy) and not (a.cmd != "selection" and getattr(a, "image", None) and os.path.realpath(a.image) == os.path.realpath(legacy)):

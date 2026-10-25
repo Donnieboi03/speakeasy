@@ -1,0 +1,18 @@
+name: macOS
+on: [push, pull_request]
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Tracker XCTest
+        run: cd tracker && swift test
+      - name: Menu-bar app builds (no launch)
+        run: bash app/build.sh build
+      - name: Python backend smoke (no LLM, no audio)
+        run: |
+          python3 -m venv /tmp/v && /tmp/v/bin/pip install -q pypdfium2 pillow pyflakes
+          /tmp/v/bin/python -m pyflakes src/*.py | grep -v "imported but unused\|redefinition of unused\|never used\|f-string is missing\|star imports\|unable to detect" && exit 1 || true
+          export SPEAKEASY_HOME=$RUNNER_TEMP/se SPEAKEASY_LLM_URL=http://127.0.0.1:9/v1
+          printf '| Name | ZIP |\n|---|---|\n| Ann | 94110 |\n' | /tmp/v/bin/python src/speakeasy.py speak --dry-run
+          /tmp/v/bin/python src/speakeasy.py stats --json
