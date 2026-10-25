@@ -328,6 +328,10 @@ final class Live: NSObject {
         }
         apply()
     }
+    func shift(dx: CGFloat, dy: CGFloat, capTs: Double) {
+        if capTs > 0 && capTs < lastMove { return }               // a scroll since the capture already moved it
+        if let r = rect { rect = r.offsetBy(dx: dx, dy: dy); src = "fig-anchor"; apply() }
+    }
     func event(seq s: Int, rect r: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool) {
         seq = s
         style(color: color, opacity: opacity, ellipse: ellipse)
@@ -687,6 +691,7 @@ struct Tracker {
         var lastBox: CGRect? = nil, lastOut: [String: Any] = [:]
         var baseline: Set<String>? = nil
         var missRun = 0
+        var figCapRef: CGRect? = nil, figCapSeq = -1
         var frameLogN = 0
         var lastAccurate = 0.0
         var speakerSeen: Int32? = nil
@@ -772,6 +777,7 @@ struct Tracker {
                     scanned = true; frames += 1; lastScan = tick
                     let frame = ws!.frame; winFrame = frame
                     var found: CGRect? = nil, method = ""
+                    var continueFig = false
                     if !gAxDead, let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
                         let content = CGRect(x: frame.minX, y: frame.minY + 24, width: frame.width, height: frame.height - 24)
                         // web views often report the whole column/container: only trust tight AX boxes, else use word boxes
@@ -800,6 +806,23 @@ struct Tracker {
                                 if ok { hit = vis; method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
                                 else { out["doc_rejected"] = true }
                             }
+                            let dk = (ev["doc"] as? [String: Any])?["kind"] as? String
+                            let isFig = dk != nil && dk != "line"
+                            if hit == nil && isFig {
+                                // figure / panel / object box: the caption is only a scroll anchor, never the box itself
+                                // (it was moving the figure box onto the caption line)
+                                if let c = refind(lines, target: target, near: nil) {
+                                    if let ref = figCapRef, figCapSeq == seq {
+                                        let dx = c.minX - ref.minX, dy = c.minY - ref.minY
+                                        if abs(dx) > 2 || abs(dy) > 2 { let cts = c0; await MainActor.run { Live.shared.shift(dx: dx, dy: dy, capTs: cts) } }
+                                    }
+                                    figCapRef = c; figCapSeq = seq; out["method"] = "fig-anchor"
+                                }
+                                out["fig_doc_miss"] = true
+                                ocrMs += (now() - o0) * 1000; ocrN += 1
+                                lastOut = out; continueFig = true
+                            }
+                            if continueFig {} else {
                             if hit == nil { hit = refind(lines, target: target, near: lastBox) }
                             if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
                                 lastAccurate = tick
@@ -818,6 +841,7 @@ struct Tracker {
                             else {
                                 let inter = Double(all.intersection(baseline!).count), uni = Double(max(1, all.union(baseline!).count))
                                 out["reason"] = inter / uni < 0.35 ? "content-changed" : "scrolled-off"
+                            }
                             }
                         } else { errNote = "capture failed (Screen Recording permission?)" }
                     }
