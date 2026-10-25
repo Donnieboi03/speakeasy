@@ -4,7 +4,7 @@ for each unique text label inside a figure, render the figure crop at 2x, ask th
 (0-1000 of the crop), map back to page points, compare with the label's PDF rect (IoU, centre error).
 
   local (free):      python3 tools/ground_eval.py --pdf paper.pdf --provider local --model qwen3-vl:4b-instruct
-  OpenRouter (PAID): python3 tools/ground_eval.py --pdf paper.pdf --provider openrouter --model google/gemini-2.5-flash --yes-paid
+  OpenRouter (PAID): python3 tools/ground_eval.py --pdf paper.pdf --provider openrouter --model google/gemini-3.5-flash-lite --yes-paid
 The OpenRouter key comes from the Keychain (service speakeasy-openrouter) or SPEAKEASY_OR_KEY. Only figure crops and
 label strings from the PDF you pass are sent. Prints one JSON summary line; nothing is written to disk except a temp crop."""
 import argparse, base64, json, os, random, re, statistics, sys, tempfile, time, urllib.request

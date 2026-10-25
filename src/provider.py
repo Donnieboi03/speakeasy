@@ -2,13 +2,13 @@
 
 SPEAKEASY_LLM=local|openrouter     spoken rewrite (text and image explanations)
 SPEAKEASY_GROUND=local|openrouter  figure-part grounding (also auto|vlm|florence|off, all local)
-SPEAKEASY_OR_MODEL                 OpenRouter model id (default google/gemini-2.5-flash)
+SPEAKEASY_OR_MODEL                 OpenRouter model id (default google/gemini-3.5-flash-lite)
 The key lives in the macOS Keychain (service "speakeasy-openrouter", account "openrouter"), never in ~/.speakeasy/config;
 SPEAKEASY_OR_KEY in the environment overrides it (CI / testing). Text and images only leave the Mac when a switch is on."""
 import os, subprocess, urllib.parse
 
 OR_URL = "https://openrouter.ai/api/v1"
-OR_DEFAULT_MODEL = "google/gemini-2.5-flash"
+OR_DEFAULT_MODEL = "google/gemini-3.5-flash-lite"
 KC_SERVICE, KC_ACCOUNT = "speakeasy-openrouter", "openrouter"
 _key_cache = {}
 

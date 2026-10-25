@@ -6,8 +6,8 @@ import SwiftUI
 
 enum Cloud {
     static let service = "speakeasy-openrouter", account = "openrouter"
-    static let defaultModel = "google/gemini-2.5-flash"
-    static let suggestions = ["google/gemini-2.5-flash", "google/gemini-2.5-flash-lite", "openai/gpt-4.1-mini", "anthropic/claude-haiku-4.5", "qwen/qwen2.5-vl-72b-instruct"]
+    static let defaultModel = "google/gemini-3.5-flash-lite"
+    static let suggestions = ["google/gemini-3.5-flash-lite", "google/gemini-2.5-flash", "openai/gpt-4.1-mini", "anthropic/claude-haiku-4.5", "qwen/qwen2.5-vl-72b-instruct"]
     static var llmOn: Bool { Config.value("SPEAKEASY_LLM") == "openrouter" }
     static var groundOn: Bool { Config.value("SPEAKEASY_GROUND") == "openrouter" }
     static var anyOn: Bool { llmOn || groundOn }
