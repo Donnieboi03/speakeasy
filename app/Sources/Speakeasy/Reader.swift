@@ -82,12 +82,7 @@ final class Reader {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && args.firstIndex(of: "--image") == nil {
             NSSound.beep(); killTracker(); onState?("idle"); return
         }
-        onState?("thinking")
-        backend = run(backendPath, args, stdin: text)
-        let me = backend
-        backend?.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async { if self?.backend === me { self?.backend = nil; self?.onState?("idle") } }
-        }
+        launch(args, text: text)
     }
 
     // ---- selection ----
@@ -231,6 +226,91 @@ final class Reader {
         if let s = stdin, let pp = pipe { pp.fileHandleForWriting.write(s.data(using: .utf8)!); try? pp.fileHandleForWriting.close() }
         if wait { p.waitUntilExit() }
         return p
+    }
+
+    // ---- area selection (Read area…) ----
+    let area = AreaSelector()
+    func startArea() {
+        guard !speaking else { stop(); return }
+        guard AXIsProcessTrusted(), CGPreflightScreenCaptureAccess() else { (NSApp.delegate as? AppDelegate)?.showOnboarding(); return }
+        area.pick { [weak self] r in
+            guard let self = self, let rect = r else { return }                          // Esc / tiny drag: nothing happens
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { self.readArea(rect) } // let the overlay leave the screen
+        }
+    }
+    func readArea(_ rect: CGRect) {
+        let t0 = Date()
+        runId = String(format: "%llx%04x", UInt64(t0.timeIntervalSince1970 * 1000), UInt32.random(in: 0...0xffff))
+        onState?("listening")
+        // the window under the area: the tracker follows it (scrolling, switching) like a text selection
+        let c = CGPoint(x: rect.midX, y: rect.midY)
+        let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
+        let hit = list.first { w in
+            guard (w[kCGWindowLayer as String] as? Int) == 0, (w[kCGWindowOwnerPID as String] as? Int32) != getpid(),
+                  (w[kCGWindowAlpha as String] as? Double ?? 1) > 0.01, let b = w[kCGWindowBounds as String] as? NSDictionary,
+                  let f = CGRect(dictionaryRepresentation: b as CFDictionary) else { return false }
+            return f.width >= 80 && f.height >= 80 && f.contains(c)
+        }
+        let pid = (hit?[kCGWindowOwnerPID as String] as? Int32) ?? 0
+        startTracker(pid: pid, wid: hit?[kCGWindowNumber as String] as? Int)
+        if pid > 0, let app = NSRunningApplication(processIdentifier: pid) { writeDocHint(front: app, appEl: AXUIElementCreateApplication(pid)) }
+        try? FileManager.default.removeItem(atPath: "/tmp/speakeasy_cap_lines.json")
+        // 1) Accessibility text inside the rectangle (text views, many PDF viewers): positions -> range -> string
+        var text = "", source = "ocr"
+        var el: AXUIElement?
+        if AXUIElementCopyElementAtPosition(AXUIElementCreateSystemWide(), Float(c.x), Float(c.y), &el) == .success, let e = el {
+            func rangeAt(_ p: CGPoint) -> CFRange? {
+                var pt = p; guard let v = AXValueCreate(.cgPoint, &pt) else { return nil }
+                var out: CFTypeRef?
+                guard AXUIElementCopyParameterizedAttributeValue(e, kAXRangeForPositionParameterizedAttribute as CFString, v, &out) == .success,
+                      let o = out, CFGetTypeID(o) == AXValueGetTypeID() else { return nil }
+                var r = CFRange(location: 0, length: 0); AXValueGetValue(o as! AXValue, .cfRange, &r); return r
+            }
+            if let a = rangeAt(CGPoint(x: rect.minX + 2, y: rect.minY + 2)), let b = rangeAt(CGPoint(x: rect.maxX - 2, y: rect.maxY - 2)), b.location > a.location {
+                var rg = CFRange(location: a.location, length: b.location + b.length - a.location)
+                var out: CFTypeRef?
+                if let v = AXValueCreate(.cfRange, &rg),
+                   AXUIElementCopyParameterizedAttributeValue(e, kAXStringForRangeParameterizedAttribute as CFString, v, &out) == .success,
+                   let s = out as? String, s.split(whereSeparator: { $0.isWhitespace }).count >= 3 {
+                    text = s; source = "ax"; writeLineBounds(e, rg)
+                }
+            }
+        }
+        // 2) the pixels, in memory; OCR when there was no AX text; the backend's vision pass finds figures in the crop
+        AreaSelector.capture(rect) { [weak self] img in
+            DispatchQueue.main.async {
+                guard let self = self else { return }
+                guard let img = img else { NSSound.beep(); self.killTracker(); self.onState?("idle"); return }
+                if text.isEmpty {
+                    var out: [[String: Any]] = [], loc = 0
+                    for (t, r) in AreaSelector.ocr(img, rect: rect) {
+                        out.append(["loc": loc, "abs": loc, "len": t.count, "rect": [r.minX, r.minY, r.width, r.height]])
+                        text += t + "\n"; loc += t.count + 1
+                    }
+                    if !out.isEmpty, let d = try? JSONSerialization.data(withJSONObject: out) {
+                        FileManager.default.createFile(atPath: "/tmp/speakeasy_cap_lines.json", contents: d)
+                    }
+                }
+                // the backend's vision step needs a file: the same owned temp capture the selection hotkey uses (deleted after use)
+                let shot = "/tmp/speakeasy_cap_sel.png"
+                let rep = NSBitmapImageRep(cgImage: img)
+                if let png = rep.representation(using: .png, properties: [:]) { FileManager.default.createFile(atPath: shot, contents: png) }
+                var args = ["speak", "--doc-hint", "/tmp/speakeasy_cap_doc.json", "--capture-method", "area", "--capture-rect", self.rs(rect),
+                            "--area-text", source]
+                if FileManager.default.fileExists(atPath: shot) { args += ["--image", shot] }
+                if FileManager.default.fileExists(atPath: "/tmp/speakeasy_cap_lines.json") { args += ["--line-bounds", "/tmp/speakeasy_cap_lines.json"] }
+                args += ["--capture-ms", String(Int(Date().timeIntervalSince(t0) * 1000)), "--run-id", self.runId, "--app", "menubar"]
+                self.launch(args, text: text)
+            }
+        }
+    }
+    func launch(_ args: [String], text: String) {
+        onState?("thinking")
+        backend = run(backendPath, args, stdin: text)
+        let me = backend
+        backend?.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async { if self?.backend === me { self?.backend = nil; self?.onState?("idle") } }
+        }
     }
 }
 

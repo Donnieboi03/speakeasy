@@ -7,6 +7,7 @@ import KeyboardShortcuts
 
 extension KeyboardShortcuts.Name {
     static let readSelection = Self("readSelection", default: .init(.s, modifiers: [.control, .option]))
+    static let readArea = Self("readArea", default: .init(.a, modifiers: [.control, .option]))
 }
 
 @main
@@ -38,6 +39,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(withTitle: "Stats…", action: #selector(showStats), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "Read selection", action: #selector(read), keyEquivalent: "").target = self
+        m.addItem(withTitle: "Read area…", action: #selector(readArea), keyEquivalent: "").target = self
         m.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: "").target = self
         m.addItem(.separator())
         for (title, key) in [("Highlight text", "SPEAKEASY_TEXT_HIGHLIGHT"), ("Figure cues", "SPEAKEASY_FIGURE_CUES")] {
@@ -54,6 +56,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         handOverFromHammerspoon()
         reader.onState = { [weak self] s in DispatchQueue.main.async { self?.pill.set(s) } }
         pill.model.onStop = { [weak self] in self?.reader.stop() }
+        pill.model.onArea = { [weak self] in self?.reader.stop(); self?.reader.startArea() }
+        KeyboardShortcuts.onKeyUp(for: .readArea) { [weak self] in self?.reader.startArea() }
         KeyboardShortcuts.onKeyUp(for: .readSelection) { [weak self] in self?.reader.toggle() }
         if !Permissions.accessibility || !Permissions.screenRecording { showOnboarding() }   // shows a window; prompts only on click
     }
@@ -85,6 +89,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func checkUpdates() { Updater.check() }
     @objc func read() { reader.toggle() }
+    @objc func readArea() { reader.startArea() }
     @objc func stop() { reader.stop() }
     @objc func showOnboarding() {
         if onboarding == nil {
@@ -97,9 +102,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
     @objc func showSettings() {
         if settings == nil {
-            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 120), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+            let w = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 360, height: 150), styleMask: [.titled, .closable], backing: .buffered, defer: false)
             w.title = "Speakeasy hotkey"; w.isReleasedWhenClosed = false
-            w.contentView = NSHostingView(rootView: Form { KeyboardShortcuts.Recorder("Read selection:", name: .readSelection) }.padding())
+            w.contentView = NSHostingView(rootView: Form { KeyboardShortcuts.Recorder("Read selection:", name: .readSelection); KeyboardShortcuts.Recorder("Read area:", name: .readArea) }.padding())
             w.center(); settings = w
         }
         NSApp.activate(ignoringOtherApps: true); settings?.makeKeyAndOrderFront(nil)

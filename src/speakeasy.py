@@ -2907,10 +2907,11 @@ def main(argv=None):
     for name in ("rewrite", "speak", "selection"):
         sp = sub.add_parser(name)
         sp.add_argument("--image")
-        sp.add_argument("--capture-method", choices=["bounds", "highlight", "select", "mouse", "no-selection-window", "no-selection-screen", "none"], help="how the image was captured (set by the hotkey script)")
+        sp.add_argument("--capture-method", choices=["bounds", "area", "highlight", "select", "mouse", "no-selection-window", "no-selection-screen", "none"], help="how the image was captured (set by the hotkey script)")
         sp.add_argument("--capture-rect", help="x,y,w,h of the captured region in screen points")
         sp.add_argument("--capture-ms", type=int, help="time the hotkey script spent capturing")
         sp.add_argument("--run-id", help="id shared with the tracker's log records")
+        sp.add_argument("--area-text", choices=["ax", "ocr"], help="Read area: where the region's text came from")
         sp.add_argument("--app", choices=["menubar", "cli"], default=None, help="what launched this run")
         sp.add_argument("--line-bounds", help="JSON file: per-line [x,y,w,h] screen rects of the selected text (from the hotkey)")
         sp.add_argument("--doc-hint", help="JSON file: {app, bundle, title, ax_document, url} of the source window (from the hotkey)")
@@ -2955,7 +2956,7 @@ def main(argv=None):
         return cmd_stats(a.n, a.json)
     t0 = time.time()
     if a.cmd in ("speak", "selection"): set_state("thinking")
-    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": a.cmd, "verbatim_blocks": [],
+    rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": a.cmd, "verbatim_blocks": [], "area_text": getattr(a, "area_text", None),
            "doc_source": None, "doc_path_hash": None, "page": None, "figures_found": None, "doc_map_method": None}
     timing = {"copy_ms": None, "capture_ms": a.capture_ms, "vision_ms": None, "llm_ms": None,
               "tts_first_audio_ms": None, "speak_ms": None}

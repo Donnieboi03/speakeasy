@@ -105,6 +105,10 @@ The focus box is drawn only by the native tracker (`~/.speakeasy/bin/speakeasy-t
 
 Both live in `~/.speakeasy/config` and can be toggled from the menu-bar app ("Highlight text", "Figure cues"). Each run logs `text_highlight` and `figure_cues` in runs.jsonl; tracker `draw` records carry `cue: text|figure`, and a suppressed cue logs `cue-off`. Design rationale and evidence: [docs/research/highlighting.md](docs/research/highlighting.md).
 
+## Read area (Control-Option-A)
+
+For PDFs and pages where selecting text is awkward: press Control-Option-A (or "Read area…" in the menu, or the viewfinder button on the pill), drag a rectangle, release. Esc cancels. Speakeasy uses the app's Accessibility text inside the rectangle when it has any, otherwise recognises the text on screen (Vision); the region also goes to the vision model for figures. The highlight band and figure cues are anchored to that region and follow scrolling like a text selection. The region is captured in memory with ScreenCaptureKit; the only file is the usual temporary capture, deleted after the run. `runs.jsonl` logs `capture_method: area` and `area_text: ax|ocr`, never the text. The overlay follows the common pattern of open-source capture tools such as Flameshot (one transparent window per screen, crosshair, Esc).
+
 ## Stats
 
 `speakeasy stats --json` (and the menu bar's Stats window) counts words listened, a daily streak heatmap, figures and tables explained, median time to first audio, and reading time saved, estimated as words read to you ÷ 238 words per minute (average adult silent reading rate; an estimate, not a measurement). `runs.jsonl` stores only counts (`words_in`, `words_spoken`, `audio_s`, `kind`), never the text. Logs rotate at 5 MB (5 kept).

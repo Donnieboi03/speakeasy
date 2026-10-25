@@ -8,6 +8,7 @@ final class PillModel: ObservableObject {
     @Published var textHighlight = Config.on("SPEAKEASY_TEXT_HIGHLIGHT")
     @Published var figureCues = Config.on("SPEAKEASY_FIGURE_CUES")
     var onStop: (() -> Void)?
+    var onArea: (() -> Void)?
 }
 
 final class Pill {
@@ -30,13 +31,13 @@ final class Pill {
     }
     func show() {
         if panel == nil {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 230, height: 44),
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 250, height: 44),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             p.isFloatingPanel = true; p.level = .statusBar; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = true
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             p.isMovableByWindowBackground = true; p.hidesOnDeactivate = false
             p.contentView = NSHostingView(rootView: PillView(model: model))
-            if let s = NSScreen.main?.visibleFrame { p.setFrameOrigin(NSPoint(x: s.midX - 115, y: s.minY + 24)) }
+            if let s = NSScreen.main?.visibleFrame { p.setFrameOrigin(NSPoint(x: s.midX - 125, y: s.minY + 24)) }
             panel = p
         }
         panel?.orderFrontRegardless()
@@ -61,11 +62,13 @@ struct PillView: View {
                 Toggle("Figure cues", isOn: Binding(get: { model.figureCues }, set: { model.figureCues = $0; Config.set("SPEAKEASY_FIGURE_CUES", $0 ? "on" : "off") }))
             } label: { Image(systemName: "gearshape") }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Highlight settings")
+            Button { model.onArea?() } label: { Image(systemName: "viewfinder") }
+                .buttonStyle(.borderless).help("Read an area (Control-Option-A)")
             Button { model.onStop?() } label: { Image(systemName: "stop.fill") }
                 .buttonStyle(.borderless).help("Stop reading")
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 14).frame(width: 230, height: 44)
+        .padding(.horizontal, 14).frame(width: 250, height: 44)
         .background(Capsule().fill(Color.black.opacity(0.82)))
     }
 }
