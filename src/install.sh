@@ -197,8 +197,8 @@ local function startTracker(win)
     "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5"),
     "--overlay", "native", "--run-id", tostring(speakeasyRunId) }
   local q = {}
-  for _, a in ipairs(args) do q[#q + 1] = "'" .. tostring(a):gsub("'", "'\\''") .. "'" end
-  local cmd = string.format("/usr/bin/nohup '%s' %s >/dev/null 2>&1 & echo $! > '%s'", TRACKER, table.concat(q, " "), TRACKER_PID)
+  for _, a in ipairs(args) do q[#q + 1] = "'" .. tostring(a):gsub("'", "'\\\\''") .. "'" end
+  local cmd = string.format("/usr/bin/nohup '%s' %s >/dev/null 2>&1 & echo \$! > '%s'", TRACKER, table.concat(q, " "), TRACKER_PID)
   hs.execute(cmd)
   local ok = speakeasyTrackerPid() ~= nil
   hslog("tracker start %s: window %s pid %s run %s", ok and "ok" or "FAILED", tostring(win:id()), tostring(app and app:pid()), tostring(speakeasyRunId))

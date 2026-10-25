@@ -1142,7 +1142,7 @@ class Focus:
             out.append(sc / max(1.0, len(fl)) ** 0.15)
         return out, sf
     _REFBACK = re.compile(r"(?i)\b(as (?:mentioned|noted|said|discussed|described|shown|stated) (?:above|earlier|before|previously)|"
-                          r"(?:mentioned|noted|described) (?:above|earlier)|as before|recall(?:ing)? that|going back to|again,|earlier,)")
+                          r"(?:mentioned|noted|described|discussed|shown) (?:above|earlier|previously)|as (?:we|I) (?:said|saw|noted)|recall(?:ing)? that|going back to|returning to)")
     def _span(self, a, b, sentence):
         """Cap a sentence's line span to about what its words need (no whole-selection boxes)."""
         words = len((sentence or "").split())
@@ -1166,10 +1166,12 @@ class Focus:
         bb = max(bwd, key=lambda i: sc[i]) if bwd else None
         T = 1.0
         best = bf
-        refback = bb is not None and (
-            (sc[bb] >= T * 1.8 and sc[bb] >= 1.6 * (sc[bf] if bf is not None else 0)
-             and any(k.startswith("#") or v > 1.0 for k, v in sf.items() if k in self.feats[bb]))
-            or (self._REFBACK.search(sentence or "") and sc[bb] >= T))
+        phrase = self._REFBACK.search(sentence or "")
+        # strong: earlier lines match far better than anything ahead AND share a number or a rare name (df == 1)
+        uniq = [k for k, v in sf.items() if bb is not None and k in self.feats[bb] and (k.startswith("#") or (v > 1.0 and self.df.get(k, 9) == 1))]
+        strong = bb is not None and sc[bb] >= T * 2.5 and sc[bb] >= 2.5 * max(0.2, sc[bf] if bf is not None else 0) and len(uniq) >= 2
+        refback = bb is not None and ((phrase and sc[bb] >= T) or strong)
+        self.ref_trigger = ("phrase: " + phrase.group(0)) if (refback and phrase) else (("terms: " + ",".join(k.lstrip("#") for k in uniq[:4])) if refback else None)
         if refback:                                                # never jump back: faint outline on the earlier lines
             a2 = b2 = bb
             while a2 - 1 >= 0 and sc[a2 - 1] >= max(T * 0.8, 0.6 * sc[bb]): a2 -= 1
@@ -1197,7 +1199,7 @@ class Focus:
         try:                                                       # mapping trace (log only; never shown)
             d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "focus.jsonl"), "a") as f:
-                f.write(json.dumps({"state": "map", "method": method, "lines": self.last_lines, "decision": self.map_note,
+                f.write(json.dumps({"state": "map", "method": method, "lines": self.last_lines, "decision": self.map_note, "ref_trigger": getattr(self, "ref_trigger", None),
                                     "ref_lines": self.ref_lines, "text": _logtext(sentence)[:120],
                                     "ts": round(time.time(), 3), "pid": os.getpid()}) + "\n")
         except OSError: pass

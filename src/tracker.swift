@@ -30,9 +30,13 @@ func writeJSONAtomic(_ obj: [String: Any], _ path: String) {
     FileManager.default.createFile(atPath: tmp, contents: d)
     _ = rename(tmp, path)
 }
+let logQ = DispatchQueue(label: "speakeasy.log")          // log writes never run on the main thread
 func appendLine(_ obj: [String: Any], _ path: String) {
     guard var d = try? JSONSerialization.data(withJSONObject: obj) else { return }
     d.append(0x0a)
+    if Thread.isMainThread { logQ.async { writeLine(d, path) } } else { logQ.sync { writeLine(d, path) } }
+}
+func writeLine(_ d: Data, _ path: String) {
     if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(d); h.closeFile() }
     else { FileManager.default.createFile(atPath: path, contents: d) }
 }
@@ -170,6 +174,9 @@ final class Live: NSObject {
     let refShape = CAShapeLayer()
     var refShown = 0, transitions = 0, heldBig = 0
     var cue = "text", suppressed = false
+    var colRect: CGRect? = nil, lineH: CGFloat = 0
+    var stuckVotes = 0, lastMomentum = 0.0
+    var pendingJump: CGRect? = nil
     var hScrollOK = false                // horizontal deltas only once OCR confirmed the content really moves sideways
     var stuckY = 0                       // +1/-1: content did not move under deltas of that sign (document edge)
     var predX = 0.0, predAt = 0.0, rejX = 0.0
@@ -225,6 +232,7 @@ final class Live: NSObject {
         v.layer!.addSublayer(shape)
         p.contentView = v
         panel = p
+        p.alphaValue = 0; p.orderFrontRegardless(); p.orderOut(nil); p.alphaValue = 1   // pay the first-show cost now, not mid-sentence
         NSWorkspace.shared.notificationCenter.addObserver(forName: NSWorkspace.didActivateApplicationNotification, object: nil, queue: .main) { [weak self] n in
             guard let s = self, let app = n.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
             let f = app.processIdentifier == s.srcPid
@@ -319,7 +327,8 @@ final class Live: NSObject {
                      "on_screen": p.isVisible])
                 shown = true; lastDrawn = f
             }
-            if drawnSeq != seq { drawnSeq = seq; writeJSONAtomic(["seq": seq, "tracker_pid": Int(getpid()), "drawn": true, "ts": now()], home + "/overlay.json") }
+            if drawnSeq != seq { drawnSeq = seq; let o: [String: Any] = ["seq": seq, "tracker_pid": Int(getpid()), "drawn": true, "ts": now()], h = home
+                logQ.async { writeJSONAtomic(o, h + "/overlay.json") } }
             hideTrigger = nil
         } else {
             if p.isVisible { p.orderOut(nil) }
@@ -355,10 +364,19 @@ final class Live: NSObject {
         if visible, let r = r, let old = rect {
             let ex = r.minX - old.minX, ey = r.minY - old.minY
             // verify the prediction: content that did not move under accepted deltas -> that direction is stuck (edge)
-            if abs(pred) >= 30 {
+            let settled = capTs > 0 && capTs - lastMove >= 0.15 && now() - lastMomentum > 0.25
+            if abs(pred) >= 80 && settled {
                 let actual = pred + ey
-                if abs(actual) < 0.3 * abs(pred) { stuckY = pred > 0 ? 1 : -1; rec(["event": "scroll-stuck", "dir": stuckY, "pred": Int(pred), "actual": Int(actual)]) }
-                else { stuckY = 0 }
+                if abs(actual) < 0.3 * abs(pred) {
+                    stuckVotes += 1
+                    if stuckVotes >= 2 { stuckY = pred > 0 ? 1 : -1; rec(["event": "scroll-stuck", "dir": stuckY, "pred": Int(pred), "actual": Int(actual), "votes": stuckVotes]) }
+                    else { rec(["event": "scroll-stuck-vote", "pred": Int(pred), "actual": Int(actual)]); return }   // keep the prediction for now
+                } else { stuckVotes = 0; stuckY = 0 }
+            } else if abs(pred) >= 80 { wantScan = true; return }                        // unsettled capture: do not judge (or snap) yet
+            // a big snap needs two agreeing scans
+            if abs(ey) > 400 && src == "scroll-delta" {
+                if let pj = pendingJump, abs(pj.minY - r.minY) < 20 { pendingJump = nil }
+                else { pendingJump = r; rec(["event": "jump-pending", "dy": Int(ey)]); wantScan = true; return }
             }
             if abs(predX) >= 30 {
                 let ax = predX + ex
@@ -382,6 +400,10 @@ final class Live: NSObject {
             }
             if method == "ocr" || method == "doc" { ocrHits += 1 } else if method == "ax" { axHits += 1 }
             if src == "scroll-delta", let old = rect { deltaOK = abs(old.minY - r.minY) <= 12 && abs(old.minX - r.minX) <= 12 }
+            if method == "ocr" || method == "doc" {               // learn the text column and line height
+                colRect = colRect.map { CGRect(x: min($0.minX, r.minX), y: 0, width: max($0.maxX, r.maxX) - min($0.minX, r.minX), height: 0) } ?? CGRect(x: r.minX, y: 0, width: r.width, height: 0)
+                if r.height < 30 { lineH = lineH > 0 ? 0.7 * lineH + 0.3 * r.height : r.height }
+            }
             pred = 0; rect = r; scanVisible = true; hiddenByKey = false; src = method
         } else {
             if scanVisible { hideTrigger = (reason ?? "scrolled-off", now()) }
@@ -428,9 +450,17 @@ final class Live: NSObject {
         if !drawOn { rec(["event": "cue-off", "seq": s, "cue": cue]) }
         // never flash a big provisional box between sentences: a text sentence's box must fit its own lines
         if let n = r0, isText {
-            let nr = n.offsetBy(dx: off.x, dy: off.y)
+            var nr = n.offsetBy(dx: off.x, dy: off.y)
+            // the backend only knows the selection box (no per-line geometry in web views): take x/width from the text
+            // column OCR has confirmed, and cap the height, so the band can move at once instead of waiting for OCR
+            if let c = colRect, nr.width > c.width * 1.2 { nr = CGRect(x: c.minX, y: nr.minY, width: c.width, height: nr.height) }
+            let lh = lineH > 0 ? lineH : 20
+            let maxH = CGFloat(nlines ?? 2) * lh * 3 + 8
+            if nr.height > maxH { nr = CGRect(x: nr.minX, y: nr.minY, width: nr.width, height: maxH) }
             let limit = CGFloat(nlines ?? 3) * 40 + 12
-            let held = nr.height > limit && rect != nil
+            let held = (nr.height > max(limit, maxH + 1) || (colRect == nil && nr.width > 700)) && rect != nil
+            if !held { r = CGRect(x: nr.minX - off.x, y: nr.minY - off.y, width: nr.width, height: nr.height) }
+            wantScan = true                                         // targeted OCR right away for the exact lines
             transitions += 1
             if held { heldBig += 1 }
             rec(["event": "transition", "seq": s, "old": rect.map { [Int($0.width), Int($0.height)] } ?? NSNull(),
@@ -546,10 +576,12 @@ final class Live: NSObject {
         if ddx != 0 && !hScrollOK { reject("horizontal"); rejX += ddx * k; ddx = 0 }
         if ddy != 0 && stuckY != 0 && (ddy > 0) == (stuckY > 0) {
             let mom = ev.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0
+            if mom { lastMomentum = now() }
             reject(mom ? "overscroll" : "no-content-move"); ddy = 0
         }
         if ddy != 0 && (ddy > 0) != (stuckY > 0) && stuckY != 0 { stuckY = 0 }      // reversing direction: content can move again
         if ddx == 0 && ddy == 0 { wantScan = true; return }
+        if ev.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0 { lastMomentum = now() }
         lastMove = now(); predAt = now(); wantScan = true
         predX += ddx * k
         off.x += ddx * k; off.y += ddy * k
