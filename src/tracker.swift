@@ -173,6 +173,7 @@ final class Live: NSObject {
     var refPanel: NSPanel? = nil
     // shape scheme: text_band | part_oval | figure_box | table_row; table_header is a faint tint kept while a table is read
     var cueKind = "text_band"
+    var drawMeta: [String: Any] = [:]       // run_id, label, doc_transform of the current event, for draw records
     var headerPanel: NSPanel? = nil
     let headerShape = CAShapeLayer()
     var headerDelta: CGRect? = nil          // header rect relative to the row band's origin (moves with it on scroll)
@@ -332,9 +333,9 @@ final class Live: NSObject {
             if !shown || abs(f.minY - lastDrawn.minY) > 2 || abs(f.minX - lastDrawn.minX) > 2 || abs(f.width - lastDrawn.width) > 2 || abs(f.height - lastDrawn.height) > 2 {
                 draws += 1
                 let H = NSScreen.screens.first?.frame.height ?? 0
-                rec(["event": "draw", "seq": seq, "cue": cue, "cue_kind": cueKind, "header": headerDelta != nil, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
+                rec(drawMeta.merging(["event": "draw", "seq": seq, "cue": cue, "cue_kind": cueKind, "header": headerDelta != nil, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
                      "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
-                     "on_screen": p.isVisible])
+                     "on_screen": p.isVisible]) { $1 })
                 shown = true; lastDrawn = f
             }
             if drawnSeq != seq { drawnSeq = seq; let o: [String: Any] = ["seq": seq, "tracker_pid": Int(getpid()), "drawn": true, "ts": now()], h = home
@@ -476,8 +477,9 @@ final class Live: NSObject {
     }
     func event(seq s: Int, rect r0: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool,
                isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil, figure: Bool = false, drawOn: Bool = true,
-               cueKind ck: String? = nil, header: CGRect? = nil) {
+               cueKind ck: String? = nil, header: CGRect? = nil, meta: [String: Any] = [:]) {
         var r = r0
+        drawMeta = meta.merging(["run_id": runId]) { a, _ in a }
         cue = figure ? "figure" : "text"; suppressed = !drawOn
         cueKind = ck ?? (ellipse ? "part_oval" : figure ? "figure_box" : "text_band")
         if cueKind == "table_row", let h = header, let n = r0 { headerDelta = CGRect(x: h.minX - n.minX, y: h.minY - n.minY, width: h.width, height: h.height) }
@@ -492,9 +494,11 @@ final class Live: NSObject {
             // column OCR has confirmed, and cap the height, so the band can move at once instead of waiting for OCR
             if let c = colRect, nr.width > c.width * 1.2 { nr = CGRect(x: c.minX, y: nr.minY, width: c.width, height: nr.height) }
             let lh = lineH > 0 ? lineH : 20
-            let maxH = CGFloat(nlines ?? 2) * lh * 3 + 8
+            // cap only when the backend says how many lines the sentence has (an unknown count used to cap every box at
+            // 2 lines = 128 pt, leaving long sentences' boxes 40-110 pt short)
+            let maxH = nlines.map { CGFloat($0) * lh * 3 + 8 } ?? .greatestFiniteMagnitude
             if nr.height > maxH { nr = CGRect(x: nr.minX, y: nr.minY, width: nr.width, height: maxH) }
-            let limit = CGFloat(nlines ?? 3) * 40 + 12
+            let limit = nlines.map { CGFloat($0) * 40 + 12 } ?? .greatestFiniteMagnitude
             let held = (nr.height > max(limit, maxH + 1) || (colRect == nil && nr.width > 700)) && rect != nil
             if !held { r = CGRect(x: nr.minX - off.x, y: nr.minY - off.y, width: nr.width, height: nr.height) }
             wantScan = true                                         // targeted OCR right away for the exact lines
@@ -948,7 +952,11 @@ struct Tracker {
                     let ref = (ev["ref"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
                     let hdr = (ev["header"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
                     let ck = ev["cue_kind"] as? String
-                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr) }
+                    var meta: [String: Any] = [:]
+                    if let dm = ev["doc"] as? [String: Any] { meta["label"] = dm["label"] ?? NSNull(); meta["doc_target"] = dm["target"] ?? NSNull() }
+                    if let t = ev["doc_transform"] { meta["doc_transform"] = t }
+                    if let c = ev["clamped"] { meta["clamped"] = c }
+                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta) }
                 }
             }
             if native && !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }

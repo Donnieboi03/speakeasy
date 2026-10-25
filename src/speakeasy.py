@@ -850,6 +850,15 @@ class Focus:
         for i, l in enumerate(d["page"]["lines"]):
             lt = set(docmap._toks(l[4]))
             if len(lt) >= 3 and len(lt & want) / len(lt) >= 0.8: out.append(i)      # short labels ("EEG") match anything
+        if out and sum(len(set(docmap._toks(d["page"]["lines"][i][4]))) for i in out) > 1.6 * len(want) + 4:
+            # more page text matched than was selected (common words): keep the lines that cover the selection best
+            ranked = sorted(out, key=lambda i: -len(set(docmap._toks(d["page"]["lines"][i][4])) & want))
+            keep, cov = [], set()
+            for i in ranked:
+                lt = set(docmap._toks(d["page"]["lines"][i][4]))
+                if (lt & want) - cov: keep.append(i); cov |= lt & want
+                if len(cov) >= 0.9 * len(want): break
+            out = sorted(keep)
         r = getattr(self, "_sr", None)
         if r and out:                                                   # stay inside the selected block (other columns share words)
             out = [i for i in out if docmap._overlap(d["page"]["lines"][i][:4], r)] or out
@@ -919,6 +928,9 @@ class Focus:
     def start_capture_fit(self, png, frame):
         """Screenshot taken: fit page->screen from text recognition on it, alongside the LLM (AX rects in Preview are unreliable)."""
         self._cf, self._cf_done = None, _threading.Event()
+        if AREA_FIT:                                   # Read area already fit the page to the screen from the full OCR lines
+            self._cf = AREA_FIT; self._cf_done.set()
+            self.rec.update(doc_transform="area-fit"); return
         def run():
             t0 = time.time()
             try:
@@ -1181,6 +1193,7 @@ class Focus:
             os.replace(tmp, path)
         except OSError: pass
     def show(self, rect, text):
+        clamped = False
         clip = getattr(self, "area_clip", None)
         if clip and rect:                       # Read area: the user drew the region; cues never leave it (12 pt slack)
             x0, y0 = max(rect[0], clip[0] - 12), max(rect[1], clip[1] - 12)
@@ -1188,7 +1201,8 @@ class Focus:
             if x1 - x0 < 8 or y1 - y0 < 8: x0, y0, x1, y1 = clip[0], clip[1], clip[0] + clip[2], clip[1] + clip[3]
             if [x0, y0, x1 - x0, y1 - y0] != list(rect):
                 self.rec["area_clamped"] = self.rec.get("area_clamped", 0) + 1
-                rect = [x0, y0, x1 - x0, y1 - y0]
+                nr = FRect([x0, y0, x1 - x0, y1 - y0]); nr.__dict__.update(getattr(rect, "__dict__", {}))   # keep doc.target etc.
+                rect = nr; clamped = True
         self.events += 1
         est = 2.0 + len(text) / 13.0                                # seconds of speech, for the overlay's watchdog
         ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect],
@@ -1204,6 +1218,9 @@ class Focus:
         ev["cue_kind"] = ("part_oval" if ev.get("shape") == "ellipse" else "table_row" if dk == "table_row"
                           else "figure_box" if ev["cue"] == "figure" else "text_band")
         if getattr(rect, "header", None): ev["header"] = rect.header
+        if clamped: ev["clamped"] = True
+        dt = self._doc_transform() if getattr(rect, "doc", None) and DOC is not None else None
+        if dt and dt != "pending": ev["doc_transform"] = [round(dt[0], 4), round(dt[1], 1), round(dt[2], 1)]
         ck = self.rec.setdefault("cue_kinds", {}); ck[ev["cue_kind"]] = ck.get(ev["cue_kind"], 0) + 1
         if ev.get("header"): ck["table_header"] = ck.get("table_header", 0) + 1
         ev["draw"] = _on("SPEAKEASY_FIGURE_CUES" if ev["cue"] == "figure" else "SPEAKEASY_TEXT_HIGHLIGHT")
@@ -2930,6 +2947,8 @@ def get_selection():
 # ---------------- observability helpers: observe.py ----------------
 from observe import peak_rss_mb, ollama_ps, capture_keep_path, crop_to_rect, tempfile_dir, CAP_PREFIX, is_owned_capture, is_temp_path, handle_capture_file, read_runs, cmd_last, cmd_stats, image_size
 # ---------------- main ----------------
+AREA_FIT = None
+
 def area_pdf_text(ocr_text, a, rec, wait=4.0):
     """Read area on a PDF: swap the OCR text for the document's own text layer inside the drawn rectangle.
     Page->screen comes from the OCR lines (same anchor fit the tracker uses); returns the PDF text and rewrites the
@@ -2953,6 +2972,8 @@ def area_pdf_text(ocr_text, a, rec, wait=4.0):
         fit = docmap.anchor_fit(ocr, anc, frame)
         if not fit or fit[4] < 3 or fit[3] > 6: rec["area_pdf"] = "no-fit"; return None
         sc, ox, oy = fit[0], fit[1], fit[2]
+        global AREA_FIT
+        AREA_FIT = (sc, ox, oy, fit[3])
         prect = [(frame[0] - ox) / sc, (frame[1] - oy) / sc, (frame[0] + frame[2] - ox) / sc, (frame[1] + frame[3] - oy) / sc]
         lines = docmap.area_lines(d["page"]["lines"], prect)
         if not lines: rec["area_pdf"] = "empty"; return None
@@ -2992,7 +3013,11 @@ def main(argv=None):
     sp.add_argument("src"); sp.add_argument("dst")
     sp = sub.add_parser("last"); sp.add_argument("--json", action="store_true")
     sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50); sp.add_argument("--json", action="store_true")
-    a = p.parse_args(argv)
+    argv = list(sys.argv[1:] if argv is None else argv)
+    for i in range(len(argv) - 1):                 # "--capture-rect -1200,40,..." (a display left of / above the main one)
+        if argv[i] == "--capture-rect" and argv[i + 1].startswith("-"):
+            argv[i:i + 2] = [f"--capture-rect={argv[i + 1]}", ""]
+    a = p.parse_args([x for x in argv if x != ""])
     import uuid
     track = os.environ.get("SPEAKEASY_TRACK", "on").lower() not in ("off", "0", "false", "no")
     RUN_META.update(run_id=getattr(a, "run_id", None) or uuid.uuid4().hex[:12],
@@ -3201,7 +3226,8 @@ def main(argv=None):
         except OSError: pass
         rec["capture_path"] = None
     if not rec.get("image"):
-        rec["capture_method"] = "none" if a.capture_method in (None, "none") or not img else rec["capture_method"]
+        rec["capture_method"] = rec["capture_method"] if a.capture_method == "area" else \
+            "none" if a.capture_method in (None, "none") or not img else rec["capture_method"]
     timing["vision_ms"] = rec.get("vision_ms"); timing["llm_ms"] = rec.get("llm_ms")
     tts_engine = os.environ.get("SPEAKEASY_TTS", "say").lower()
     rewrite_err = rec.get("error"); rec["error"] = None; tts_err = None

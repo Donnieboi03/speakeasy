@@ -26,7 +26,7 @@ def cache_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
-PARSE_VERSION = 3          # bump when parse_pdf output changes, so cached parses are rebuilt
+PARSE_VERSION = 4          # bump when parse_pdf output changes, so cached parses are rebuilt
 
 def _key(path):
     st = os.stat(path)
@@ -155,6 +155,8 @@ def parse_pdf(path, fig_pages=None, prev=None):
             lines, _ = _text_lines(page)
             pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": [], "figs_done": False}); continue
         lines, blocks = _text_lines(page)
+        half = [l for l in lines if 0.25 * W < l[2] - l[0] < 0.52 * W]
+        two_col = sum(1 for l in half if l[2] <= W / 2 + 10) >= 8 and sum(1 for l in half if l[0] >= W / 2 - 10) >= 8
         gfx = []
         try:
             for r in page.images():
@@ -171,12 +173,18 @@ def parse_pdf(path, fig_pages=None, prev=None):
             if not m: m = TAB_RE.match(first[4]); kind = "table"
             if not m: continue
             cap = [round(v, 1) for v in _union([lines[i][:4] for i in bl])]
+            # the caption's column on a two-column page: a table never takes the other column's text
+            nxt = min((l for l in lines if l[1] >= cap[3] - 1), key=lambda l: l[1], default=None)
+            in_col = nxt is not None and nxt[2] <= W / 2 + 10 if cap[2] <= W / 2 + 10 else nxt is not None and nxt[0] >= W / 2 - 10
+            if not (two_col and in_col): col = (0, W)
+            elif cap[2] <= W / 2 + 10: col = (cap[0] - 12, W / 2 + 6)
+            else: col = (W / 2 - 6, W)
             text = " ".join(lines[i][4] for i in bl)
             # figure: graphics directly above the caption (chain upward); table: content below
             # (graphics that run into the caption are clipped at its top)
             cand = sorted([[g[0], g[1], g[2], min(g[3], cap[1] - 2)] for g in gfx if g[1] < cap[1] - 20 and g[3] >= cap[1] - 0.7 * H
                            and not (g[3] > cap[3] + 20)], key=lambda g: -g[3]) if kind == "figure" \
-                else sorted([g for g in gfx if g[1] >= cap[3] - 8 and g[1] <= cap[3] + 0.7 * H], key=lambda g: g[1])
+                else sorted([g for g in gfx if g[1] >= cap[3] - 8 and g[1] <= cap[3] + 0.7 * H and g[0] >= col[0] - 4 and g[2] <= col[1] + 4], key=lambda g: g[1])
             body = None
             for g in cand:
                 if body is None:
@@ -186,7 +194,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
                     body = _union([body, g])
             if kind == "table":
                 # the body is the grid / text block right below the caption (until a big gap, the next caption or the page end)
-                below = sorted([l for l in lines if l[1] >= cap[3] - 1 and l[0] < cap[2] + 200 and l[2] > cap[0] - 200], key=lambda l: l[1])
+                below = sorted([l for l in lines if l[1] >= cap[3] - 1 and l[0] >= col[0] and l[2] <= col[1]], key=lambda l: l[1])
                 y = cap[3]; rows = []
                 lh = max(8.0, (cap[3] - cap[1]) / max(1, len(bl)))
                 for l in below:
