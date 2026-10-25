@@ -7,7 +7,12 @@ swift build -c release --disable-sandbox
 APP="$OUT/Speakeasy.app"
 rm -rf "$APP"; mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$(swift build -c release --show-bin-path)/Speakeasy" "$APP/Contents/MacOS/Speakeasy"
-swiftc -O -parse-as-library -swift-version 5 ../src/tracker.swift -o "$APP/Contents/MacOS/speakeasy-track"
+# the embedded tracker is src/tracker.swift with the same BUILD stamp install.sh uses (git sha + source hash)
+BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo src)-$(shasum -a 256 ../src/tracker.swift | cut -c1-8)"
+TSRC="$(mktemp -t speakeasy_track_src).swift"
+sed "s/^let BUILD = \"dev\"/let BUILD = \"$BUILD_ID\"/" ../src/tracker.swift > "$TSRC"
+swiftc -O -parse-as-library -swift-version 5 "$TSRC" -o "$APP/Contents/MacOS/speakeasy-track"
+rm -f "$TSRC"
 cp NOTICE "$APP/Contents/Resources/NOTICE"
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>

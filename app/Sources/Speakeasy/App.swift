@@ -43,12 +43,22 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(.separator())
         m.addItem(withTitle: "Quit Speakeasy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = m
+        handOverFromHammerspoon()
         KeyboardShortcuts.onKeyUp(for: .readSelection) { [weak self] in self?.reader.toggle() }
         if !Permissions.accessibility || !Permissions.screenRecording { showOnboarding() }   // shows a window; prompts only on click
     }
     @objc func toggleCue(_ it: NSMenuItem) {
         guard let key = it.representedObject as? String else { return }
         let on = !Config.on(key); Config.set(key, on ? "on" : "off"); it.state = on ? .on : .off
+    }
+    /// The app owns the hotkey: tell an old Hammerspoon speakeasy block to let go (it deletes its hotkey when
+    /// SPEAKEASY_HOTKEY=app) and reload it headlessly if the hs CLI is installed.
+    func handOverFromHammerspoon() {
+        guard Config.value("SPEAKEASY_HOTKEY") != "app" else { return }
+        Config.set("SPEAKEASY_HOTKEY", "app")
+        for hs in ["/opt/homebrew/bin/hs", "/usr/local/bin/hs"] where FileManager.default.isExecutableFile(atPath: hs) {
+            reader.run(hs, ["-t", "5", "-c", "hs.reload()"], stdin: nil); break
+        }
     }
     @objc func read() { reader.toggle() }
     @objc func stop() { reader.stop() }
@@ -100,6 +110,13 @@ struct OnboardingView: View {
 enum Config {
     static var path: String { NSHomeDirectory() + "/.speakeasy/config" }
     static func lines() -> [String] { ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").components(separatedBy: "\n") }
+    static func value(_ key: String) -> String? {
+        if let e = ProcessInfo.processInfo.environment[key], !e.isEmpty { return e }
+        for l in lines() where l.trimmingCharacters(in: .whitespaces).hasPrefix(key + "=") {
+            return l.split(separator: "=", maxSplits: 1).last.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"'")) }
+        }
+        return nil
+    }
     static func on(_ key: String) -> Bool {
         for l in lines() where l.trimmingCharacters(in: .whitespaces).hasPrefix(key + "=") {
             let v = l.split(separator: "=", maxSplits: 1).last.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"'")).lowercased() } ?? "on"
