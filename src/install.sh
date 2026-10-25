@@ -146,7 +146,6 @@ local FOCUS_ON = cfg("SPEAKEASY_FOCUS", "on") ~= "off"
 local LINES = "/tmp/speakeasy_cap_lines.json"
 local TRACK_ON = FOCUS_ON and cfg("SPEAKEASY_TRACK", "on") ~= "off"
 local TRACKER = os.getenv("HOME") .. "/.speakeasy/bin/speakeasy-track"
-NATIVE_OVERLAY = TRACK_ON and cfg("SPEAKEASY_OVERLAY", "native") ~= "hammerspoon"
 pcall(require, "hs.ipc")        -- lets the 'hs' command-line tool talk to Hammerspoon (e.g. hs -c 'hs.reload()')
 -- speakeasy's own Hammerspoon log: ~/.speakeasy/logs/hs.log (also printed to the Hammerspoon console)
 local function hslog(fmt, ...)
@@ -159,58 +158,15 @@ end
 hslog("config loaded (focus=%s, track=%s, tracker binary %s)", tostring(FOCUS_ON), tostring(TRACK_ON),
       hs.fs.attributes(TRACKER) and "present" or "MISSING")
 
--- Focus highlight: speakeasy writes ~/.speakeasy/focus.json as each sentence starts playing;
--- draw a translucent, click-through rounded box over the part of the selection being read.
-local focusCanvas, focusTimer, focusKey = nil, nil, nil
-local focusCur = nil            -- the focus event currently shown (pid, seq), so tracker updates can be matched
-local srcWinId = nil            -- the window the selection came from (locked at hotkey time)
-local trackerHidden = false     -- the live tracker said the text is not visible
-local srcPid = nil              -- its app
-local function srcIsFront()
-  if not srcWinId then return true end
-  local fw = hs.window.frontmostWindow()
-  return fw ~= nil and fw:id() == srcWinId
+-- The focus box is drawn only by the native tracker (~/.speakeasy/bin/speakeasy-track: an NSPanel moved in-process by
+-- scroll/AX events). Hammerspoon only owns the hotkey and starts/stops the tracker and the backend; it draws nothing.
+-- Stop old Hammerspoon box machinery left over from before a reload.
+for _, n in ipairs({ "speakeasyScrollTap", "speakeasyKeyTap", "speakeasyFocusWatcher", "speakeasyTapGate", "speakeasyNativeTimer" }) do
+  if _G[n] then pcall(function() _G[n]:stop() end); _G[n] = nil end
 end
--- Instant hide/show on app or window switches: event-driven (no polling).
-local function frontSet(isFront)
-  if not focusCanvas then return end
-  if isFront and not trackerHidden then focusCanvas:show() else focusCanvas:hide() end
-end
-speakeasyAppWatcher = hs.application.watcher.new(function(_, ev, app)
-  if not focusCanvas or not srcPid or not app then return end
-  if ev == hs.application.watcher.deactivated and app:pid() == srcPid then frontSet(false)
-  elseif ev == hs.application.watcher.activated then
-    if app:pid() ~= srcPid then frontSet(false) else frontSet(srcIsFront()) end
-  end
-end)
-speakeasyAppWatcher:start()
-speakeasyWinFilter = hs.window.filter.new(true)
-speakeasyWinFilter:subscribe(hs.window.filter.windowFocused, function(w)
-  if focusCanvas and srcWinId then frontSet(w ~= nil and w:id() == srcWinId) end
-end)
-speakeasyWinFilter:subscribe(hs.window.filter.windowUnfocused, function(w)
-  if focusCanvas and srcWinId and w and w:id() == srcWinId then frontSet(false) end
-end)
-local function focusClear()
-  if focusTimer then focusTimer:stop(); focusTimer = nil end
-  trackerHidden = false
-  if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
-  focusCur = nil
-end
-local function hexColor(h, a)
-  local r, g, b = tostring(h or ""):match("^#?(%x%x)(%x%x)(%x%x)")
-  if not r then r, g, b = "3B", "82", "F6" end
-  return { red = tonumber(r, 16) / 255, green = tonumber(g, 16) / 255, blue = tonumber(b, 16) / 255, alpha = a }
-end
-local focusShape = "rect"
--- an ellipse around an object (figure sub-object) needs ~20% more room than a box to cover the same rect
-local function shapeFrame(r)
-  if focusShape == "ellipse" then
-    local dx, dy = r[3] * 0.12 + 6, r[4] * 0.12 + 6
-    return { x = r[1] - dx, y = r[2] - dy, w = r[3] + 2 * dx, h = r[4] + 2 * dy }
-  end
-  return { x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 }
-end
+for _, n in ipairs({ "speakeasyAppWatcher" }) do if _G[n] then pcall(function() _G[n]:stop() end); _G[n] = nil end end
+if speakeasyWinFilter then pcall(function() speakeasyWinFilter:unsubscribeAll() end); speakeasyWinFilter = nil end
+local srcWinId, srcPid = nil, nil
 -- The tracker runs detached (nohup) so a Hammerspoon reload never kills an active read; its pid lives in tracker.pid.
 local TRACKER_PID = os.getenv("HOME") .. "/.speakeasy/tracker.pid"
 local pidCache = { t = 0 }
@@ -229,185 +185,9 @@ function speakeasyTrackerKill()
   if p then hs.execute("/bin/kill " .. p .. " 2>/dev/null") end
   os.remove(TRACKER_PID); pidCache.t = 0
 end
--- did the tracker's native panel draw this sentence? (it writes overlay.json on its first draw of each seq)
-local function nativeDrew(e)
-  local f = io.open(os.getenv("HOME") .. "/.speakeasy/overlay.json", "r"); if not f then return false end
-  local ok, o = pcall(hs.json.decode, f:read("*a") or ""); f:close()
-  return ok and type(o) == "table" and o.drawn == true and tonumber(o.seq) == tonumber(e.seq) and tonumber(o.tracker_pid) == speakeasyTrackerPid()
-end
-local focusShowCanvas
-local function focusShow(e)
-  -- the tracker draws the box itself (native panel); if it has not drawn within 300 ms, Hammerspoon draws it instead
-  if NATIVE_OVERLAY and speakeasyTrackerPid() and not e.native_checked then
-    if speakeasyNativeTimer then speakeasyNativeTimer:stop() end
-    speakeasyNativeTimer = hs.timer.doAfter(0.3, function()
-      if focusCur == nil or focusCur.seq ~= e.seq or focusCur.pid ~= e.pid then return end
-      if nativeDrew(e) then
-        if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
-      else
-        hslog("native panel did not draw seq %s within 300 ms: Hammerspoon box", tostring(e.seq))
-        e.native_checked = true; focusShowCanvas(e)
-      end
-    end)
-    return
-  end
-  focusShowCanvas(e)
-end
-focusShowCanvas = function(e)
-  local r = e.rect
-  if type(r) ~= "table" or #r ~= 4 then return end
-  focusShape = (e.shape == "ellipse") and "ellipse" or "rect"
-  -- speakeasy computed this box from the screen at hotkey time: carry the scrolling done since then
-  local so = speakeasyScrollOff or { 0, 0 }
-  r = { r[1] + so[1], r[2] + so[2], r[3], r[4] }
-  local f = shapeFrame(r)
-  local op = tonumber(e.opacity) or 0.22
-  if not focusCanvas then
-    focusCanvas = hs.canvas.new(f)
-    focusCanvas:level(hs.canvas.windowLevels.overlay)
-    focusCanvas:behaviorAsLabels({ "canJoinAllSpaces", "stationary", "ignoresCycle" })
-    focusCanvas:clickActivating(false)          -- never takes focus; no mouse callback = clicks pass through
-    focusCanvas[1] = { type = "rectangle", action = "strokeAndFill", roundedRectRadii = { xRadius = 6, yRadius = 6 } }
-    focusCanvas:show()
-  else
-    focusCanvas:frame(f); focusCanvas:show()
-  end
-  focusCanvas[1].type = (focusShape == "ellipse") and "oval" or "rectangle"
-  focusCanvas[1].fillColor = hexColor(e.color, op)
-  focusCanvas[1].strokeColor = hexColor(e.color, e.border == false and 0 or math.min(1, op * 3))
-  focusCanvas[1].strokeWidth = 1.5
-  if focusTimer then focusTimer:stop() end
-  local left = (tonumber(e.expires) or (os.time() + 20)) - os.time()
-  focusTimer = hs.timer.doAfter(math.max(1, left), focusClear)   -- watchdog if speakeasy dies
-  -- hide the box whenever the source window is not frontmost (works with or without the live tracker)
-  if not srcIsFront() then focusCanvas:hide() end
-end
-local function focusRead()
-  local f = io.open(os.getenv("HOME") .. "/.speakeasy/focus.json", "r")
-  if not f then return end
-  local raw = f:read("*a"); f:close()
-  local ok, e = pcall(hs.json.decode, raw)
-  if not ok or type(e) ~= "table" then return end
-  local key = tostring(e.pid) .. ":" .. tostring(e.seq)
-  if key == focusKey then return end
-  focusKey = key
-  if e.state == "show" and FOCUS_ON then focusShow(e); focusCur = e else focusClear() end
-end
--- Live tracker updates (~/.speakeasy/track.json): move the box with scrolling, hide it when the window is not
--- frontmost, its content changed, or the text scrolled off.
-local trackKey = nil
-local function trackRead()
-  if not focusCur or not focusCanvas then return end
-  local f = io.open(os.getenv("HOME") .. "/.speakeasy/track.json", "r")
-  if not f then return end
-  local raw = f:read("*a"); f:close()
-  local ok, t = pcall(hs.json.decode, raw)
-  if not ok or type(t) ~= "table" then return end
-  if t.focus_pid ~= focusCur.pid or t.seq ~= focusCur.seq then return end
-  if raw == trackKey then return end
-  trackKey = raw
-  -- a scan whose screenshot predates the last scroll or tab switch is stale: the scroll prediction already moved the box
-  if tonumber(t.cap_ts) and tonumber(t.cap_ts) < (speakeasyLastMove or 0) then return end
-  if t.visible == false then trackerHidden = true; focusCanvas:hide()
-  elseif type(t.rect) == "table" and #t.rect == 4 then
-    local r = t.rect
-    speakeasyScrollCalibrate(r)
-    trackerHidden = false
-    focusCanvas:frame(shapeFrame(r))
-    if srcIsFront() then focusCanvas:show() end
-  end
-end
--- Real-time scroll following: a listen-only scroll tap shifts the box by the scroll delta at once (no screenshot needed);
--- the scale (points of content per scroll point) is calibrated from the next recognition fit, which also corrects drift.
-speakeasyLastMove = 0
-local scrollK = { [true] = 1.0, [false] = 1.0 }   -- continuous (trackpad) / line (wheel) scale
-local scrollAcc = { dx = 0, dy = 0, cont = true } -- predicted shift since the last recognition fit
-local scrollStats = { n = 0, lagSum = 0, lagMax = 0, t0 = 0 }
-local function scrollFlush()
-  if scrollStats.n > 0 then
-    hslog("scroll-follow: %d events, lag scroll->box avg %.1f ms max %.1f ms, k=%.2f/%.2f", scrollStats.n,
-          scrollStats.lagSum / scrollStats.n, scrollStats.lagMax, scrollK[true], scrollK[false])
-  end
-  scrollStats = { n = 0, lagSum = 0, lagMax = 0, t0 = 0 }
-end
-function speakeasyScrollCalibrate(r)
-  if not focusCanvas then return end
-  local f = shapeFrame(r); local cur = focusCanvas:frame()
-  local pred = scrollAcc.dy
-  if math.abs(pred) >= 20 then
-    local actual = pred + (f.y - cur.y)                    -- what the content really moved
-    local k = scrollK[scrollAcc.cont] * actual / pred
-    if k > 0.2 and k < 5 then scrollK[scrollAcc.cont] = 0.5 * scrollK[scrollAcc.cont] + 0.5 * k end
-    hslog("scroll-follow: fit residual %.0f pt after %.0f pt predicted; k(%s)=%.2f", f.y - cur.y, pred,
-          scrollAcc.cont and "trackpad" or "wheel", scrollK[scrollAcc.cont])
-  end
-  scrollAcc.dx, scrollAcc.dy = 0, 0
-end
-local function overSource()
-  if not srcWinId or not srcIsFront() then return false end
-  local w = hs.window.get(srcWinId); if not w then return false end
-  local m = hs.mouse.absolutePosition(); local fr = w:frame()
-  return m.x >= fr.x and m.x <= fr.x + fr.w and m.y >= fr.y and m.y <= fr.y + fr.h
-end
-local P = hs.eventtap.event.properties
-if speakeasyScrollTap then speakeasyScrollTap:stop() end
-speakeasyScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(e)
-  if not focusCanvas or not focusCur or trackerHidden then return false end
-  if not overSource() then return false end
-  local cont = e:getProperty(P.scrollWheelEventIsContinuous) ~= 0
-  local dy = e:getProperty(P.scrollWheelEventPointDeltaAxis1) or 0
-  local dx = e:getProperty(P.scrollWheelEventPointDeltaAxis2) or 0
-  if dy == 0 and dx == 0 then return false end
-  local k = scrollK[cont]
-  local f = focusCanvas:frame()
-  focusCanvas:frame({ x = f.x + dx * k, y = f.y + dy * k, w = f.w, h = f.h })
-  scrollAcc.dy = scrollAcc.dy + dy * k; scrollAcc.dx = scrollAcc.dx + dx * k; scrollAcc.cont = cont
-  speakeasyScrollOff = speakeasyScrollOff or { 0, 0 }
-  speakeasyScrollOff[1] = speakeasyScrollOff[1] + dx * k; speakeasyScrollOff[2] = speakeasyScrollOff[2] + dy * k
-  speakeasyLastMove = hs.timer.secondsSinceEpoch()
-  -- lag: event timestamp (ns since boot) to the box having moved
-  local lag = (hs.timer.absoluteTime() - e:timestamp()) / 1e6
-  if lag >= 0 and lag < 5000 then
-    scrollStats.n = scrollStats.n + 1; scrollStats.lagSum = scrollStats.lagSum + lag
-    if lag > scrollStats.lagMax then scrollStats.lagMax = lag end
-  end
-  if speakeasyScrollFlushT then speakeasyScrollFlushT:stop() end
-  speakeasyScrollFlushT = hs.timer.doAfter(0.6, scrollFlush)
-  return false                                               -- listen only: the scroll goes through untouched
-end)
-speakeasyScrollTap:start()
--- Tab switches inside the app (Cmd+1..9, Ctrl+Tab, Cmd+Shift+[ ], Cmd+Opt+arrows, Cmd+T/W): hide at once;
--- the tracker shows the box again when the text is back on screen.
-if speakeasyKeyTap then speakeasyKeyTap:stop() end
-speakeasyKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
-  if not focusCanvas or not focusCur or not srcIsFront() then return false end
-  local fl = e:getFlags(); local c = hs.keycodes.map[e:getKeyCode()]
-  local tab = (fl.cmd and not fl.alt and c and c:match("^%d$"))
-    or (fl.ctrl and c == "tab")
-    or (fl.cmd and fl.shift and (c == "[" or c == "]"))
-    or (fl.cmd and fl.alt and (c == "left" or c == "right"))
-    or (fl.cmd and (c == "t" or c == "w"))
-    or c == "pageup" or c == "pagedown" or c == "home" or c == "end"
-  if tab then
-    trackerHidden = true; focusCanvas:hide(); speakeasyLastMove = hs.timer.secondsSinceEpoch()
-    hslog("focus hidden on key %s%s", fl.cmd and "cmd+" or (fl.ctrl and "ctrl+" or ""), tostring(c))
-  end
-  return false
-end)
--- These are active (filtering) taps: every scroll/key event on the Mac waits for Hammerspoon's Lua thread. Run them only
--- while Hammerspoon's own box is on screen; the native tracker panel has its own listen-only tap.
-speakeasyScrollTap:stop(); speakeasyKeyTap:stop()
-if speakeasyTapGate then speakeasyTapGate:stop() end
-speakeasyTapGate = hs.timer.doEvery(0.2, function()
-  local want = focusCanvas ~= nil
-  if want ~= speakeasyScrollTap:isEnabled() then
-    if want then speakeasyScrollTap:start(); speakeasyKeyTap:start() else speakeasyScrollTap:stop(); speakeasyKeyTap:stop() end
-  end
-end)
 local function startTracker(win)
   speakeasyTrackerKill()
   srcWinId = win and win:id() or nil
-  speakeasyScrollOff = { 0, 0 }
   srcPid = win and win:application() and win:application():pid() or nil
   if not TRACK_ON then hslog("tracker off (SPEAKEASY_TRACK)"); return end
   if not win then hslog("tracker not started: no focused window"); return end
@@ -415,7 +195,7 @@ local function startTracker(win)
   local app = win:application()
   local args = { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
     "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5"),
-    "--overlay", NATIVE_OVERLAY and "native" or "hammerspoon", "--run-id", tostring(speakeasyRunId) }
+    "--overlay", "native", "--run-id", tostring(speakeasyRunId) }
   local q = {}
   for _, a in ipairs(args) do q[#q + 1] = "'" .. tostring(a):gsub("'", "'\\''") .. "'" end
   local cmd = string.format("/usr/bin/nohup '%s' %s >/dev/null 2>&1 & echo $! > '%s'", TRACKER, table.concat(q, " "), TRACKER_PID)
@@ -423,13 +203,6 @@ local function startTracker(win)
   local ok = speakeasyTrackerPid() ~= nil
   hslog("tracker start %s: window %s pid %s run %s", ok and "ok" or "FAILED", tostring(win:id()), tostring(app and app:pid()), tostring(speakeasyRunId))
 end
-if speakeasyFocusWatcher then speakeasyFocusWatcher:stop() end
-speakeasyFocusWatcher = hs.pathwatcher.new(os.getenv("HOME") .. "/.speakeasy/", function(paths)
-  for _, p in ipairs(paths) do
-    if p:match("focus%.json") then focusRead(); trackRead(); return end
-    if p:match("track%.json") then trackRead(); return end
-  end
-end):start()
 
 -- Is any text selected? Copy with Cmd-C and see if the pasteboard changed; restore it afterwards.
 local function hasTextSelection()
@@ -589,11 +362,10 @@ speakeasyHotkey = hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   os.remove("/tmp/speakeasy_sel.png"); os.remove("/tmp/speakeasy_win.png")   -- legacy capture files
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
   if hs.fs.attributes(pidf) then
-    focusClear()
     speakeasyTrackerKill()
     hs.task.new(SPEAKEASY, nil, { "stop" }):start(); return
   end
-  focusClear(); os.remove(LINES)
+  os.remove(LINES)
   local t0 = hs.timer.secondsSinceEpoch()
   startTracker(hs.window.focusedWindow())      -- lock onto the source window now; it idles until the first sentence plays
   writeDocHint(hs.window.focusedWindow())

@@ -79,12 +79,19 @@ loaded lazily in the Kokoro venv while vision runs) grounds the phrase on the fi
 `~/.speakeasy/logs/tracker.jsonl`, one JSON object per line, written as each event happens:
 
 - `start` {ts, tracker_pid, pid, window_id, accessibility, screen_recording, fps, run_id, build, overlay}
-- `draw` {ts, tracker_pid, seq, rect (panel), text_rect, src: ax|ocr|doc|scroll-delta|event, overlay: swift-panel|hammerspoon}
+- `draw` {ts, tracker_pid, seq, rect (panel), text_rect, src: ax|ocr|doc|scroll-delta|event, overlay: swift-panel}
+- `draw-failed` {ts, tracker_pid, seq, why, after_ms: 300}: the panel should be showing but has not drawn 300 ms after the sentence started; also written to `hs.log` as `NATIVE PANEL FAILED TO DRAW`. There is no fallback box.
 - `hide` {ts, tracker_pid, seq, trigger: app-switch|tab-switch|window-switch|not-frontmost|scrolled-off|content-changed|speech-finished, hide_ms}
 - `scroll` {ts, tracker_pid, scroll_lag_ms, src}; `ax` {ts, tracker_pid, notif, ax_ms, hit}
 - `tap`, `ax-observer`, `ax-selection` (setup status), `frame` (per OCR scan)
 - `exit` (also on SIGTERM) {ts, tracker_pid, run_id, reason, draws, hides, scroll_events, ax_events, ax_hits, ocr_hits, scroll_delta_hits,
   scroll_lag_avg_ms, scroll_lag_max_ms, hide_ms_avg, hide_ms_max, rss_mb_peak, cpu_pct, build}
 
+The exit record also carries `draw_failed` (count).
+
 `runs.jsonl` carries the same `run_id`, plus `app` (menubar|cli), `overlay`, `ram_total_mb` and always `doc_source`.
 Paths are home-relative (`~/...`) or hashed (`doc_path_hash`); window titles are never logged.
+
+## Focus box
+
+The focus box is drawn only by the native tracker (`~/.speakeasy/bin/speakeasy-track`, an `NSPanel` it moves itself on scroll/AX events and corrects with on-screen text recognition). Hammerspoon only binds the hotkey and starts/stops the tracker and the backend; it draws nothing and installs no scroll or key event taps. The old Hammerspoon canvas overlay, its 300 ms fallback and `SPEAKEASY_OVERLAY` were removed: if the panel cannot draw, the run logs `draw-failed` (tracker.jsonl) and `NATIVE PANEL FAILED TO DRAW` (hs.log). `SPEAKEASY_FOCUS=off` or `SPEAKEASY_TRACK=off` turns the box off.

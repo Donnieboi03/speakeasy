@@ -3073,11 +3073,10 @@ def main(argv=None):
     sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50)
     a = p.parse_args(argv)
     import uuid
-    ov = os.environ.get("SPEAKEASY_OVERLAY", "native").lower()
     track = os.environ.get("SPEAKEASY_TRACK", "on").lower() not in ("off", "0", "false", "no")
     RUN_META.update(run_id=getattr(a, "run_id", None) or uuid.uuid4().hex[:12],
                     app=getattr(a, "app", None) or os.environ.get("SPEAKEASY_APP", "cli"),
-                    overlay=("swift-panel" if track and ov != "hammerspoon" else "hammerspoon")
+                    overlay=("swift-panel" if track else "off")
                             if os.environ.get("SPEAKEASY_FOCUS", "on").lower() not in ("off", "0", "false", "no") else "off")
     if docmap is not None:
         try: docmap.clean_tmp(tempfile.gettempdir())          # our own old downloads, every run (not only download runs)

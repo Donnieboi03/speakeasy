@@ -165,6 +165,8 @@ final class Live: NSObject {
     var stallN = 0, stallMax = 0.0, lastWork = "idle"
     var hb: Timer? = nil
     var lastFlush = 0.0
+    var drawFails = 0
+    var runId = ""
     var winTimer: DispatchSourceTimer? = nil
     // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
     func startWinWatch(_ wid: CGWindowID) {
@@ -352,6 +354,15 @@ final class Live: NSObject {
         axGood = false
         if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" }
         apply()                                                   // draw the event box now; AX refines it later
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {   // no fallback box any more: fail loudly instead
+            guard self.seq == s, self.drawnSeq != s, self.rect != nil, self.front, self.winFront, self.scanVisible, !self.hiddenByKey else { return }
+            let why = self.panel == nil ? "no panel" : (self.panel!.isVisible ? "visible but no draw record" : "panel not on screen")
+            self.drawFails += 1
+            self.rec(["event": "draw-failed", "seq": s, "why": why, "after_ms": 300])
+            let line = "\(stamp()) NATIVE PANEL FAILED TO DRAW: seq \(s) (\(why)), run \(self.runId)\n"
+            if let h = FileHandle(forWritingAtPath: self.home + "/logs/hs.log") { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
+            FileHandle.standardError.write(line.data(using: .utf8)!)
+        }
         if axDead { rec(["event": "ax-range", "seq": s, "hit": false, "why": "ax-disabled"]); return }
         guard let el = axEl, let rg = range, rg.count == 2 else {
             axFail = axEl == nil ? "no-element" : "no-range"
@@ -461,7 +472,7 @@ final class Live: NSObject {
          "scroll_delta_hits": deltaHits,
          "scroll_lag_avg_ms": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(), "scroll_lag_max_ms": (lagMax * 10).rounded() / 10,
          "hide_ms_avg": hideN > 0 ? (hideSum / Double(hideN) * 10).rounded() / 10 : NSNull(), "hide_ms_max": (hideMax * 10).rounded() / 10,
-         "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
+         "draw_failed": drawFails, "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
          "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
     }
 }
@@ -520,6 +531,7 @@ func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CG
     return (CGRect(x: sc * tg[0] + ox, y: sc * tg[1] + oy, width: sc * (tg[2] - tg[0]), height: sc * (tg[3] - tg[1])), P.count, rms)
 }
 var gAxDead = false   // set on main when the app has no AX text geometry; the scan loop then skips AX lookups
+func stamp() -> String { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f.string(from: Date()) }
 func recognise(_ img: CGImage, frame: CGRect, accurate: Bool) -> [OLine] {
     let req = VNRecognizeTextRequest()
     req.recognitionLevel = accurate ? .accurate : .fast
@@ -675,8 +687,8 @@ struct Tracker {
         try? FileManager.default.createDirectory(atPath: home + "/logs", withIntermediateDirectories: true)
         // element focused at hotkey time; only when already trusted (launched by Hammerspoon), never prompt
         let axEl = pid > 0 && AXIsProcessTrusted() ? focusedElement(pid) : nil
-        let native = (a["overlay"] ?? "native") == "native"
-        if native { await MainActor.run { Live.shared.setup(home: home, pid: pid, el: axEl); Live.shared.startWinWatch(wid) } }
+        let native = true            // the native panel is the only focus box (the Hammerspoon canvas was removed)
+        if native { await MainActor.run { Live.shared.runId = a["run-id"] ?? ""; Live.shared.setup(home: home, pid: pid, el: axEl); Live.shared.startWinWatch(wid) } }
 
         // ScreenCaptureKit: find our window once
         var filter: SCContentFilter? = nil
