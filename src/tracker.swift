@@ -127,7 +127,7 @@ func docMap(_ lines: [OLine], _ doc: [String: Any]) -> (CGRect, Int, Double)? {
     var num = 0.0, den = 0.0
     for (p, q) in zip(P, S) { num += (p.0 - mpx) * (q.0 - msx) + (p.1 - mpy) * (q.1 - msy); den += pow(p.0 - mpx, 2) + pow(p.1 - mpy, 2) }
     if den < 100 { return nil }
-    let sc = num / den; if sc <= 0 { return nil }
+    let sc = num / den; if sc < 0.3 || sc > 6 { return nil }
     let ox = msx - sc * mpx, oy = msy - sc * mpy
     var err = 0.0
     for (p, q) in zip(P, S) { err += pow(sc * p.0 + ox - q.0, 2) + pow(sc * p.1 + oy - q.1, 2) }
@@ -353,7 +353,13 @@ struct Tracker {
                             var lines = recognise(img, frame: frame, accurate: accurate)
                             var hit: CGRect? = nil
                             if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm) {
-                                hit = r.intersection(frame); method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10
+                                let vis = r.intersection(frame)
+                                // sanity: the mapped box must lie mostly in the window, and a text line must agree with where its words are
+                                var ok = !vis.isNull && vis.width * vis.height >= 0.5 * r.width * r.height
+                                if ok && (dm["kind"] as? String) == "line", let rf = refind(lines, target: target, near: lastBox),
+                                   rf.intersection(r).isNull { ok = false }
+                                if ok { hit = vis; method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
+                                else { out["doc_rejected"] = true }
                             }
                             if hit == nil { hit = refind(lines, target: target, near: lastBox) }
                             if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s

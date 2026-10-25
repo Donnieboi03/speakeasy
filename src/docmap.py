@@ -70,6 +70,9 @@ def _text_lines(page):
         if bl: blocks.append(bl)
     return lines, blocks
 
+def _overlap(a, b):
+    return a[0] < b[2] and b[0] < a[2] and a[1] < b[3] and b[1] < a[3]
+
 def _inside(r, b, pad=2):
     return r[0] >= b[0] - pad and r[2] <= b[2] + pad and r[1] >= b[1] - pad and r[3] <= b[3] + pad
 

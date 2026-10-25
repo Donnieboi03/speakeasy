@@ -787,6 +787,9 @@ class Focus:
         for i, l in enumerate(d["page"]["lines"]):
             lt = set(docmap._toks(l[4]))
             if len(lt) >= 3 and len(lt & want) / len(lt) >= 0.8: out.append(i)      # short labels ("EEG") match anything
+        r = getattr(self, "_sr", None)
+        if r and out:                                                   # stay inside the selected block (other columns share words)
+            out = [i for i in out if docmap._overlap(d["page"]["lines"][i][:4], r)] or out
         return out
     def _table_for_selection(self, d):
         if hasattr(self, "_tb"): return self._tb
@@ -800,6 +803,27 @@ class Focus:
             cov = len(st & set(t for l in inside for t in docmap._toks(l[4]))) / len(st)
             if inside and cov >= 0.6: self._tb = f; break
         return self._tb
+    def _sel_region(self, d):
+        """Page-space region the selection / capture covers (union of the selected lines, and the capture rect mapped back)."""
+        if hasattr(self, "_sr"): return self._sr
+        self._sr = None
+        ix = self._doc_lines(1, len(self.lines)) if self.lines else []
+        if ix:
+            ls = [d["page"]["lines"][i] for i in ix]
+            # keep the dominant block: lines from another column that happen to share words must not widen it
+            ys = sorted(l[1] for l in ls); med = ys[len(ys) // 2]
+            xs = sorted(l[0] for l in ls); mx = xs[len(xs) // 2]
+            ls = [l for l in ls if abs(l[0] - mx) < 60] or ls
+            ls.sort(key=lambda l: l[1]); i0 = min(range(len(ls)), key=lambda i: abs(ls[i][1] - med))
+            a = b = i0                                                  # the contiguous run of lines around the median
+            while a > 0 and ls[a][1] - ls[a - 1][3] < 25: a -= 1
+            while b + 1 < len(ls) and ls[b + 1][1] - ls[b][3] < 25: b += 1
+            ls = ls[a:b + 1]
+            self._sr = [min(l[0] for l in ls) - 4, min(l[1] for l in ls) - 4, max(l[2] for l in ls) + 4, max(l[3] for l in ls) + 4]
+        return self._sr
+    def _visible(self, d, bbox):
+        r = self._sel_region(d)
+        return r is None or docmap._overlap(bbox, r)
     def _fig_mode(self, d):
         """The figure this run is about: the selection is (mostly) its caption, or the screenshot went to the vision model."""
         if getattr(self, "_fm_done", False): return self._fm
@@ -810,8 +834,15 @@ class Focus:
         best = max(figs, key=lambda f: len(sel & set(docmap._toks(f.get("caption") or ""))))
         ov = len(sel & set(docmap._toks(best.get("caption") or ""))) / max(1, len(sel))
         vision = bool(self.rec.get("image"))
-        if ov >= 0.4 or (vision and (ov >= 0.15 or len(figs) == 1)):
-            self._fm = best
+        if ov >= 0.4:
+            self._fm = best                                             # the selection is the caption
+        elif vision:
+            # the screenshot must actually contain the figure body: a paragraph that cites "Fig. 3e" stays in text mode
+            reg = self._sel_region(d)
+            vis = [f for f in figs if reg is None or docmap._overlap(f["bbox"], reg)]
+            if vis:
+                b2 = max(vis, key=lambda f: len(sel & set(docmap._toks(f.get("caption") or ""))))
+                if ov >= 0.15 and b2 is best or len(vis) == 1: self._fm = b2
         self._fm_done = vision or self.rec.get("vision_gate") is not None   # decided once the vision choice is known
         self.rec["doc_figure_mode"] = bool(self._fm)
         return self._fm
@@ -821,10 +852,9 @@ class Focus:
         self._dt = None
         d = DOC.get()
         if d and d.get("page") and not self.line_bounds and self.rect:
-            ix = self._doc_lines(1, len(self.lines)) if self.lines else []
-            if ix:
-                ls = [d["page"]["lines"][i] for i in ix]
-                pr = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]
+            sr = self._sel_region(d)
+            if sr:
+                pr = [sr[0] + 4, sr[1] + 4, sr[2] - 4, sr[3] - 4]
                 x, y, w, h = self.rect
                 if pr[3] - pr[1] > 4:
                     sc = h / (pr[3] - pr[1])                       # height is reliable; web views often report the column width
@@ -885,9 +915,11 @@ class Focus:
                 tgt, kind = (prect, "panel") if prect else (fm["bbox"], "figure"); label = fm["label"] + (panel or "")
                 if use_g:
                     r.pending = GROUNDER.submit(DOC.path, d["page"]["n"], prect or fm["bbox"], docmap.object_phrase(fp))
-        elif f:
+        elif f and (f.get("kind") == "table" or self._visible(d, f.get("bbox") or [0, 0, 0, 0])):
             self.last_fig = f
             tgt, kind = docmap.target_rect(f, panel); label = f["label"] + (panel or "")
+        elif f:
+            f = None                                                    # cited but not on screen: stay on the sentence's own lines
         if tgt is None and not f:
             # a selection inside a table body (row labels, cells): box the table
             tb = self._table_for_selection(d)
@@ -905,8 +937,15 @@ class Focus:
         if t:
             nr[:] = [round(v, 1) for v in docmap.apply(t, tgt)]
         nr.shape = shape
+        anc = d.get("anchors") or []
+        if self.lines:
+            ix = self._doc_lines(1, len(self.lines))
+            own = [[round(v, 1) for v in d["page"]["lines"][i][:4]] + [d["page"]["lines"][i][4][:80]] for i in ix if len(d["page"]["lines"][i][4].strip()) >= 14]
+            keys = set(a[4] for a in own)
+            anc = (own + [a for a in anc if a[4] not in keys])[:48]
         nr.doc = {"kind": kind, "label": label, "page": d["page"]["n"], "page_size": d.get("page_size"), "target": [round(v, 1) for v in tgt],
-                  "anchors": d.get("anchors") or []}
+                  "anchors": anc}
+        if kind == "line": nr.doc["lines"] = [[round(v, 1) for v in d["page"]["lines"][i][:4]] for i in self._doc_lines(*self.last_lines)]
         if kind != "line" and f and f.get("caption"):
             nr.src = [re.sub(r"\s+", " ", f["caption"])[:100]]          # tracker finds the caption when anchors fail
         return nr, ("doc-" + kind) if (t or kind != "line") else method
@@ -1694,6 +1733,8 @@ def vision_call(text, data_url, timeout, mode=None):
 
 _FIG_CUES = re.compile(r"(?i)\b(fig\.?|figure|table|tab\.|axis|axes|x-axis|y-axis|chart|plot|graph|diagram|legend|histogram|scatter|panel|flowchart)\b|%")
 
+_CAPTION_START = re.compile(r"(?i)^\s*(fig(?:ure)?\.?|table|tab\.)\s*[A-Z]?\d+[a-z]?\s*[|:.]")
+
 def vision_gate(text):
     """Cheap, model-free check: does this copied text need the screenshot? Returns (use_vision, reason)."""
     t = text.strip()
@@ -1711,6 +1752,13 @@ def vision_gate(text):
         return True, "column alignment"
     if re.search(r"[\u2500-\u257f\u2580-\u259f]", t):
         return True, "box/bar drawing chars"
+    # prose first: full sentences with %, units, numbers or "Fig. 3e" citations are read as text
+    sents0 = re.findall(r"[^.!?]{20,}?[a-z)\]%\d][.!?](?:[\"')\]]*)(?=\s|$)", re.sub(r"\b(?:Fig|Figs|Eq|al|e\.g|i\.e|vs|ca|approx|Ref|No)\.", "X", t))
+    longw = sum(len(x.split()) for x in sents0)
+    shortl = sum(1 for l in lines if len(l.split()) <= 4)
+    if len(sents0) >= 2 and longw >= 0.6 * len(words) and longw / len(sents0) >= 8 and shortl <= max(1, len(lines) // 4) \
+            and not _CAPTION_START.match(t):
+        return False, f"prose ({len(words)} words, {len(sents0)} sentences)"
     m = _FIG_CUES.search(t)
     if m:
         return True, f"figure/chart cue '{m.group(0).strip()}'"
