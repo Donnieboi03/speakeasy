@@ -6,7 +6,7 @@ HOME_DIR="${SPEAKEASY_HOME:-$HOME/.speakeasy}"
 MODEL="${SPEAKEASY_MODEL:-qwen2.5:3b-instruct}"
 VMODEL="${SPEAKEASY_VISION_MODEL:-qwen2.5vl:3b}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
-cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
+cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then
@@ -85,7 +85,7 @@ else
 fi
 # Document-aware focus (PDF parsing): PyMuPDF in the Kokoro venv (AGPL-3.0; fine for local personal use)
 if [ -x "$TTS_VENV/bin/python" ]; then
-  "$TTS_VENV/bin/python" -c 'import pymupdf' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pymupdf >/dev/null 2>&1 \
+  "$TTS_VENV/bin/python" -c 'import pymupdf, PIL' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pymupdf pillow >/dev/null 2>&1 \
     && echo "PyMuPDF ready for document-aware focus" || echo "NOTE: PyMuPDF not installed; PDF figure mapping off (Markdown still works)"
 fi
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
@@ -94,6 +94,7 @@ set_cfg SPEAKEASY_FOCUS on
 set_cfg SPEAKEASY_FOCUS_TAGS off
 set_cfg SPEAKEASY_TRACK on
 set_cfg SPEAKEASY_DOC_READ local
+set_cfg SPEAKEASY_GROUND auto
 set_cfg SPEAKEASY_TRACK_FPS 5
 # old default (3) -> 5 scans/s while speaking
 if grep -qx 'SPEAKEASY_TRACK_FPS=3' "$CONFIG" 2>/dev/null; then sed -i '' 's/^SPEAKEASY_TRACK_FPS=3$/SPEAKEASY_TRACK_FPS=5/' "$CONFIG"; fi
@@ -194,10 +195,20 @@ local function hexColor(h, a)
   if not r then r, g, b = "3B", "82", "F6" end
   return { red = tonumber(r, 16) / 255, green = tonumber(g, 16) / 255, blue = tonumber(b, 16) / 255, alpha = a }
 end
+local focusShape = "rect"
+-- an ellipse around an object (figure sub-object) needs ~20% more room than a box to cover the same rect
+local function shapeFrame(r)
+  if focusShape == "ellipse" then
+    local dx, dy = r[3] * 0.12 + 6, r[4] * 0.12 + 6
+    return { x = r[1] - dx, y = r[2] - dy, w = r[3] + 2 * dx, h = r[4] + 2 * dy }
+  end
+  return { x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 }
+end
 local function focusShow(e)
   local r = e.rect
   if type(r) ~= "table" or #r ~= 4 then return end
-  local f = { x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 }
+  focusShape = (e.shape == "ellipse") and "ellipse" or "rect"
+  local f = shapeFrame(r)
   local op = tonumber(e.opacity) or 0.22
   if not focusCanvas then
     focusCanvas = hs.canvas.new(f)
@@ -209,6 +220,7 @@ local function focusShow(e)
   else
     focusCanvas:frame(f); focusCanvas:show()
   end
+  focusCanvas[1].type = (focusShape == "ellipse") and "oval" or "rectangle"
   focusCanvas[1].fillColor = hexColor(e.color, op)
   focusCanvas[1].strokeColor = hexColor(e.color, e.border == false and 0 or math.min(1, op * 3))
   focusCanvas[1].strokeWidth = 1.5
@@ -246,7 +258,7 @@ local function trackRead()
   elseif type(t.rect) == "table" and #t.rect == 4 then
     local r = t.rect
     trackerHidden = false
-    focusCanvas:frame({ x = r[1] - 4, y = r[2] - 2, w = r[3] + 8, h = r[4] + 4 })
+    focusCanvas:frame(shapeFrame(r))
     if srcIsFront() then focusCanvas:show() end
   end
 end

@@ -357,6 +357,8 @@ except Exception:            # pragma: no cover - missing module never breaks sp
     docmap = None
 
 class DocJob(_threading.Thread):
+    path = None
+    img_given = False
     """Find and read the source document (read-only, local) alongside the audio; never blocks speech."""
     def __init__(self, hint_path, sel_text, rec):
         super().__init__(daemon=True)
@@ -387,8 +389,9 @@ class DocJob(_threading.Thread):
         if not path: return
         if src == "browser":
             path = docmap.fetch_pdf(path, tempfile_dir())
+        self.path = path
         if not docmap.cached(path): self.cold = True            # first read of this file: the prompt will not wait for it
-        doc, cache = docmap.load(path)
+        doc, cache = docmap.load(path, sel_text=self.sel)
         self._fill(doc_source=src, doc_path_hash=docmap.path_hash(hint.get("url") if src == "browser" else path), doc_cache=cache)
         if not doc: return
         out = {"kind": doc["kind"], "figures": [], "page": None, "anchors": []}
@@ -424,12 +427,70 @@ class DocJob(_threading.Thread):
             self._fill(doc_map_method="md-line" if at else "md-none")
         self._fill(figures_found=len(out["figures"]))
         self.out = out
+        st = set(docmap._toks(self.sel))
+        about_fig = any(f.get("kind") == "figure" and len(st & set(docmap._toks(f.get("caption") or ""))) >= 0.4 * max(1, len(st)) for f in out["figures"])
+        if out.get("page") and any(f.get("kind") == "figure" for f in out["figures"]) and (self.img_given or about_fig):
+            GROUNDER.start()                                          # load the grounding model while vision / the LLM run
     cold = False
     def get(self, wait=0.0):
         if wait > 0 and not self.cold:
             end = time.time() + wait
             while not self.done.is_set() and not self.cold and time.time() < end: self.done.wait(0.01)
         return self.out if self.done.is_set() else None
+
+class _GFuture:
+    def __init__(self, clip):
+        self.done = _threading.Event(); self.boxes = []; self.labels = []; self.ms = None; self.clip = clip; self.max_frac = 0.6
+    def best(self):
+        """The grounded box for the sentence's object: a non-generic phrase, not (almost) the whole figure."""
+        c = self.clip; ca = max(1.0, (c[2] - c[0]) * (c[3] - c[1]))
+        good = [(b, l) for b, l in zip(self.boxes, self.labels or [""] * len(self.boxes))
+                if (b[2] - b[0]) * (b[3] - b[1]) < self.max_frac * ca and docmap.content_words(l or "x y z") and not docmap.REF_RE.search(l or "")]
+        if not good: good = [(b, l) for b, l in zip(self.boxes, self.labels or [""] * len(self.boxes)) if (b[2] - b[0]) * (b[3] - b[1]) < self.max_frac * ca]
+        return good[0][0] if good else None
+
+class Grounder:
+    """Florence-2 phrase grounding on the figure crop, in a lazily started worker (Kokoro venv). Never blocks speech."""
+    def __init__(self):
+        self.p = None; self.lock = _threading.Lock(); self.pending = {}; self.n = 0; self.ready = _threading.Event(); self.failed = False
+    def enabled(self):
+        if os.environ.get("SPEAKEASY_GROUND", "auto").lower() in ("off", "0", "no", "false") or self.failed or docmap is None: return False
+        return DOC is not None and getattr(DOC, "path", None) and DOC.path.lower().endswith(".pdf") and docmap.venv_python() is not None
+    def start(self):
+        with self.lock:
+            if self.p is not None or not self.enabled(): return
+            try:
+                env = dict(os.environ, PYTHONWARNINGS="ignore", HF_HUB_OFFLINE=os.environ.get("HF_HUB_OFFLINE", "0"))
+                self.p = subprocess.Popen([docmap.venv_python(), os.path.join(os.path.dirname(os.path.realpath(__file__)), "ground.py")],
+                                          stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, bufsize=1, env=env)
+            except OSError:
+                self.failed = True; return
+            _threading.Thread(target=self._read, daemon=True).start()
+    def _read(self):
+        for line in self.p.stdout:
+            try: m = json.loads(line)
+            except ValueError: continue
+            if "ready" in m:
+                if not m["ready"]: self.failed = True
+                self.ready.set(); continue
+            f = self.pending.pop(m.get("id"), None)
+            if f: f.boxes, f.labels, f.ms = m.get("boxes") or [], m.get("labels") or [], m.get("ms"); f.done.set()
+        self.failed = True; self.ready.set()
+        for f in list(self.pending.values()): f.done.set()
+    def submit(self, pdf, page, clip, text):
+        self.start()
+        f = _GFuture(clip)
+        if self.p is None: f.done.set(); return f
+        with self.lock:
+            self.n += 1; self.pending[self.n] = f
+            try: self.p.stdin.write(json.dumps({"id": self.n, "pdf": pdf, "page": page, "clip": clip, "text": text[:200]}) + "\n"); self.p.stdin.flush()
+            except (OSError, ValueError): f.done.set()
+        return f
+    def close(self):
+        if self.p is not None:
+            try: self.p.stdin.close(); self.p.terminate()
+            except OSError: pass
+GROUNDER = Grounder()
 
 def doc_context_text():
     """Figure / table list for the prompt (labels only), when the document was read in time."""
@@ -566,6 +627,8 @@ class FRect(list):
     src = None
     rng = None
     doc = None
+    shape = None
+    pending = None
 
 def _plain_line(l):
     """A source line as it looks rendered on screen (markdown/table syntax removed), for OCR re-finding."""
@@ -577,6 +640,7 @@ def _plain_line(l):
 class Focus:
     def __init__(self, text, rect, line_bounds, image_mode, dry, rec):
         self.lines = source_lines(text)
+        self.text_all = text or ""
         self.rect = rect                 # (x, y, w, h) screen points
         self.ranges = None
         self.line_bounds = self._map_bounds(text, line_bounds)
@@ -666,12 +730,40 @@ class Focus:
         out = []
         for i, l in enumerate(d["page"]["lines"]):
             lt = set(docmap._toks(l[4]))
-            if lt and len(lt & want) / len(lt) >= 0.8: out.append(i)
+            if len(lt) >= 3 and len(lt & want) / len(lt) >= 0.8: out.append(i)      # short labels ("EEG") match anything
         return out
+    def _fig_mode(self, d):
+        """The figure this run is about: the selection is (mostly) its caption, or the screenshot went to the vision model."""
+        if getattr(self, "_fm_done", False): return self._fm
+        figs = [f for f in d.get("figures") or [] if f.get("kind") == "figure" and f.get("page") == d["page"]["n"] and f.get("bbox")]
+        self._fm = None
+        if not figs: self._fm_done = True; return None
+        sel = set(docmap._toks(self.text_all))
+        best = max(figs, key=lambda f: len(sel & set(docmap._toks(f.get("caption") or ""))))
+        ov = len(sel & set(docmap._toks(best.get("caption") or ""))) / max(1, len(sel))
+        vision = bool(self.rec.get("image"))
+        if ov >= 0.4 or (vision and (ov >= 0.15 or len(figs) == 1)):
+            self._fm = best
+        self._fm_done = vision or self.rec.get("vision_gate") is not None   # decided once the vision choice is known
+        self.rec["doc_figure_mode"] = bool(self._fm)
+        return self._fm
     def _doc_transform(self):
-        """Page -> screen from the hotkey's per-line AX rects of the selected lines (when present)."""
+        """Page -> screen: from the hotkey's per-line AX rects of the selected lines, else from the selection rect."""
         if hasattr(self, "_dt"): return self._dt
         self._dt = None
+        d = DOC.get()
+        if d and d.get("page") and not self.line_bounds and self.rect:
+            ix = self._doc_lines(1, len(self.lines)) if self.lines else []
+            if ix:
+                ls = [d["page"]["lines"][i] for i in ix]
+                pr = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]
+                x, y, w, h = self.rect
+                if pr[3] - pr[1] > 4:
+                    sc = h / (pr[3] - pr[1])                       # height is reliable; web views often report the column width
+                    if 0.4 <= sc <= 5:
+                        self._dt = (sc, x - sc * pr[0], y - sc * pr[1], 0.0)
+                        self.rec["doc_transform"] = "selection-rect"
+            return self._dt
         d = DOC.get()
         if d and d.get("page") and self.line_bounds:
             pairs = []
@@ -681,7 +773,7 @@ class Focus:
                     l = d["page"]["lines"][ix[0]]; b = self.line_bounds[i]
                     pairs.append((l[:4], [b[0], b[1], b[0] + b[2], b[1] + b[3]]))
             t = docmap.fit(pairs)
-            if t and t[3] < 12: self._dt = t
+            if t and t[3] < 12: self._dt = t; self.rec["doc_transform"] = "line-bounds"
         return self._dt
     def _doc_target(self, r, method, sentence):
         d = DOC.get() if DOC is not None else None
@@ -696,21 +788,46 @@ class Focus:
                 return nr, "doc-md"
             return r, method
         if not d.get("page"): return r, method
-        tgt, kind, label = None, None, None
-        if f:
+        tgt, kind, label, shape = None, None, None, None
+        fm = self._fig_mode(d)
+        if f and f.get("page") != d["page"]["n"]:
+            f = None                                                    # drawn on another page: named in speech, not boxed
+        if fm is not None and (f is None or f is fm):
+            # the run is about a figure: box the object the sentence names, else its panel, else the whole figure
+            f = fm; self.last_fig = fm
+            if panel: self.cur_panel = panel                             # "In Figure 4a, ..." holds until another panel is named
+            panel = panel or getattr(self, "cur_panel", None)
+            prect = next((p["bbox"] for p in fm.get("panels") or [] if p["label"] == panel), None) if panel else None
+            fp = docmap.focus_phrase(sentence)
+            use_g = GROUNDER.enabled() and docmap.content_words(fp)
+            g = docmap.ground_label(fp, fm, prect) or docmap.ground_label(sentence, fm, prect)
+            if g:
+                tgt, kind, shape = g[0], "object", "ellipse"; label = fm["label"] + (panel or "") + ": " + g[1][:40]
+                if not g[3] and use_g and docmap.device_alias(fp, fm):
+                    # the label sits on a raster picture: find the named thing next to it (e.g. "the device" near "WANDmini")
+                    fb = fm["bbox"]; lr = g[0]; pad = 90
+                    clip = [max(fb[0], lr[0] - pad), max(fb[1], lr[1] - pad), min(fb[2], lr[2] + pad), min(fb[3], lr[3] + pad)]
+                    ph = docmap.object_phrase(fp)
+                    if docmap.docmap_generic(ph) or not docmap.content_words(ph): ph = g[1]
+                    r.pending = GROUNDER.submit(DOC.path, d["page"]["n"], clip, ph); r.pending.max_frac = 0.9
+            else:
+                tgt, kind = (prect, "panel") if prect else (fm["bbox"], "figure"); label = fm["label"] + (panel or "")
+                if use_g:
+                    r.pending = GROUNDER.submit(DOC.path, d["page"]["n"], prect or fm["bbox"], docmap.object_phrase(fp))
+        elif f:
             self.last_fig = f
             tgt, kind = docmap.target_rect(f, panel); label = f["label"] + (panel or "")
-            if f.get("page") != d["page"]["n"]: tgt = None              # drawn on another page: name it, do not box it
         elif self.last_lines:
             ix = self._doc_lines(*self.last_lines)
             if ix:
                 ls = [d["page"]["lines"][i] for i in ix]
                 tgt = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]; kind = "line"
         if not tgt: return r, method
-        nr = FRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None)
+        nr = FRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.pending = getattr(r, "pending", None)
         t = self._doc_transform()
         if t:
             nr[:] = [round(v, 1) for v in docmap.apply(t, tgt)]
+        nr.shape = shape
         nr.doc = {"kind": kind, "label": label, "page": d["page"]["n"], "page_size": d.get("page_size"), "target": [round(v, 1) for v in tgt],
                   "anchors": d.get("anchors") or []}
         if kind != "line" and f and f.get("caption"):
@@ -805,7 +922,28 @@ class Focus:
         if getattr(rect, "src", None): ev["src"] = rect.src
         ev["range"] = getattr(rect, "rng", None)                    # absolute AX character range, or null when unknown
         if getattr(rect, "doc", None): ev["doc"] = rect.doc          # page-space target + text anchors for the tracker
+        if getattr(rect, "shape", None): ev["shape"] = rect.shape
+        fut = getattr(rect, "pending", None)
+        if fut is not None and fut.done.is_set() and self._apply_ground(rect, fut, ev): pass
         self._write(ev)
+        if fut is not None and not fut.done.is_set():
+            seq = self.events
+            def late():                                             # grounding finished after the sentence started: update the box
+                if fut.done.wait(6.0) and self.events == seq and not STOP.is_set():
+                    ev2 = dict(ev); ev2["doc"] = dict(ev["doc"])
+                    if self._apply_ground(rect, fut, ev2):
+                        self.events += 1; ev2["seq"] = self.events; self._write(ev2)
+            _threading.Thread(target=late, daemon=True).start()
+    def _apply_ground(self, rect, fut, ev):
+        b = fut.best()
+        if not b: self.methods["ground-miss"] = self.methods.get("ground-miss", 0) + 1; return False
+        ev["doc"]["target"] = [round(v, 1) for v in b]; ev["doc"]["kind"] = "object"; ev["shape"] = "ellipse"
+        ev["doc"]["label"] = (ev["doc"].get("label") or "") + " (grounded)"
+        t = self._doc_transform()
+        if t: ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]
+        self.methods["ground-florence"] = self.methods.get("ground-florence", 0) + 1
+        self.rec["ground_ms"] = fut.ms
+        return True
     def clear(self):
         self._write({"state": "clear", "seq": self.events + 1})
     def summary(self):
@@ -1525,6 +1663,7 @@ def vision_gate(text):
     return False, f"prose ({len(words)} words, {sents} sentences)"
 
 def rewrite_with_image(text, path, rec, mode=None):
+    if rec.get("_t0"): rec["vision_start_ms"] = int((time.time() - rec["_t0"]) * 1000)   # the doc read must never delay this
     rec.update(image=False, image_px=None, image_sent_px=None, vision_model=vision_model(), vision_ms=None)
     try:
         url, (w, h), (sw, sh) = load_image(path)
@@ -2584,7 +2723,7 @@ def main(argv=None):
     DOC = None
     if docmap is not None and a.cmd in ("speak", "selection", "rewrite") and os.environ.get("SPEAKEASY_DOC_READ", "local").lower() in ("local", "all") \
             and (a.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT")):
-        DOC = DocJob(a.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT"), text, rec); DOC.start()
+        DOC = DocJob(a.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT"), text, rec); DOC.img_given = bool(a.image); DOC.start()
     img = a.image
     method = a.capture_method or ("none" if not img else None)
     rec.update(capture_method=method, capture_rect=a.capture_rect)
@@ -2763,6 +2902,7 @@ def main(argv=None):
     rec["peak_rss_mb"] = peak_rss_mb()
     rec["ollama_models"] = ollama_ps()
     if DOC is not None: DOC.done.wait(1.0)                       # document fields for the log (speech is already done)
+    GROUNDER.close()
     log_run(rec, text, out)
     return 0
 

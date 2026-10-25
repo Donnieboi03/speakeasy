@@ -63,3 +63,13 @@ box targets the exact line, figure or panel; the live tracker maps page coordina
 - PDF parsing uses [PyMuPDF](https://pymupdf.readthedocs.io/), installed into the Kokoro venv by `install.sh`.
   PyMuPDF is licensed under **AGPL-3.0** (or a commercial licence); that is fine for local personal use, but keep it in
   mind before redistributing a bundle that includes it. Markdown parsing is stdlib only.
+
+### Figures: panels and sub-objects (phase 3)
+
+When the selection is a figure's caption, or the screenshot goes to the vision model, each spoken sentence is boxed on the
+figure itself: a named object ("the WANDmini", "EEG", "Base Station") is circled using the figure's own text labels
+(PDF text inside the figure, or text recognition for raster figures) and the graphic next to them; "Figure 4a" / "panel b"
+boxes that panel; anything else boxes the whole figure. The vision prompt lists the figure and panel labels so the narration
+says "In Figure 4a, ...". When no label matches, Florence-2 (`microsoft/Florence-2-base` family, local, MPS when available,
+loaded lazily in the Kokoro venv while vision runs) grounds the phrase on the figure crop and the box moves when it answers.
+`SPEAKEASY_GROUND=auto|off` (default auto). The model is downloaded once from Hugging Face (about 0.5 GB).

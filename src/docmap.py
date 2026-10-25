@@ -52,23 +52,80 @@ def _panels(fig, labels):
         out.append({"label": lb["l"], "bbox": [round(x0 - 2, 1), round(y0 - 2, 1), round(x1, 1), round(y1, 1)]})
     return out
 
-def parse_pdf(path):
+GENERIC = set("""a an the this that these those it its of in on at to for from with by and or as is are was were be been being
+shows show shown showing depicts depicting illustrates displays display figure fig diagram image picture panel part left right top bottom
+here there which where while what how also then next each both all some data result results overview setup scheme process involves
+first second third finally using used use uses into onto over under between""".split())
+
+def _text_lines(page):
+    d = page.get_text("dict")
+    lines, blocks = [], []
+    for b in d.get("blocks", []):
+        if b.get("type") != 0: continue
+        bl = []
+        for l in b.get("lines", []):
+            t = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
+            if t:
+                lines.append([*[round(v, 1) for v in l["bbox"]], t]); bl.append(len(lines) - 1)
+        if bl: blocks.append(bl)
+    return lines, blocks
+
+def _inside(r, b, pad=2):
+    return r[0] >= b[0] - pad and r[2] <= b[2] + pad and r[1] >= b[1] - pad and r[3] <= b[3] + pad
+
+def _objects(page, fb):
+    """Graphic sub-objects inside a figure: raster images and small drawing clusters (page space)."""
+    area = max(1.0, (fb[2] - fb[0]) * (fb[3] - fb[1])); out = []
+    try:
+        for im in page.get_image_info():
+            r = list(im.get("bbox") or [])
+            if len(r) == 4 and _inside(r, fb, 4) and (r[2] - r[0]) * (r[3] - r[1]) < 0.7 * area and r[2] - r[0] > 12 and r[3] - r[1] > 12:
+                out.append([round(v, 1) for v in r] + ["image"])
+    except Exception: pass
+    try:                                              # individual vector paths (boxes, plots, outlines)
+        for d in page.get_drawings():
+            r = d.get("rect")
+            if r is None: continue
+            rr = [r.x0, r.y0, r.x1, r.y1]
+            if _inside(rr, fb, 2) and r.width > 10 and r.height > 10 and 150 < r.width * r.height < 0.35 * area:
+                out.append([round(v, 1) for v in rr] + ["drawing"])
+    except Exception: pass
+    out.sort(key=lambda o: -(o[2] - o[0]) * (o[3] - o[1]))
+    return out[:400]
+
+def _ocr_labels(page, fb, tmpdir=None):
+    """Raster figures carry no PDF text: render the figure and read its labels with the tracker's text recognition."""
+    trk = os.environ.get("SPEAKEASY_TRACKER") or os.path.join(os.environ.get("SPEAKEASY_HOME") or os.path.expanduser("~/.speakeasy"), "bin", "speakeasy-track")
+    if not os.path.exists(trk): return []
+    import pymupdf
+    png = os.path.join(tmpdir or tempfile.gettempdir(), f"speakeasy_cap_fig_{os.getpid()}.png")
+    try:
+        page.get_pixmap(clip=pymupdf.Rect(*fb), matrix=pymupdf.Matrix(3, 3)).save(png)
+        r = subprocess.run([trk, "--ocr-lines", png, "--frame", ",".join(str(v) for v in [fb[0], fb[1], fb[2] - fb[0], fb[3] - fb[1]])],
+                           capture_output=True, timeout=20)
+        out = json.loads(r.stdout.decode() or "[]")
+        return [[round(v, 1) for v in o["r"]] + [o["t"]] for o in out if re.search(r"[A-Za-z]{2,}", o.get("t", ""))]
+    except Exception:
+        return []
+    finally:
+        try: os.remove(png)
+        except OSError: pass
+
+def parse_pdf(path, fig_pages=None, prev=None):
+    """Text lines for every page; figures (bbox, caption, panels, text labels, graphic objects) for fig_pages (None = all).
+    prev: an earlier partial parse whose figure pages are kept."""
     import pymupdf
     doc = pymupdf.open(path)
     pages = []
+    old = {p["n"]: p for p in (prev or {}).get("pages", []) if p.get("figs_done")}
     for pno, page in enumerate(doc):
         W, H = page.rect.width, page.rect.height
-        d = page.get_text("dict")
-        lines, blocks = [], []
-        for b in d.get("blocks", []):
-            if b.get("type") != 0: continue
-            bl = []
-            for l in b.get("lines", []):
-                t = "".join(s.get("text", "") for s in l.get("spans", [])).strip()
-                if t:
-                    r = [round(v, 1) for v in l["bbox"]]
-                    lines.append([*r, t]); bl.append(len(lines) - 1)
-            if bl: blocks.append(bl)
+        if pno + 1 in old and (fig_pages is None or True):
+            pages.append(old[pno + 1]); continue
+        if fig_pages is not None and pno + 1 not in fig_pages:
+            lines, _ = _text_lines(page)
+            pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": [], "figs_done": False}); continue
+        lines, blocks = _text_lines(page)
         gfx = []
         try:
             for im in page.get_image_info():
@@ -108,10 +165,17 @@ def parse_pdf(path):
                       for l in lines if PANEL_RE.match(l[4]) and len(l[4]) <= 40 and body
                       and l[0] >= fb[0] - 6 and l[2] <= fb[2] + 6 and l[1] >= fb[1] - 6 and l[3] <= fb[3] + 6]
             seen = set(); labels = [x for x in labels if not (x["l"] in seen or seen.add(x["l"]))]
+            labels.sort(key=lambda x: x["l"])
+            # the figure's own text labels ("WANDmini", "Base Station", "EEG"): words, not tick numbers
+            tl = [l for l in lines if body and _inside(l[:4], fb) and re.search(r"[A-Za-z]{2,}", l[4]) and not PANEL_RE.match(l[4])]
+            src_l = "pdf"
+            if body and kind == "figure" and len(tl) < 3:
+                tl = _ocr_labels(page, fb) or tl; src_l = "ocr" if tl else "none"
             figs.append({"label": f"{'Figure' if kind == 'figure' else 'Table'} {m.group(1)}", "kind": kind, "n": int(m.group(1)),
                          "page": pno + 1, "bbox": fb, "caption_bbox": cap, "caption": text[:300],
-                         "panels": _panels(fb, labels)})
-        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs})
+                         "panels": _panels(fb, labels), "labels": tl[:200], "labels_src": src_l,
+                         "objects": _objects(page, fb) if body and kind == "figure" else []})
+        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs, "figs_done": True})
     return {"kind": "pdf", "pages": pages, "n_pages": len(pages)}
 
 # ---------------- Markdown (stdlib) ----------------
@@ -157,25 +221,38 @@ def cached(path):
     try: return os.path.exists(os.path.join(cache_dir(), _key(path) + ".json"))
     except OSError: return False
 
-def load(path, timeout=20):
-    """Parsed document (cached). Returns (doc, cache_state)."""
+def load(path, timeout=30, sel_text=""):
+    """Parsed document (cached). PDFs: text for all pages, figures for the selection's page (and its neighbours) only,
+    so a first read stays short; later reads of other pages add their figures. Returns (doc, cache_state)."""
     kind = "pdf" if path.lower().endswith(".pdf") else "md" if re.search(r"\.(md|markdown|mdx)$", path, re.I) else None
     if not kind: return None, "unsupported"
     c = os.path.join(cache_dir(), _key(path) + ".json")
+    prev = None
     if os.path.exists(c):
-        try: return json.load(open(c)), "hit"
-        except ValueError: pass
+        try:
+            prev = json.load(open(c))
+            if kind == "md": return prev, "hit"
+            pg, _ = match_page(prev, sel_text)
+            if pg is None or pg.get("figs_done", True): return prev, "hit"
+        except ValueError: prev = None
     if kind == "md":
         doc = parse_md(path)
     else:
         py = venv_python()
         if not py: return None, "no-pymupdf"
         tmp = c + f".{os.getpid()}.tmp"
-        r = subprocess.run([py, os.path.realpath(__file__), "parse-pdf", path, tmp], capture_output=True, timeout=timeout)
+        selp = tmp + ".sel"
+        with open(selp, "w") as f: f.write(sel_text or "")
+        args = [py, os.path.realpath(__file__), "parse-pdf", path, tmp, "--sel", selp] + (["--prev", c] if prev else [])
+        try:
+            r = subprocess.run(args, capture_output=True, timeout=timeout)
+        finally:
+            try: os.remove(selp)
+            except OSError: pass
         if r.returncode != 0 or not os.path.exists(tmp):
             return None, "parse-failed: " + r.stderr.decode(errors="replace").strip().splitlines()[-1][:120] if r.stderr else "parse-failed"
         os.replace(tmp, c)
-        return json.load(open(c)), "miss"
+        return json.load(open(c)), "partial-miss" if prev else "miss"
     json.dump(doc, open(c, "w"))
     return doc, "miss"
 
@@ -309,6 +386,83 @@ def target_rect(f, panel):
         if p: return p["bbox"], "panel"
     return f.get("bbox"), "figure"
 
+def content_words(sentence):
+    return [t for t in _toks(sentence) if t not in GENERIC and not t.isdigit() and len(t) >= 3]
+
+def focus_phrase(sentence):
+    """The part of a sentence that names its object: drop a leading "In Figure 4a," and cut at the first clause break
+    ("the device worn by the subject" -> "the device")."""
+    t = re.sub(r"^\s*(?:in|as shown in|as seen in)?\s*(?:fig(?:ure)?s?\.?|table)\s*\d+\s*\(?[a-h]?\)?\s*[,:]?\s*", "", sentence or "", flags=re.I)
+    t = re.sub(r"^\s*(?:in\s+)?panel\s*\(?[a-h]\)?\s*[,:]?\s*", "", t, flags=re.I)
+    m = re.search(r",|;|\s(?:that|which|who|where|while|worn|used|placed|located|connected|secured|shown|by|with|via|to)\s", t)
+    return (t[:m.start()] if m and m.start() > 8 else t).strip()
+
+DEVICE_WORDS = {"device", "devices", "hardware", "sensor", "sensors", "headset", "wearable", "board", "unit", "module", "prototype", "instrument", "gadget"}
+
+def object_phrase(fp):
+    """The last determiner phrase: "This shows a diagram of the device" -> "the device"."""
+    ms = list(re.finditer(r"\b(the|a|an|this|these|those|its|their)\s+((?:[\w-]+\s+){0,2}[\w-]+)", fp or "", re.I))
+    for m in reversed(ms):
+        if docmap_generic(m.group(2)): continue
+        return m.group(0).strip()
+    return (fp or "").strip()
+
+def docmap_generic(words):
+    return all(t in GENERIC for t in _toks(words))
+
+def device_alias(fp, fig):
+    """'the device' / 'the hardware' -> the named device the caption talks about (a mixed-case label such as 'WANDmini')."""
+    if not set(_toks(fp)) & DEVICE_WORDS: return None
+    cap = fig.get("caption") or ""
+    names = {}
+    for l in fig.get("labels") or []:
+        for w in re.findall(r"[A-Za-z][A-Za-z0-9-]{2,}", l[4]):
+            if re.search(r"[a-z][A-Z]|[A-Z]{2,}[a-z]|[A-Za-z]\d|\d[A-Za-z]", w) and w in cap:
+                names[w] = names.get(w, 0) + 1
+    return max(names, key=names.get) if names else None
+
+def ground_label(sentence, fig, panel_hint=None):
+    """Match the sentence's words to the figure's own text labels. Returns (rect, label_text, score) or None.
+    The rect is the label's neighbourhood: the smallest graphic object holding or touching the label, else a padded label box."""
+    alias = device_alias(sentence, fig)
+    words = content_words(alias) if alias else content_words(sentence)
+    if not words or not fig.get("labels"): return None
+    cands = []
+    for l in fig["labels"]:
+        lt = [t for t in _toks(l[4]) if len(t) >= 2]
+        if not lt: continue
+        sc, pos = 0.0, None
+        for t in lt:
+            for i, w in enumerate(words):
+                if t == w or (len(t) >= 4 and len(w) >= 4 and (t.startswith(w[:5]) or w.startswith(t[:5]))):
+                    sc += 1.0 if t == w else 0.7; pos = i if pos is None else min(pos, i); break
+        if sc <= 0: continue
+        sc = sc / len(lt) ** 0.5 + 0.1 * min(len(l[4]), 20) / 20
+        if sc >= 0.6: cands.append((pos, -sc, l))
+    if panel_hint:                                   # a named panel: only its own labels
+        cands = [c for c in cands if _inside(c[2][:4], panel_hint, 2)]
+    if not cands: return None
+    # a sentence that lists several things ("recording EEG data, calculating features, training a model") is about the first;
+    # among equally good labels (the same name twice), prefer the one attached to a graphic (the photo, the drawn device)
+    key0 = min((c[0], c[1]) for c in cands)
+    top = [c for c in cands if (c[0], c[1]) == key0]
+    fa = (fig["bbox"][2] - fig["bbox"][0]) * (fig["bbox"][3] - fig["bbox"][1])
+    objs = [o for o in fig.get("objects") or [] if (o[2] - o[0]) * (o[3] - o[1]) < 0.35 * fa]
+    def hood(lr):
+        def dist(o):
+            dx = max(o[0] - lr[2], lr[0] - o[2], 0); dy = max(o[1] - lr[3], lr[1] - o[3], 0); return (dx * dx + dy * dy) ** 0.5
+        h = max(6.0, lr[3] - lr[1])
+        near = sorted([o for o in objs if dist(o) <= 14 and (o[2] - o[0]) * (o[3] - o[1]) > 4 * (lr[2] - lr[0]) * h],
+                      key=lambda o: (dist(o) > 0, (o[2] - o[0]) * (o[3] - o[1])))
+        if near: return _union([near[0][:4], lr]), True
+        return [lr[0] - 2 * h, lr[1] - 1.5 * h, lr[2] + 2 * h, lr[3] + 1.5 * h], False
+    scored = [(hood(c[2][:4]), c) for c in top]
+    (r, attached), c = max(scored, key=lambda x: x[0][1])
+    l = c[2]
+    fb = fig["bbox"]
+    r = [max(fb[0], r[0]), max(fb[1], r[1]), min(fb[2], r[2]), min(fb[3], r[3])]
+    return r, l[4], round(-c[1], 2), attached
+
 def fit(pairs):
     """Uniform scale + offset from (page_rect, screen_rect) pairs: X = s*x + ox, Y = s*y + oy. Returns (s, ox, oy, rms) or None."""
     if len(pairs) < 2: return None
@@ -329,8 +483,20 @@ def apply(t, r):
     return [s * r[0] + ox, s * r[1] + oy, s * (r[2] - r[0]), s * (r[3] - r[1])]
 
 if __name__ == "__main__":
-    if len(sys.argv) == 4 and sys.argv[1] == "parse-pdf":
-        json.dump(parse_pdf(sys.argv[2]), open(sys.argv[3], "w")); sys.exit(0)
+    if len(sys.argv) >= 4 and sys.argv[1] == "parse-pdf":
+        opt = dict(zip(sys.argv[4::2], sys.argv[5::2]))
+        prev = json.load(open(opt["--prev"])) if opt.get("--prev") and os.path.exists(opt["--prev"]) else None
+        sel = open(opt["--sel"]).read() if opt.get("--sel") else ""
+        if sel.strip():
+            import pymupdf
+            d0 = pymupdf.open(sys.argv[2])
+            txt = {"pages": [{"n": i + 1, "lines": _text_lines(pg)[0]} for i, pg in enumerate(d0)]}
+            pg, _ = match_page(txt, sel)
+            want = {pg["n"] - 1, pg["n"], pg["n"] + 1} if pg else {1}
+            out = parse_pdf(sys.argv[2], want, prev)
+        else:
+            out = parse_pdf(sys.argv[2], None, prev)
+        json.dump(out, open(sys.argv[3], "w")); sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == "dump":
         print(json.dumps(parse_pdf(sys.argv[2]) if sys.argv[2].lower().endswith(".pdf") else parse_md(sys.argv[2]), indent=1)[:6000]); sys.exit(0)
     print("usage: docmap.py parse-pdf FILE OUT.json | dump FILE", file=sys.stderr); sys.exit(2)
