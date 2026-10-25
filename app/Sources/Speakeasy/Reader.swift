@@ -30,6 +30,7 @@ final class Reader {
     func stop() {
         killTracker()
         run(backendPath, ["stop"], stdin: nil)
+        onState?("idle")
     }
     func killTracker() {
         tracker?.terminate(); tracker = nil
@@ -81,7 +82,12 @@ final class Reader {
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && args.firstIndex(of: "--image") == nil {
             NSSound.beep(); killTracker(); onState?("idle"); return
         }
+        onState?("thinking")
         backend = run(backendPath, args, stdin: text)
+        let me = backend
+        backend?.terminationHandler = { [weak self] _ in
+            DispatchQueue.main.async { if self?.backend === me { self?.backend = nil; self?.onState?("idle") } }
+        }
     }
 
     // ---- selection ----
