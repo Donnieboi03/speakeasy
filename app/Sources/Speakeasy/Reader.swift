@@ -192,7 +192,13 @@ final class Reader {
     // ---- tracker ----
     func frontWindow(_ pid: pid_t) -> (id: Int, frame: CGRect)? {
         guard let list = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]],
-              let w = list.first(where: { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }),
+              // the app's real front window: skip invisible (alpha 0) and thin layer-0 strips such as title/tab bars,
+              // the same rule the tracker uses for "front"; otherwise the tracker locks onto a strip and never draws
+              let w = list.first(where: { w in
+                  guard (w[kCGWindowOwnerPID as String] as? Int32) == pid, (w[kCGWindowLayer as String] as? Int) == 0,
+                        (w[kCGWindowAlpha as String] as? Double ?? 1) > 0.01, let b = w[kCGWindowBounds as String] as? NSDictionary,
+                        let r = CGRect(dictionaryRepresentation: b as CFDictionary) else { return false }
+                  return r.width >= 80 && r.height >= 80 }),
               let wid = w[kCGWindowNumber as String] as? Int else { return nil }
         var f = CGRect.zero
         if let b = w[kCGWindowBounds as String] as? NSDictionary { CGRectMakeWithDictionaryRepresentation(b, &f) }
