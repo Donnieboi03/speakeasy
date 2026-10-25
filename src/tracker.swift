@@ -171,6 +171,11 @@ final class Live: NSObject {
     var lastFlush = 0.0
     var drawFails = 0
     var refPanel: NSPanel? = nil
+    // shape scheme: text_band | part_oval | figure_box | table_row; table_header is a faint tint kept while a table is read
+    var cueKind = "text_band"
+    var headerPanel: NSPanel? = nil
+    let headerShape = CAShapeLayer()
+    var headerDelta: CGRect? = nil          // header rect relative to the row band's origin (moves with it on scroll)
     let refShape = CAShapeLayer()
     var refShown = 0, transitions = 0, heldBig = 0
     var cue = "text", suppressed = false
@@ -266,7 +271,10 @@ final class Live: NSObject {
         var r = 0.23, g = 0.51, b = 0.96
         if let c = color, c.count == 7, let v = Int(c.dropFirst(), radix: 16) { r = Double((v >> 16) & 255) / 255; g = Double((v >> 8) & 255) / 255; b = Double(v & 255) / 255 }
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        if figure {
+        if cueKind == "table_row" {                                   // a row reads like text: the same soft band
+            shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.16)
+            shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0); shape.lineWidth = 0
+        } else if figure {
             shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.06)
             shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0.9); shape.lineWidth = 2
         } else {
@@ -316,13 +324,15 @@ final class Live: NSObject {
             p.setFrame(f, display: false)
             let b = CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2)
             shape.frame = p.contentView!.bounds
-            shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: 6, cornerHeight: 6, transform: nil)
+            let rad: CGFloat = cueKind == "figure_box" ? min(12, min(b.width, b.height) / 4) : 6
+            shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: rad, cornerHeight: rad, transform: nil)
             CATransaction.commit()
             if !p.isVisible { p.orderFrontRegardless() }
+            drawHeader(r)
             if !shown || abs(f.minY - lastDrawn.minY) > 2 || abs(f.minX - lastDrawn.minX) > 2 || abs(f.width - lastDrawn.width) > 2 || abs(f.height - lastDrawn.height) > 2 {
                 draws += 1
                 let H = NSScreen.screens.first?.frame.height ?? 0
-                rec(["event": "draw", "seq": seq, "cue": cue, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
+                rec(["event": "draw", "seq": seq, "cue": cue, "cue_kind": cueKind, "header": headerDelta != nil, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
                      "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
                      "on_screen": p.isVisible])
                 shown = true; lastDrawn = f
@@ -332,7 +342,7 @@ final class Live: NSObject {
             hideTrigger = nil
         } else {
             if p.isVisible { p.orderOut(nil) }
-            refPanel?.orderOut(nil)
+            refPanel?.orderOut(nil); headerPanel?.orderOut(nil)
             if shown {
                 shown = false; hides += 1
                 let trig = hideReason()
@@ -415,6 +425,29 @@ final class Live: NSObject {
         if capTs > 0 && capTs < lastMove { return }               // a scroll since the capture already moved it
         if let r = rect { rect = r.offsetBy(dx: dx, dy: dy); src = "fig-anchor"; apply() }
     }
+    func drawHeader(_ row: CGRect) {
+        guard cueKind == "table_row", let d = headerDelta, !suppressed else { headerPanel?.orderOut(nil); return }
+        if headerPanel == nil {
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false; p.ignoresMouseEvents = true
+            p.level = .statusBar; p.hidesOnDeactivate = false; p.isReleasedWhenClosed = false
+            p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+            let v = NSView(frame: p.contentView!.bounds); v.wantsLayer = true; v.autoresizingMask = [.width, .height]
+            v.layer!.addSublayer(headerShape); p.contentView = v; headerPanel = p
+        }
+        guard let p = headerPanel else { return }
+        var h = CGRect(x: row.minX + d.minX, y: row.minY + d.minY, width: d.width, height: d.height)
+        if let w = winFrame { h = h.intersection(w) }                    // clipped to the window like the band
+        if h.isNull || h.height < 3 { p.orderOut(nil); return }
+        let H = NSScreen.screens.first?.frame.height ?? 0
+        let g = h.insetBy(dx: -4, dy: -2), f = NSRect(x: g.minX, y: H - g.maxY, width: g.width, height: g.height)
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        p.setFrame(f, display: false); headerShape.frame = p.contentView!.bounds
+        headerShape.path = CGPath(roundedRect: CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2), cornerWidth: 5, cornerHeight: 5, transform: nil)
+        headerShape.fillColor = shape.fillColor?.copy(alpha: 0.07); headerShape.strokeColor = nil
+        CATransaction.commit()
+        p.orderFrontRegardless()
+    }
     func showRef(_ r: CGRect) {
         if refPanel == nil {
             let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
@@ -442,9 +475,13 @@ final class Live: NSObject {
         _ = my; DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { p.orderOut(nil) }
     }
     func event(seq s: Int, rect r0: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool,
-               isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil, figure: Bool = false, drawOn: Bool = true) {
+               isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil, figure: Bool = false, drawOn: Bool = true,
+               cueKind ck: String? = nil, header: CGRect? = nil) {
         var r = r0
         cue = figure ? "figure" : "text"; suppressed = !drawOn
+        cueKind = ck ?? (ellipse ? "part_oval" : figure ? "figure_box" : "text_band")
+        if cueKind == "table_row", let h = header, let n = r0 { headerDelta = CGRect(x: h.minX - n.minX, y: h.minY - n.minY, width: h.width, height: h.height) }
+        else { headerDelta = nil }                              // row 0 is the header itself; other cues have none
         cueStyle(figure: figure, color: color)
         if figure { refPanel?.orderOut(nil) }                    // one cue at a time: no text outline while a figure part is boxed
         if !drawOn { rec(["event": "cue-off", "seq": s, "cue": cue]) }
@@ -909,7 +946,9 @@ struct Tracker {
                     let nl = ev["nlines"] as? Int
                     let cueFig = (ev["cue"] as? String) == "figure", drawOn = ev["draw"] as? Bool ?? true
                     let ref = (ev["ref"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
-                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn) }
+                    let hdr = (ev["header"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                    let ck = ev["cue_kind"] as? String
+                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr) }
                 }
             }
             if native && !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }

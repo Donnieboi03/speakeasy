@@ -597,6 +597,36 @@ def anchor_fit(ocr, anchors, frame=None):
     rms = (sum((t[0] * p[0] + t[1] - q[0]) ** 2 + (t[0] * p[1] + t[2] - q[1]) ** 2 for p, q in zip(P, S)) / len(P)) ** 0.5
     return (t[0], t[1], t[2], rms, len(P)) if rms <= 10 else None
 
+def table_rows(lines, tb, cap=None):
+    """Row rects of a table from its PDF text lines: lines inside the table box (caption excluded) grouped by vertical
+    centre. Returns [{"rect": [x0,y0,x1,y1], "toks": set, "n": cells}] top to bottom; rows[0] is the header row."""
+    inn = [l for l in lines if _inside(l[:4], tb, 3) and not (cap and _inside(l[:4], cap, 2)) and l[4].strip()]
+    inn.sort(key=lambda l: (l[1] + l[3]) / 2)
+    rows = []
+    for l in inn:
+        cy, h = (l[1] + l[3]) / 2, max(4.0, l[3] - l[1])
+        if rows and abs(cy - rows[-1]["cy"]) < 0.6 * h:
+            r = rows[-1]; r["rect"] = [min(r["rect"][0], l[0]), min(r["rect"][1], l[1]), max(r["rect"][2], l[2]), max(r["rect"][3], l[3])]
+            r["toks"] |= set(_toks(l[4])); r["n"] += 1
+        else:
+            rows.append({"cy": cy, "rect": list(l[:4]), "toks": set(_toks(l[4])), "n": 1})
+    for r in rows:                                   # a row band spans the table's width
+        r["rect"] = [min(r["rect"][0], tb[0]), r["rect"][1] - 1, max(r["rect"][2], tb[2]), r["rect"][3] + 1]
+    return rows
+
+def match_row(rows, sentence, start=0):
+    """Forward-only: the first row at or after start that the spoken sentence covers best (table speech reads one row per
+    sentence). Returns the row index or None."""
+    st = set(_toks(sentence))
+    if not st: return None
+    best, bi = 0.0, None
+    for i in range(start, len(rows)):
+        rt = rows[i]["toks"]
+        if not rt: continue
+        sc = len(rt & st) / len(rt)
+        if sc > best + 0.05: best, bi = sc, i
+    return bi if best >= 0.4 else None
+
 def area_lines(lines, prect):
     """PDF text inside a rectangle (page space), like a PDF reader's rectangle / column selection (PDFKit
     PDFPage.selection(for:), Preview's Option-drag): lines whose vertical centre is inside and at least half of whose width

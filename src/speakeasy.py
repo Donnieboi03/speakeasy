@@ -1028,6 +1028,19 @@ class Focus:
             # a selection inside a table body (row labels, cells): box the table
             tb = self._table_for_selection(d)
             if tb: tgt, kind, label = tb["bbox"], "table", tb["label"]; f = tb
+        header = None
+        if tgt is not None and kind == "table" and f:
+            # table: a band on the row being spoken (forward-only) + a faint header tint for the whole read
+            rows = self._rows.get(f["label"]) if hasattr(self, "_rows") else None
+            if rows is None:
+                if not hasattr(self, "_rows"): self._rows, self._row_at = {}, {}
+                rows = self._rows[f["label"]] = docmap.table_rows(d["page"]["lines"], f["bbox"], f.get("caption_bbox"))
+            if len(rows) >= 2:
+                i = docmap.match_row(rows, sentence, self._row_at.get(f["label"], 0))
+                if i is not None:
+                    self._row_at[f["label"]] = i
+                    tgt, kind = rows[i]["rect"], "table_row"; label = f"{f['label']} row {i}"
+                    header = rows[0]["rect"] if i > 0 else None
         if tgt is not None:
             pass
         elif self.last_lines:
@@ -1042,7 +1055,9 @@ class Focus:
             nr.hold = tgt; t = None                                     # no box until the capture fit lands (never a wrong one)
         elif t:
             nr[:] = [round(v, 1) for v in docmap.apply(t, tgt)]
-        nr.shape = shape
+        nr.shape = shape or ("roundrect" if kind in ("figure", "panel", "table") else None)
+        if header is not None and t and t != "pending":
+            nr.header = [round(v, 1) for v in docmap.apply(t, header)]
         anc = d.get("anchors") or []
         if self.lines:
             ix = self._doc_lines(1, len(self.lines))
@@ -1185,6 +1200,12 @@ class Focus:
         if getattr(rect, "nlines", None): ev["nlines"] = rect.nlines
         dk = (getattr(rect, "doc", None) or {}).get("kind")
         ev["cue"] = "figure" if (dk and dk != "line") or ev.get("shape") == "ellipse" else "text"
+        # shape scheme (docs/research/highlighting.md): text_band | part_oval | figure_box | table_row (+ table_header)
+        ev["cue_kind"] = ("part_oval" if ev.get("shape") == "ellipse" else "table_row" if dk == "table_row"
+                          else "figure_box" if ev["cue"] == "figure" else "text_band")
+        if getattr(rect, "header", None): ev["header"] = rect.header
+        ck = self.rec.setdefault("cue_kinds", {}); ck[ev["cue_kind"]] = ck.get(ev["cue_kind"], 0) + 1
+        if ev.get("header"): ck["table_header"] = ck.get("table_header", 0) + 1
         ev["draw"] = _on("SPEAKEASY_FIGURE_CUES" if ev["cue"] == "figure" else "SPEAKEASY_TEXT_HIGHLIGHT")
         if getattr(rect, "ref", None) and not getattr(rect, "doc", None): ev["ref"] = rect.ref; ev["ref_src"] = getattr(rect, "ref_src", None)
         fut = getattr(rect, "pending", None)
@@ -1219,7 +1240,7 @@ class Focus:
     def _apply_ground(self, rect, fut, ev):
         b = fut.best()
         if not b: self.methods["ground-miss"] = self.methods.get("ground-miss", 0) + 1; return False
-        ev["doc"]["target"] = [round(v, 1) for v in b]; ev["doc"]["kind"] = "object"; ev["shape"] = "ellipse"
+        ev["doc"]["target"] = [round(v, 1) for v in b]; ev["doc"]["kind"] = "object"; ev["shape"] = "ellipse"; ev["cue_kind"] = "part_oval"
         ev["doc"]["label"] = (ev["doc"].get("label") or "") + " (grounded)"
         t = self._doc_transform()
         if t and t != "pending": ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]

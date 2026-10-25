@@ -10,6 +10,30 @@ Speakeasy reads a selection aloud and shows where it is. This note records the e
 4. **Pacing:** the cue follows the audio (audio-paced), not the reader's own scrolling or eye position.
 5. **Settings:** `SPEAKEASY_TEXT_HIGHLIGHT=on|off` and `SPEAKEASY_FIGURE_CUES=on|off`, both on by default, toggled independently (menu-bar app or `~/.speakeasy/config`), logged per run.
 
+## Shape scheme (one cue at a time)
+
+| What is being read | Shape | Look | Setting | Logged `cue_kind` |
+|---|---|---|---|---|
+| Plain text (the sentence's lines) | Band | soft tinted fill, rounded, no border | `SPEAKEASY_TEXT_HIGHLIGHT` | `text_band` |
+| Earlier text the sentence refers back to | Dashed outline | faint dashed rounded rectangle, 1.5 s | `SPEAKEASY_TEXT_HIGHLIGHT` | `ref-outline` (tracker) |
+| A whole figure (or panel, or a table as a whole) | Rounded rectangle | 2 pt outline, very light fill | `SPEAKEASY_FIGURE_CUES` | `figure_box` |
+| One part inside a figure | Oval | 2 pt ellipse around the part, only while it is mentioned | `SPEAKEASY_FIGURE_CUES` | `part_oval` |
+| The table row being read | Band | the text band's tint across the row; advances one row per spoken row, never back | `SPEAKEASY_FIGURE_CUES` | `table_row` |
+| The table's header row | Faint tint | about half the band's tint, stays while the table's rows are read | `SPEAKEASY_FIGURE_CUES` | `table_header` |
+
+Every cue is clipped to the source window, follows scrolling with the tracker, and replaces the previous one (no flashing
+between sentences). Row rects come from the PDF text layer (lines inside the table grouped by their vertical centre); the
+spoken row is matched forward-only by its words.
+
+Why these shapes (common practice):
+- Bands for the words being read are what read-along tools use (Microsoft Immersive Reader, Read&Write, Apple's Spoken
+  Content "highlight content"): a fill, not a box, so the text stays legible.
+- A rounded rectangle for a whole region and an oval for one item follow the usual annotation convention (callouts boxed,
+  a specific item circled), which keeps "the whole figure" and "this part" visually distinct.
+- Row-by-row with the header kept visible mirrors how screen readers move through tables (VoiceOver / NVDA announce the
+  column header with each cell) and how spreadsheets freeze the header row. *(Product behaviour described from general
+  knowledge, not re-verified here.)*
+
 ## Evidence
 
 | Source | What it found | How it shapes the design |
