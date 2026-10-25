@@ -13,7 +13,7 @@ import hashlib, json, os, re, subprocess, sys, tempfile, time, urllib.parse, url
 # captions need a separator after the number ("Figure 3:", "Fig. 3.", "Table 2 |"), so prose like "Table 2 summarizes" is not one
 CAP_RE = re.compile(r"^\s*(?:fig(?:ure)?s?\.?)\s*(\d+)\s*(?:[.:|\u2013\u2014]|\s-\s|$)\s*(.*)$", re.I)
 TAB_RE = re.compile(r"^\s*table\s*(\d+)\s*(?:[.:|\u2013\u2014]|\s-\s|$)\s*(.*)$", re.I)
-PANEL_RE = re.compile(r"^\s*\(?([a-hA-H])\)\s*$|^\s*\(([a-h])\)\s+\S")
+PANEL_RE = re.compile(r"^\s*\(?([a-hA-H])\)\s*$|^\s*\(([a-h])\)\s+\S|^\s*([a-h])\s*$")
 REF_RE = re.compile(r"\b(fig(?:ure)?s?\.?|table)\s*(\d+)\s*(?:\(?([a-h])\)?(?![a-z]))?", re.I)
 PANEL_REF_RE = re.compile(r"\b(?:panel|subfigure|part)\s*\(?([a-h])\)?(?![a-z])", re.I)
 PAGE_OF_RE = re.compile(r"(?:page\s*)?(\d{1,4})\s*(?:of|/)\s*(\d{1,4})\b", re.I)
@@ -111,6 +111,20 @@ def _ocr_labels(page, fb, tmpdir=None):
         try: os.remove(png)
         except OSError: pass
 
+def _guess_panels(fb, caption):
+    """No drawn (a)/(b) labels but the caption names panels: split the figure evenly (side by side when wide)."""
+    cap = caption or ""
+    ls = set(re.findall(r"\(([a-f])\)", cap))
+    ls |= set(re.findall(r"(?:^|[.;|]\s+)([a-f])\s+(?=[A-Z])", cap))          # Nature style: "... scheme. a Subjects sit ... b Recorded"
+    ls = [l for l in "abcdef" if l in ls]
+    if len(ls) < 2 or ls[0] != "a": return []
+    n = len(ls); w, h = fb[2] - fb[0], fb[3] - fb[1]; out = []
+    for k, l in enumerate(ls):
+        if w >= h: r = [fb[0] + k * w / n, fb[1], fb[0] + (k + 1) * w / n, fb[3]]
+        else: r = [fb[0], fb[1] + k * h / n, fb[2], fb[1] + (k + 1) * h / n]
+        out.append({"label": l, "bbox": [round(v, 1) for v in r], "guessed": True})
+    return out
+
 def parse_pdf(path, fig_pages=None, prev=None):
     """Text lines for every page; figures (bbox, caption, panels, text labels, graphic objects) for fig_pages (None = all).
     prev: an earlier partial parse whose figure pages are kept."""
@@ -156,12 +170,24 @@ def parse_pdf(path, fig_pages=None, prev=None):
                     if gap < 60: body = list(g)
                 elif (body[1] - g[3] < 40) if kind == "figure" else (g[1] - body[3] < 40):
                     body = _union([body, g])
+            if kind == "table":
+                # the body is the grid / text block right below the caption (until a big gap, the next caption or the page end)
+                below = sorted([l for l in lines if l[1] >= cap[3] - 1 and l[0] < cap[2] + 200 and l[2] > cap[0] - 200], key=lambda l: l[1])
+                y = cap[3]; rows = []
+                lh = max(8.0, (cap[3] - cap[1]) / max(1, len(bl)))
+                for l in below:
+                    if l[1] - y > 2.2 * lh and rows: break
+                    if CAP_RE.match(l[4]) or TAB_RE.match(l[4]): break
+                    rows.append(l); y = max(y, l[3])
+                tbody = _union([r[:4] for r in rows]) if rows else None
+                if tbody and (body is None or tbody[3] > body[3]): body = _union([body, tbody]) if body else tbody
+                if body: body = _union([body, cap])
             if body is None and kind == "figure":            # no vector/image found: the text-free gap above the caption
                 above = [l for l in lines if l[3] <= cap[1] - 2 and l[0] < cap[2] and l[2] > cap[0]]
                 top = max([l[3] for l in above if cap[1] - l[3] > 30] or [None]) if above else None
                 if top is not None and cap[1] - top > 40: body = [cap[0], top + 2, cap[2], cap[1] - 2]
             fb = [round(v, 1) for v in (body or cap)]
-            labels = [] if kind == "table" else [{"l": (PANEL_RE.match(l[4]).group(1) or PANEL_RE.match(l[4]).group(2)).lower(), "r": l[:4]}
+            labels = [] if kind == "table" else [{"l": (PANEL_RE.match(l[4]).group(1) or PANEL_RE.match(l[4]).group(2) or PANEL_RE.match(l[4]).group(3)).lower(), "r": l[:4]}
                       for l in lines if PANEL_RE.match(l[4]) and len(l[4]) <= 40 and body
                       and l[0] >= fb[0] - 6 and l[2] <= fb[2] + 6 and l[1] >= fb[1] - 6 and l[3] <= fb[3] + 6]
             seen = set(); labels = [x for x in labels if not (x["l"] in seen or seen.add(x["l"]))]
@@ -173,7 +199,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
                 tl = _ocr_labels(page, fb) or tl; src_l = "ocr" if tl else "none"
             figs.append({"label": f"{'Figure' if kind == 'figure' else 'Table'} {m.group(1)}", "kind": kind, "n": int(m.group(1)),
                          "page": pno + 1, "bbox": fb, "caption_bbox": cap, "caption": text[:300],
-                         "panels": _panels(fb, labels), "labels": tl[:200], "labels_src": src_l,
+                         "panels": _panels(fb, labels) or (_guess_panels(fb, text) if body and kind == "figure" else []), "labels": tl[:200], "labels_src": src_l,
                          "objects": _objects(page, fb) if body and kind == "figure" else []})
         pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs, "figs_done": True})
     return {"kind": "pdf", "pages": pages, "n_pages": len(pages)}
@@ -194,6 +220,7 @@ def parse_md(path):
         elif s.startswith("|"): els.append({"kind": "table", "line": i, "text": s})
         for m in re.finditer(r"!\[([^\]]*)\]\(([^)\s]+)[^)]*\)", l):
             figs.append({"kind": "image", "alt": m.group(1), "line": i})
+        s = re.sub(r"^\s*(?:[*_]{1,3}|<(?:em|i|b|strong|figcaption)>)\s*|\s*(?:[*_]{1,3}|</(?:em|i|b|strong|figcaption)>)\s*$", "", s)
         if CAP_RE.match(s) or TAB_RE.match(s):
             m = CAP_RE.match(s) or TAB_RE.match(s)
             figs.append({"kind": "caption", "label": f"{'Figure' if CAP_RE.match(s) else 'Table'} {m.group(1)}", "line": i, "caption": s[:300]})
@@ -309,9 +336,24 @@ def resolve(hint, mode="local"):
         if p: return "browser-file", p, "url"
         pth = urllib.parse.urlparse(u).path.lower()
         if mode == "all" and re.match(r"^https://", u) and (pth.endswith(".pdf") or "/pdf/" in pth or title.lower().rstrip().endswith(".pdf")):
+            if not public_host(u): return None, None, "browser: not a public host"
             return "browser", u, "url"
         return None, None, "browser: not a public pdf" if mode == "all" else "browser: web off (SPEAKEASY_DOC_READ=local)"
     return None, None, "no document"
+
+def public_host(url):
+    """Only public internet hosts: no localhost, loopback, private, link-local, reserved or multicast addresses."""
+    import ipaddress, socket
+    h = (urllib.parse.urlparse(url).hostname or "").strip("[]").lower()
+    if not h or h == "localhost" or h.endswith(".localhost") or h.endswith(".local") or h.endswith(".internal"): return False
+    try:
+        addrs = {ai[4][0] for ai in socket.getaddrinfo(h, 443, proto=socket.IPPROTO_TCP)}
+    except OSError:
+        return False
+    for a in addrs:
+        ip = ipaddress.ip_address(a.split("%")[0])
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast or ip.is_unspecified: return False
+    return bool(addrs)
 
 def fetch_pdf(url, tmpdir, max_mb=40, timeout=8):
     """Public PDFs only: no cookies, no auth, refuse redirects to other hosts or non-PDF answers."""
@@ -319,12 +361,13 @@ def fetch_pdf(url, tmpdir, max_mb=40, timeout=8):
         if f.startswith("speakeasy_doc_") and time.time() - os.path.getmtime(os.path.join(tmpdir, f)) > 86400:
             try: os.remove(os.path.join(tmpdir, f))
             except OSError: pass
+    if not public_host(url): raise ValueError("not a public host")
     dst = os.path.join(tmpdir, "speakeasy_doc_" + hashlib.sha256(url.encode()).hexdigest()[:16] + ".pdf")
     if os.path.exists(dst): return dst
     class NoRedir(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, hdrs, newurl):
             a, b = urllib.parse.urlparse(req.full_url), urllib.parse.urlparse(newurl)
-            if b.scheme != "https" or b.netloc != a.netloc or re.search(r"log ?in|sign ?in|auth|sso|account", b.path, re.I): return None
+            if b.scheme != "https" or b.netloc != a.netloc or re.search(r"log ?in|sign ?in|auth|sso|account", b.path, re.I) or not public_host(newurl): return None
             return super().redirect_request(req, fp, code, msg, hdrs, newurl)
     op = urllib.request.build_opener(NoRedir)
     req = urllib.request.Request(url, headers={"User-Agent": "speakeasy/1 (local reader)"})
@@ -360,14 +403,15 @@ def sel_lines(page, sel_text):
         if lt and len(lt & st) / len(lt) >= 0.8: out.append(i)
     return out
 
-def figure_context(figs, limit=8):
+def figure_context(figs, limit=8, cap_chars=160):
     out = []
     for f in figs[:limit]:
         if not f.get("label"): continue
         pn = ", ".join(p["label"] for p in f.get("panels") or [])
         cap = re.sub(r"\s+", " ", f.get("caption") or "")
         cap = re.sub(r"^\s*(?:fig(?:ure)?s?\.?|table)\s*\d+\s*[.:|\-\u2013\u2014]?\s*", "", cap, flags=re.I)
-        out.append(f"{f['label']}" + (f" (panels {pn})" if pn else "") + ": " + cap[:160])
+        cap = cap[:cap_chars].rsplit(" ", 1)[0] if len(cap) > cap_chars else cap
+        out.append(f"{f['label']}" + (f" (panels {pn})" if pn else "") + (": " + cap.rstrip(" .,;:") if cap else ""))
     return out
 
 def find_ref(sentence, figs, last=None):
@@ -384,7 +428,7 @@ def target_rect(f, panel):
     if panel:
         p = next((p for p in f.get("panels") or [] if p["label"] == panel), None)
         if p: return p["bbox"], "panel"
-    return f.get("bbox"), "figure"
+    return f.get("bbox"), ("table" if f.get("kind") == "table" else "figure")
 
 def content_words(sentence):
     return [t for t in _toks(sentence) if t not in GENERIC and not t.isdigit() and len(t) >= 3]
