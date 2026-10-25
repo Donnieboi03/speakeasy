@@ -2012,6 +2012,7 @@ def _v_kind(block_lines, context):
     return "message"
 
 class VLines(list):
+    header = None       # table header cells
     framing = None      # the line introducing the block ("Here's a text you could send to Sam:")
     who = None          # inline quote speaker ("Sam wrote: ...")
     lead = None         # short words before an inline quote on the same line
@@ -2057,6 +2058,56 @@ def _is_footer(l):
 def _prev_blank_or_end(lines, k):
     return k == 0 or not lines[k - 1].strip() or bool(re.search(r"[,]\s*$", lines[k - 1]))
 
+_T_SEP = re.compile(r"^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$")
+def _cells(l):
+    """Split a table row into cells: pipes, tabs, or 2+ spaces between columns. None if it is not a row."""
+    t = l.strip()
+    if not t or _T_SEP.match(t): return None
+    if t.count("|") >= 1 and not re.search(r"\s[\u00b7\u2022]\s", t):
+        c = [x.strip() for x in t.strip("|").split("|")]
+        if len(c) >= 2: return c
+    if "\t" in l:
+        c = [x.strip() for x in l.strip("\n").split("\t") if x.strip()]
+        if len(c) >= 2: return c
+    c = [x.strip() for x in re.split(r"\s{2,}", t) if x.strip()]
+    return c if len(c) >= 2 else None
+
+def find_table(lines, i):
+    """(end, header, rows) for a table starting at line i: >= 3 rows with a consistent column count. Else None."""
+    j, rows = i, []
+    while j < len(lines):
+        if _T_SEP.match(lines[j].strip() or "x"): j += 1; continue
+        c = _cells(lines[j])
+        if c is None or (rows and abs(len(c) - len(rows[0])) > 1) or len(c) > 12: break
+        rows.append(c); j += 1
+    if len(rows) < 3 or any(len(" ".join(r).split()) > 40 for r in rows): return None
+    hdr = None
+    if all(not re.search(r"\d", x) for x in rows[0]) and any(re.search(r"\d", x) for r in rows[1:] for x in r) \
+            or any(_T_SEP.match(lines[k].strip() or "x") for k in range(i, min(j, i + 3))) \
+            or all(len(x.split()) <= 3 and x[:1].isupper() for x in rows[0]) and len(rows) >= 4:
+        hdr, rows = rows[0], rows[1:]
+    return j, hdr, rows
+
+def find_cell_table(lines, i):
+    """A copied HTML table that arrives one cell per line: a row pattern repeating every k lines (k=2..6), anchored on a
+    column of codes/numbers (ZIP, id, price) that recurs at the same position. Optional header row of k labels."""
+    seg = []
+    j = i
+    while j < len(lines) and lines[j].strip() and len(lines[j].split()) <= 8: seg.append(lines[j].strip()); j += 1
+    if len(seg) < 6: return None
+    num = [bool(re.fullmatch(r"[$#]?\d[\d,.\- ]*%?", x)) for x in seg]
+    for k in range(2, 7):
+        for off in range(k):
+            for h in (0, k):                                   # with or without a header row
+                body = seg[h:]
+                if len(body) < 3 * k or len(body) % k: continue
+                if all(num[h + r * k + off] for r in range(len(body) // k)) and \
+                        sum(num) == len(body) // k * sum(1 for o in range(k) if all(num[h + r * k + o] for r in range(len(body) // k))):
+                    hdr = seg[:k] if h else None
+                    if hdr and any(re.search(r"\d", x) for x in hdr): continue
+                    return i + len(seg), hdr, [body[r * k:(r + 1) * k] for r in range(len(body) // k)]
+    return None
+
 def split_verbatim(text):
     """[(kind, lines)] where kind is 'plain' or ('verbatim', info). Only clear cases are marked verbatim:
     an email/message (headers or greeting ... sign-off), a run of '>' blockquote lines, or a long fully quoted paragraph."""
@@ -2066,6 +2117,21 @@ def split_verbatim(text):
         if plain: out.append(("plain", plain[:])); plain.clear()
     while i < n:
         l = lines[i]
+        # table (pipes / tabs / aligned columns / one cell per line): announce, then every row
+        t = find_table(lines, i) if _cells(l) is not None else None
+        if t is None and l.strip() and (i == 0 or not lines[i - 1].strip()): t = find_cell_table(lines, i)
+        if t is not None:
+            vl = VLines(t[2]); vl.header = t[1]; vl.framing = _take_framing(plain)
+            flush(); out.append(("table", vl)); i = t[0]; continue
+        # bullet / numbered list of >= 3 short items: read every item
+        if re.match(r"^\s*(?:[-*+\u2022]|\d+[.)])\s+\S", l):
+            j = i
+            while j < n and re.match(r"^\s*(?:[-*+\u2022]|\d+[.)])\s+\S", lines[j]) and len(lines[j].split()) <= 25: j += 1
+            if j - i >= 3 and (j >= n or not re.match(r"^\s*(?:[-*+\u2022]|\d+[.)])\s+\S", lines[j])):
+                vl = VLines([re.sub(r"^\s*(?:[-*+\u2022]|\d+[.)])\s+", "", x).strip() for x in lines[i:j]])
+                vl.framing = _take_framing(plain) or (plain[-1].strip() if plain and plain[-1].strip().endswith(":") else None)
+                if vl.framing and plain and plain[-1].strip() == vl.framing: plain.pop()
+                flush(); out.append(("list", vl)); i = j; continue
         # email / message / letter
         if _V_HDR.match(l) or _greet(l):
             j = i
@@ -2177,8 +2243,57 @@ def _greet_name(body):
     if m and m.group(1).lower() not in ("all", "team", "everyone", "there", "folks", "sir", "madam"): return m.group(1)
     return None
 
+_DIGIT_COL = re.compile(r"(?i)\b(zip|postal|code|phone|tel|id|no|number|#|account|acct|sku|pin|ext)\b")
+def _plural(w):
+    w = w.lower()
+    if re.search(r"(s|x|ch|sh)$", w): return w + "es"
+    if re.search(r"[^aeiou]y$", w): return w[:-1] + "ies"
+    return w + "s"
+
+def _say_cell(x, digits):
+    x = _smooth_line(x)
+    if digits and re.fullmatch(r"[\d\- ()+.]{3,}", x):
+        return " ".join(ch for ch in x if ch.isdigit())          # ZIP 93701 -> '9 3 7 0 1'
+    return x
+
+def table_speech(rows, header=None, framing=None):
+    n = len(rows)
+    ncol = max(len(r) for r in rows)
+    digit_cols = set()
+    for c in range(ncol):
+        vals = [r[c] for r in rows if c < len(r) and r[c].strip()]
+        name = header[c] if header and c < len(header) else ""
+        if vals and (_DIGIT_COL.search(name) or all(re.fullmatch(r"0?\d{4,6}(-\d{4})?", v.strip()) for v in vals)):
+            digit_cols.add(c)
+    if header:
+        noun = _plural(_smooth_line(header[0])) if len(header[0].split()) <= 2 else "rows"
+        rest = [_smooth_line(h) for h in header[1:] if h.strip()]
+        rest = [h if h.isupper() else h.lower() for h in rest]
+        cols = (", with " + (", ".join(rest[:-1]) + " and " + rest[-1] if len(rest) > 1 else rest[0])) if rest else ""
+        head = f"Here's the table of {n} {noun if n != 1 else noun.rstrip('s')}{cols}."
+    else:
+        head = f"Here's the table, {n} rows."
+    if framing: head = _smooth_line(framing).rstrip(":. ") + ". " + head
+    out = [head]
+    for r in rows:
+        cells = [_say_cell(x, c in digit_cols) for c, x in enumerate(r) if x.strip()]
+        out.append(", ".join(cells) + ".")
+    return out
+
+def list_speech(items, framing=None):
+    n = len(items)
+    out = [(_smooth_line(framing).rstrip(":. ") + ", " + f"{n} items." ) if framing else f"Here's the list of {n} items."]
+    for x in items:
+        t = _smooth_line(x)
+        out.append(t if re.search(r"[.!?]$", t) else t + ".")
+    return out
+
 def verbatim_speech(kind, lines, context=""):
     """Sentences to speak for one verbatim block: a short naming line, then the body nearly word for word."""
+    if kind == "table":
+        return table_speech(list(lines), getattr(lines, "header", None), getattr(lines, "framing", None))
+    if kind == "list":
+        return list_speech(list(lines), getattr(lines, "framing", None))
     out = []
     if kind == "inline":
         q = _smooth_line(lines[0] if lines else "").rstrip(" ,;:")
@@ -2262,7 +2377,7 @@ def rewrite(text, rec, keep_error=False):
     segs = split_verbatim(text) if os.environ.get("SPEAKEASY_VERBATIM", "on").lower() != "off" else [("plain", text.splitlines())]
     if not any(k != "plain" for k, _ in segs):
         return _rewrite(text, rec, keep_error)
-    rec["verbatim_blocks"] = [("quote" if k in ("quote", "inline") else
+    rec["verbatim_blocks"] = [(k if k in ("table", "list") else "quote" if k in ("quote", "inline") else
                                "text" if re.search(r"(?i)\btexts?\b|\bsms\b|\bimessage\b", getattr(v, "framing", None) or "")
                                else _v_kind(v, getattr(v, "framing", None) or text)) for k, v in segs if k != "plain"]
     parts, streamed_any = [], False
