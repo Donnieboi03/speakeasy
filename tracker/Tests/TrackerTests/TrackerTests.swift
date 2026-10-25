@@ -85,3 +85,17 @@ final class LifetimeTests: XCTestCase {
         XCTAssertTrue(waitExit(p, 5), "tracker outlived its parent")
     }
 }
+
+final class KeyHideTests: XCTestCase {
+    func testScreenshotShortcutsAreNotTabSwitches() {
+        for kc: Int64 in [20, 21, 23, 22] { XCTAssertFalse(isTabSwitchKey(cmd: true, ctrl: false, shift: true, alt: false, keyCode: kc)) }   // Cmd-Shift-3/4/5/6
+        XCTAssertTrue(isTabSwitchKey(cmd: true, ctrl: false, shift: false, alt: false, keyCode: 21))     // Cmd-4
+        XCTAssertTrue(isTabSwitchKey(cmd: false, ctrl: true, shift: false, alt: false, keyCode: 48))     // Ctrl-Tab
+        XCTAssertTrue(isTabSwitchKey(cmd: true, ctrl: false, shift: true, alt: false, keyCode: 30))      // Cmd-Shift-]
+    }
+    func testSamePageBringsTheBoxBack() {
+        let page: Set<String> = Set((0..<50).map { "w\($0)" })
+        XCTAssertTrue(sameContent(page.union(["x1", "x2"]), page))
+        XCTAssertFalse(sameContent(Set((40..<90).map { "w\($0)" }), page))
+    }
+}

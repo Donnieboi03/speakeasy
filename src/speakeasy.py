@@ -530,6 +530,25 @@ class _GFuture:
         if not good: good = [(b, l) for b, l in zip(self.boxes, self.labels or [""] * len(self.boxes)) if (b[2] - b[0]) * (b[3] - b[1]) < self.max_frac * ca]
         return good[0][0] if good else None
 
+def gemini_model(model):
+    """Gemini answers boxes natively as box_2d [ymin, xmin, ymax, xmax] on 0..1000 (y first), whatever the prompt says."""
+    return "gemini" in (model or "").lower()
+
+def ground_prompt(model):
+    if gemini_model(model):
+        return 'Answer only JSON {"box_2d":[ymin,xmin,ymax,xmax]} normalized to 0-1000.'
+    return 'Answer only JSON {"bbox_2d":[x1,y1,x2,y2]} with coordinates 0-1000.'
+
+def parse_ground_box(content, model):
+    """Model answer -> [x0, y0, x1, y1] as 0..1 of the crop, or None. Gemini's box_2d is y-first; Qwen's bbox_2d is x-first."""
+    m = re.search(r"\[\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*,\s*(-?[\d.]+)\s*\]", content or "")
+    if not m: return None
+    a = [float(x) for x in m.groups()]
+    if gemini_model(model): a = [a[1], a[0], a[3], a[2]]
+    scale = 1.0 if max(a) <= 1.0 else 1000.0              # some models answer 0..1
+    v = [min(1.0, max(0.0, x / scale)) for x in a]
+    return v if v[2] > v[0] and v[3] > v[1] else None
+
 class Grounder:
     """Florence-2 phrase grounding on the figure crop, in a lazily started worker (Kokoro venv). Never blocks speech."""
     def __init__(self):
@@ -579,14 +598,16 @@ class Grounder:
             url = (c[0] if c else os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/")) + "/chat/completions"
             gh = {"Content-Type": "application/json", **(c[1] if c else {})}
             self.provider = "openrouter" if c else "local"
-            body = {"model": c[2] if c else vision_model(), "temperature": 0, "max_tokens": 40, "stream": False,
+            body_model = c[2] if c else vision_model()
+            body = {"model": body_model, "temperature": 0, "max_tokens": 40, "stream": False,
                     "messages": [{"role": "user", "content": [
-                        {"type": "text", "text": 'Locate ' + re.sub(r"[\"{}]", "", text)[:120] + ' in the image. Answer only JSON {"bbox_2d":[x1,y1,x2,y2]} with coordinates 0-1000.'},
+                        {"type": "text", "text": 'Locate ' + re.sub(r"[\"{}]", "", text)[:120] + ' in the image. ' + ground_prompt(body_model)},
                         {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]}
             r = json.load(urllib.request.urlopen(urllib.request.Request(url, json.dumps(body).encode(), gh), timeout=20))
-            m = re.search(r"\[\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\]", r["choices"][0]["message"]["content"] or "")
-            if m:
-                v = [float(x) / 1000 for x in m.groups()]; w, h = clip[2] - clip[0], clip[3] - clip[1]
+            v = parse_ground_box(r["choices"][0]["message"]["content"] or "", body_model)
+            if v:
+                w, h = clip[2] - clip[0], clip[3] - clip[1]
+                self.box_convention = "yx" if gemini_model(body_model) else "xy"
                 if v[2] > v[0] and v[3] > v[1]:
                     f.boxes = [[clip[0] + v[0] * w, clip[1] + v[1] * h, clip[0] + v[2] * w, clip[1] + v[3] * h]]; f.labels = [text[:60]]
         except Exception:

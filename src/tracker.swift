@@ -136,6 +136,7 @@ final class Live: NSObject {
     var rect: CGRect? = nil              // target text box, global top-left coordinates
     var isEllipse = false
     var front = true, winFront = true, hiddenByKey = false, scanVisible = false
+    var keyHideAt = 0.0          // when a tab-switch key hid the box; a later scan of the same page brings it back
     var winFrame: CGRect? = nil
     var srcPid: pid_t = 0
     var axEl: AXUIElement? = nil
@@ -597,11 +598,10 @@ final class Live: NSObject {
         guard front, rect != nil else { return }
         if type == .keyDown {
             let f = ev.flags, kc = ev.getIntegerValueField(.keyboardEventKeycode)
-            let digit: Set<Int64> = [18, 19, 20, 21, 23, 22, 26, 28, 25]
             let cmd = f.contains(.maskCommand), ctrl = f.contains(.maskControl), sh = f.contains(.maskShift), alt = f.contains(.maskAlternate)
-            let tabSwitch = (cmd && !alt && digit.contains(kc)) || (ctrl && kc == 48) || (cmd && sh && (kc == 33 || kc == 30))
+            let tabSwitch = isTabSwitchKey(cmd: cmd, ctrl: ctrl, shift: sh, alt: alt, keyCode: kc)
                 || (cmd && alt && (kc == 123 || kc == 124)) || (cmd && (kc == 17 || kc == 13)) || [116, 121, 115, 119].contains(kc)
-            if tabSwitch { hiddenByKey = true; lastMove = now(); hideTrigger = ("tab-switch", now()); apply() }
+            if tabSwitch { hiddenByKey = true; keyHideAt = now(); lastMove = now(); hideTrigger = ("tab-switch", now()); apply() }
             return
         }
         guard let w = winFrame, w.contains(ev.location) else { return }
@@ -781,6 +781,19 @@ func refind(_ lines: [OLine], target: [String], near: CGRect?) -> CGRect? {
         if dn >= up { hi += 1; box = box.union(rows[hi].box) } else { lo -= 1; box = box.union(rows[lo].box) }
     }
     return box
+}
+
+/// Keys that switch the document under the box (tab / page): Cmd-1..9, Ctrl-Tab, Cmd-Shift-[ / ]. Cmd-Shift-3/4/5/6
+/// are macOS screenshot shortcuts, not tab switches: they used to hide the box for the rest of the read.
+func isTabSwitchKey(cmd: Bool, ctrl: Bool, shift: Bool, alt: Bool, keyCode kc: Int64) -> Bool {
+    let digit: Set<Int64> = [18, 19, 20, 21, 23, 22, 26, 28, 25]
+    return (cmd && !alt && !shift && digit.contains(kc)) || (ctrl && kc == 48) || (cmd && shift && (kc == 33 || kc == 30))
+}
+
+/// After a tab-switch key, the box comes back once a scan shows the same page (token overlap with the run's first scan).
+func sameContent(_ a: Set<String>, _ b: Set<String>) -> Bool {
+    let uni = Double(max(1, a.union(b).count))
+    return Double(a.intersection(b).count) / uni >= 0.6
 }
 
 // ---------------- lifetime ----------------
@@ -1095,6 +1108,14 @@ struct Tracker {
                             ocrMs += (now() - o0) * 1000; ocrN += 1
                             let all = Set(lines.flatMap { $0.toks })
                             if baseline == nil { baseline = all }
+                            if native, let bl = baseline, sameContent(all, bl) {
+                                await MainActor.run {
+                                    let L = Live.shared
+                                    if L.hiddenByKey && now() - L.keyHideAt > 0.4 {
+                                        L.hiddenByKey = false; L.hideTrigger = nil; L.rec(["event": "unhide", "reason": "same-page"]); L.apply()
+                                    }
+                                }
+                            }
                             if let r = hit { found = r; if method.isEmpty { method = "ocr" } }
                             else {
                                 let inter = Double(all.intersection(baseline!).count), uni = Double(max(1, all.union(baseline!).count))
