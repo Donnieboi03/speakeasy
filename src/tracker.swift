@@ -215,6 +215,17 @@ struct Tracker {
     }
     static func run(_ a: [String: String]) async {
         // Offline check: --ocr-image file.png --find "text" [--frame x,y,w,h]
+        // --ocr-lines file.png --frame x,y,w,h : recognised lines as JSON, boxes in frame coordinates (used for raster figures)
+        if let p = a["ocr-lines"] {
+            guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: p) as CFURL, nil),
+                  let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { print("[]"); return }
+            let f = (a["frame"] ?? "").split(separator: ",").compactMap { Double($0) }
+            let frame = f.count == 4 ? CGRect(x: f[0], y: f[1], width: f[2], height: f[3]) : CGRect(x: 0, y: 0, width: img.width, height: img.height)
+            let lines = recognise(img, frame: frame, accurate: true)
+            let arr: [[String: Any]] = lines.map { ["t": $0.text, "r": [Double($0.box.minX), Double($0.box.minY), Double($0.box.maxX), Double($0.box.maxY)]] }
+            if let d = try? JSONSerialization.data(withJSONObject: arr), let s = String(data: d, encoding: .utf8) { print(s) } else { print("[]") }
+            return
+        }
         if let p = a["ocr-image"] {
             guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: p) as CFURL, nil),
                   let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { print("{\"error\":\"bad image\"}"); return }
@@ -272,6 +283,7 @@ struct Tracker {
         var missRun = 0
         var frameLogN = 0
         var lastAccurate = 0.0
+        var speakerSeen: Int32? = nil
         var maxRss = 0.0
         var activeS = 0.0
         var errNote: String? = filter == nil ? "window not shareable (Screen Recording permission?)" : nil
@@ -285,16 +297,30 @@ struct Tracker {
             let state = ev["state"] as? String ?? ""
             let epid = ev["pid"] as? Int ?? -1
             let seq = ev["seq"] as? Int ?? -1
-            if state == "clear" { if lastClear == nil { lastClear = tick }; if tick - lastClear! > 1.5 { exitReason = "speech-finished"; break } } else { lastClear = nil }
-            if state == "show" { lastShowTs = tick }
-            if tick - lastShowTs > (lastSeq < 0 ? 45 : 25) { exitReason = "no-focus-events"; break }                  // nothing to follow (first wait covers LLM/vision)
+            let evTs = ev["ts"] as? Double ?? 0
+            let fresh = evTs >= t0 - 0.5                                   // written by this run, not left over from the last one
+            if lastSeq < 0 {
+                // Before the first sentence: vision / the LLM can take many seconds. Wait for the first focus event or for the
+                // speakeasy process to exit; a stale "clear" from an earlier run is not the end of this one.
+                let sp = Int32((try? String(contentsOfFile: home + "/speak.pid", encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 0
+                if sp > 0 && kill(sp, 0) == 0 { speakerSeen = sp }
+                if let p = speakerSeen, kill(p, 0) != 0 { exitReason = "speaker-exited"; break }
+                if speakerSeen == nil && tick - t0 > 10 { exitReason = "speaker-not-started"; break }
+                if state == "clear" && fresh && epid > 0 && Int32(epid) == speakerSeen { exitReason = "speech-finished"; break }
+                if tick - t0 > 240 { exitReason = "no-focus-events"; break }
+            } else {
+                if state == "clear" { if lastClear == nil { lastClear = tick }; if tick - lastClear! > 1.5 { exitReason = "speech-finished"; break } } else { lastClear = nil }
+                if tick - lastShowTs > 25 { exitReason = "no-focus-events"; break }
+            }
+            if state == "show" && (fresh || lastSeq >= 0) { lastShowTs = tick }
             if epid > 0 && lastPid > 0 && epid != lastPid { exitReason = "newer-run"; break }                   // a newer speakeasy run took over
-            if epid > 0 && kill(pid_t(epid), 0) != 0 && state == "show" && tick - t0 > 2 { exitReason = "speaker-died"; break }   // speaker died
-            if state == "show" && (seq != lastSeq || epid != lastPid) { lastSeq = seq; lastPid = epid; missRun = 0 }
+            if epid > 0 && kill(pid_t(epid), 0) != 0 && state == "show" && (fresh || lastSeq >= 0) && tick - t0 > 2 { exitReason = "speaker-died"; break }   // speaker died
+            let showing = state == "show" && (fresh || lastSeq >= 0)
+            if showing && (seq != lastSeq || epid != lastPid) { lastSeq = seq; lastPid = epid; missRun = 0 }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
             var scanned = false
             var winFrame: CGRect? = nil
-            if state == "show" {
+            if showing {
                 activeS += tick - prevTick
                 let ws = windowState(wid)
                 let seqChanged = (lastOut["seq"] as? Int) != seq
