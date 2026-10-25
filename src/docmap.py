@@ -597,6 +597,27 @@ def anchor_fit(ocr, anchors, frame=None):
     rms = (sum((t[0] * p[0] + t[1] - q[0]) ** 2 + (t[0] * p[1] + t[2] - q[1]) ** 2 for p, q in zip(P, S)) / len(P)) ** 0.5
     return (t[0], t[1], t[2], rms, len(P)) if rms <= 10 else None
 
+def area_lines(lines, prect):
+    """PDF text inside a rectangle (page space), like a PDF reader's rectangle / column selection (PDFKit
+    PDFPage.selection(for:), Preview's Option-drag): lines whose vertical centre is inside and at least half of whose width
+    is inside, ordered column by column (a gutter is an x no chosen line crosses), top to bottom within a column."""
+    x0, y0, x1, y1 = prect
+    sel = []
+    for l in lines:
+        cy = (l[1] + l[3]) / 2; w = max(0.1, l[2] - l[0])
+        if y0 - 1 <= cy <= y1 + 1 and (min(l[2], x1) - max(l[0], x0)) / w >= 0.5 and l[4].strip(): sel.append(l)
+    if not sel: return []
+    # gutters: sweep the x extents; a gap between merged spans splits columns
+    spans = sorted([max(l[0], x0), min(l[2], x1)] for l in sel)
+    cols = [spans[0][:]]
+    for a0, a1 in spans[1:]:
+        if a0 > cols[-1][1] + 4: cols.append([a0, a1])
+        else: cols[-1][1] = max(cols[-1][1], a1)
+    def col(l):
+        c = max(l[0], x0)
+        return next(i for i, (c0, c1) in enumerate(cols) if c0 - 0.5 <= c <= c1 + 0.5)
+    return sorted(sel, key=lambda l: (col(l), round(l[1], 0), l[0]))
+
 def apply(t, r):
     s, ox, oy = t[:3]
     return [s * r[0] + ox, s * r[1] + oy, s * (r[2] - r[0]), s * (r[3] - r[1])]

@@ -2909,6 +2909,46 @@ def get_selection():
 # ---------------- observability helpers: observe.py ----------------
 from observe import peak_rss_mb, ollama_ps, capture_keep_path, crop_to_rect, tempfile_dir, CAP_PREFIX, is_owned_capture, is_temp_path, handle_capture_file, read_runs, cmd_last, cmd_stats, image_size
 # ---------------- main ----------------
+def area_pdf_text(ocr_text, a, rec, wait=4.0):
+    """Read area on a PDF: swap the OCR text for the document's own text layer inside the drawn rectangle.
+    Page->screen comes from the OCR lines (same anchor fit the tracker uses); returns the PDF text and rewrites the
+    per-line rects file with the PDF lines mapped to screen, or None to keep OCR."""
+    t0 = time.time()
+    try:
+        end = time.time() + wait
+        while not DOC.done.is_set() and time.time() < end: DOC.done.wait(0.02)
+        d = DOC.out if DOC.done.is_set() else None
+        if not d or not d.get("page") or d.get("kind") == "md": rec["area_pdf"] = "no-doc"; return None
+        lb = json.load(open(a.line_bounds))
+        ocr = []
+        for e in lb:
+            t = ocr_text[int(e["loc"]):int(e["loc"]) + int(e["len"])]; x, y, w, h = map(float, e["rect"])
+            ocr.append([x, y, x + w, y + h, t])
+        frame = [float(v) for v in a.capture_rect.split(",")]
+        seen, anc = set(), []
+        for l in d["page"]["lines"]:
+            k = re.sub(r"\s+", " ", l[4].strip().lower())
+            if len(k) >= 14 and k not in seen: seen.add(k); anc.append(l)
+        fit = docmap.anchor_fit(ocr, anc, frame)
+        if not fit or fit[4] < 3 or fit[3] > 6: rec["area_pdf"] = "no-fit"; return None
+        sc, ox, oy = fit[0], fit[1], fit[2]
+        prect = [(frame[0] - ox) / sc, (frame[1] - oy) / sc, (frame[0] + frame[2] - ox) / sc, (frame[1] + frame[3] - oy) / sc]
+        lines = docmap.area_lines(d["page"]["lines"], prect)
+        if not lines: rec["area_pdf"] = "empty"; return None
+        out, loc, parts = [], 0, []
+        for l in lines:
+            t = l[4].strip()
+            out.append({"loc": loc, "abs": loc, "len": len(t),
+                        "rect": [round(sc * l[0] + ox, 1), round(sc * l[1] + oy, 1), round(sc * (l[2] - l[0]), 1), round(sc * (l[3] - l[1]), 1)]})
+            parts.append(t); loc += len(t) + 1
+        with open(a.line_bounds, "w") as f: json.dump(out, f)
+        rec.update(area_text="pdf", area_pdf="ok", area_pdf_lines=len(lines), area_fit_rms=round(fit[3], 1), area_fit_anchors=fit[4])
+        return "\n".join(parts)
+    except (OSError, ValueError, KeyError, TypeError) as e:
+        rec["area_pdf"] = f"error: {type(e).__name__}"; return None
+    finally:
+        rec["area_pdf_ms"] = int((time.time() - t0) * 1000)
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="speakeasy", description="Rewrite text for listening and speak it.")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -2998,6 +3038,8 @@ def main(argv=None):
     if docmap is not None and a.cmd in ("speak", "selection", "rewrite") and os.environ.get("SPEAKEASY_DOC_READ", "local").lower() in ("local", "all") \
             and (a.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT")):
         DOC = DocJob(a.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT"), text, rec); DOC.img_given = bool(a.image); DOC.start()
+    if getattr(a, "capture_method", None) == "area" and getattr(a, "area_text", None) == "ocr" and DOC is not None and a.line_bounds and a.capture_rect:
+        text = area_pdf_text(text, a, rec) or text
     img = a.image
     method = a.capture_method or ("none" if not img else None)
     rec.update(capture_method=method, capture_rect=a.capture_rect)
