@@ -774,6 +774,7 @@ class Focus:
         self.image_mode = image_mode     # True when the output may be about an image (R tags)
         self.dry, self.rec = dry, rec
         self.prev_line, self.n, self.events, self.methods = 0, 0, 0, {}
+        self.prev_start, self.ref_lines, self.map_note = 1, None, None
         self.toks = [_toks(l) for l in self.lines]
         self.tags = os.environ.get("SPEAKEASY_FOCUS_TAGS", "off").lower() in ("on", "1", "true", "yes")
         self.feats = [_feats(l) for l in self.lines]
@@ -837,8 +838,13 @@ class Focus:
     def locate(self, sentence, tag):
         """(rect, method); the rect also carries .src (source lines, for the live tracker to re-find on screen)
         and .rng (absolute AX character range of those lines, when the hotkey supplied per-line offsets)."""
+        self.ref_lines = None; self.map_note = None
         rect, method = self._locate(sentence, tag)
         r = FRect(rect)
+        r.nlines = (self.last_lines[1] - self.last_lines[0] + 1) if self.last_lines else None
+        if self.ref_lines:
+            r.ref = [round(v, 1) for v in self._line_rect(*self.ref_lines)]
+            r.ref_src = [_plain_line(l) for l in self.lines[self.ref_lines[0] - 1:self.ref_lines[1]]][:4]
         if self.last_lines and self.lines:
             a, b = self.last_lines
             r.src = [_plain_line(l) for l in self.lines[a - 1:b]][:6]
@@ -989,7 +995,7 @@ class Focus:
             if f:
                 self.last_fig = f
                 cap = f.get("caption") or ""
-                nr = FRect(r); nr.src = [cap[:120]] if cap else getattr(r, "src", None); nr.rng = getattr(r, "rng", None)
+                nr = FRect(r); nr.src = [cap[:120]] if cap else getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.nlines = getattr(r, "nlines", None)
                 nr.doc = {"kind": "figure", "label": f.get("label"), "md_line": f.get("line")}
                 return nr, "doc-md"
             return r, method
@@ -1037,7 +1043,7 @@ class Focus:
                 ls = [d["page"]["lines"][i] for i in ix]
                 tgt = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]; kind = "line"
         if not tgt: return r, method
-        nr = FRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.pending = getattr(r, "pending", None)
+        nr = FRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.nlines = getattr(r, "nlines", None); nr.pending = getattr(r, "pending", None)
         t = self._doc_transform()
         if t == "pending":
             nr.hold = tgt; t = None                                     # no box until the capture fit lands (never a wrong one)
@@ -1090,8 +1096,21 @@ class Focus:
                         sc += 0.6 * w * (1.0 / self.df[hit[0]]) ** 0.5 if N > 1 else 0.6 * w
             out.append(sc / max(1.0, len(fl)) ** 0.15)
         return out, sf
+    _REFBACK = re.compile(r"(?i)\b(as (?:mentioned|noted|said|discussed|described|shown|stated) (?:above|earlier|before|previously)|"
+                          r"(?:mentioned|noted|described) (?:above|earlier)|as before|recall(?:ing)? that|going back to|again,|earlier,)")
+    def _span(self, a, b, sentence):
+        """Cap a sentence's line span to about what its words need (no whole-selection boxes)."""
+        words = len((sentence or "").split())
+        wpl = max(4.0, sum(len(l.split()) for l in self.lines) / max(1, len(self.lines)))
+        cap = max(1, int(words / wpl + 0.999) + 1)
+        return a, min(b, a + cap - 1)
     def _match(self, sentence):
-        """Overlap with the source lines, with a monotonic-progress prior; proportional progress otherwise."""
+        """Forward-only overlap with the source lines: the main box never moves back up. A sentence that refers back
+        (wording or a strong match on earlier lines) keeps the box forward and gets a faint secondary outline there."""
+        self.ref_lines = None
+        r = self._match_inner(sentence)
+        return r
+    def _match_inner(self, sentence):
         sc, sf = self._scores(sentence)
         cur = self.prev_line                                       # 1-based last line highlighted (0 = none yet)
         n = len(self.lines)
@@ -1102,25 +1121,39 @@ class Focus:
         bb = max(bwd, key=lambda i: sc[i]) if bwd else None
         T = 1.0
         best = bf
-        if bb is not None and sc[bb] >= T * 1.8 and sc[bb] >= 1.6 * (sc[bf] if bf is not None else 0) \
-                and any(k.startswith("#") or v > 1.0 for k, v in sf.items() if k in self.feats[bb]):
-            best = bb                                              # strong evidence (number / name) to jump back
+        refback = bb is not None and (
+            (sc[bb] >= T * 1.8 and sc[bb] >= 1.6 * (sc[bf] if bf is not None else 0)
+             and any(k.startswith("#") or v > 1.0 for k, v in sf.items() if k in self.feats[bb]))
+            or (self._REFBACK.search(sentence or "") and sc[bb] >= T))
+        if refback:                                                # never jump back: faint outline on the earlier lines
+            a2 = b2 = bb
+            while a2 - 1 >= 0 and sc[a2 - 1] >= max(T * 0.8, 0.6 * sc[bb]): a2 -= 1
+            while b2 + 1 < n and b2 + 1 < max(1, cur) - 1 and sc[b2 + 1] >= max(T * 0.8, 0.6 * sc[bb]): b2 += 1
+            a2, b2 = self._span(a2 + 1, b2 + 1, sentence)
+            self.ref_lines = [a2, b2]
+        lo = max(1, self.prev_start)                               # forward-only: never start above the last sentence
         if best is not None and sc[best] >= T:
             a = b = best
-            while a - 1 >= 0 and sc[a - 1] >= max(T * 0.8, 0.6 * sc[best]): a -= 1
+            while a - 1 >= lo - 1 and sc[a - 1] >= max(T * 0.8, 0.6 * sc[best]): a -= 1
             while b + 1 < n and sc[b + 1] >= max(T * 0.8, 0.6 * sc[best]): b += 1
-            self.prev_line = b + 1; self.last_lines = [a + 1, b + 1]
-            return self._line_rect(a + 1, b + 1), "overlap"
-        step = max(1, round(n / 6.0))                              # proportional progress: next chunk of lines
-        a = min(n, cur + 1); b = min(n, a + step - 1)
-        self.prev_line = b; self.last_lines = [a, b]
+            a, b = self._span(a + 1, b + 1, sentence)
+            self.prev_line = b; self.prev_start = a; self.last_lines = [a, b]
+            self.map_note = "ref-back" if refback else "forward"
+            return self._line_rect(a, b), "overlap"
+        a = min(n, max(cur + 1, lo)); _, b = self._span(a, n, sentence)   # proportional progress: next lines
+        if refback: a = min(n, max(cur, lo)); _, b = self._span(a, n, sentence)   # a back-reference stays where we are
+        self.prev_line = b; self.prev_start = a; self.last_lines = [a, b]
+        self.map_note = "ref-back" if refback else "forward"
         return self._line_rect(a, b), "progress"
     def note(self, method, sentence=""):
         self.methods[method] = self.methods.get(method, 0) + 1
+        if self.map_note:
+            fm = self.rec.setdefault("focus_map", {}); fm[self.map_note] = fm.get(self.map_note, 0) + 1
         try:                                                       # mapping trace (log only; never shown)
             d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "focus.jsonl"), "a") as f:
-                f.write(json.dumps({"state": "map", "method": method, "lines": self.last_lines, "text": _logtext(sentence)[:120],
+                f.write(json.dumps({"state": "map", "method": method, "lines": self.last_lines, "decision": self.map_note,
+                                    "ref_lines": self.ref_lines, "text": _logtext(sentence)[:120],
                                     "ts": round(time.time(), 3), "pid": os.getpid()}) + "\n")
         except OSError: pass
     # -- events --
@@ -1146,6 +1179,8 @@ class Focus:
         ev["range"] = getattr(rect, "rng", None)                    # absolute AX character range, or null when unknown
         if getattr(rect, "doc", None): ev["doc"] = rect.doc          # page-space target + text anchors for the tracker
         if getattr(rect, "shape", None): ev["shape"] = rect.shape
+        if getattr(rect, "nlines", None): ev["nlines"] = rect.nlines
+        if getattr(rect, "ref", None) and not getattr(rect, "doc", None): ev["ref"] = rect.ref; ev["ref_src"] = getattr(rect, "ref_src", None)
         fut = getattr(rect, "pending", None)
         hold = getattr(rect, "hold", None)
         if hold is not None:

@@ -166,6 +166,9 @@ final class Live: NSObject {
     var hb: Timer? = nil
     var lastFlush = 0.0
     var drawFails = 0
+    var refPanel: NSPanel? = nil
+    let refShape = CAShapeLayer()
+    var refShown = 0, transitions = 0, heldBig = 0
     var runId = ""
     var winTimer: DispatchSourceTimer? = nil
     // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
@@ -293,6 +296,7 @@ final class Live: NSObject {
             hideTrigger = nil
         } else {
             if p.isVisible { p.orderOut(nil) }
+            refPanel?.orderOut(nil)
             if shown {
                 shown = false; hides += 1
                 let trig = hideReason()
@@ -334,7 +338,47 @@ final class Live: NSObject {
         if capTs > 0 && capTs < lastMove { return }               // a scroll since the capture already moved it
         if let r = rect { rect = r.offsetBy(dx: dx, dy: dy); src = "fig-anchor"; apply() }
     }
-    func event(seq s: Int, rect r: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool) {
+    func showRef(_ r: CGRect) {
+        if refPanel == nil {
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 10, height: 10), styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            p.isOpaque = false; p.backgroundColor = .clear; p.hasShadow = false; p.ignoresMouseEvents = true
+            p.level = .statusBar; p.hidesOnDeactivate = false; p.isReleasedWhenClosed = false
+            p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
+            let v = NSView(frame: p.contentView!.bounds); v.wantsLayer = true; v.autoresizingMask = [.width, .height]
+            refShape.lineWidth = 1; refShape.lineDashPattern = [4, 3]
+            v.layer!.addSublayer(refShape); p.contentView = v; refPanel = p
+        }
+        guard let p = refPanel, front, winFront else { return }
+        let f = frameFor(r.offsetBy(dx: off.x, dy: off.y))
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        p.setFrame(f, display: false)
+        refShape.frame = p.contentView!.bounds
+        let b = CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2)
+        refShape.path = CGPath(roundedRect: b, cornerWidth: 5, cornerHeight: 5, transform: nil)
+        refShape.fillColor = CGColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 0.05)
+        refShape.strokeColor = CGColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 0.45)
+        CATransaction.commit()
+        p.orderFrontRegardless()
+        refShown += 1
+        rec(["event": "ref-outline", "seq": seq, "rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "ms": 1500])
+        let my = seq
+        _ = my; DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { p.orderOut(nil) }
+    }
+    func event(seq s: Int, rect r0: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool,
+               isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil) {
+        var r = r0
+        // never flash a big provisional box between sentences: a text sentence's box must fit its own lines
+        if let n = r0, isText {
+            let nr = n.offsetBy(dx: off.x, dy: off.y)
+            let limit = CGFloat(nlines ?? 3) * 40 + 12
+            let held = nr.height > limit && rect != nil
+            transitions += 1
+            if held { heldBig += 1 }
+            rec(["event": "transition", "seq": s, "old": rect.map { [Int($0.width), Int($0.height)] } ?? NSNull(),
+                 "new": [Int(nr.width), Int(nr.height)], "nlines": nlines ?? NSNull(), "held": held])
+            if held { r = nil }                                     // keep the previous box until OCR / AX finds the tight one
+        }
+        if let rf = ref { showRef(rf) }
         seq = s
         style(color: color, opacity: opacity, ellipse: ellipse)
         range = rg
@@ -472,7 +516,7 @@ final class Live: NSObject {
          "scroll_delta_hits": deltaHits,
          "scroll_lag_avg_ms": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(), "scroll_lag_max_ms": (lagMax * 10).rounded() / 10,
          "hide_ms_avg": hideN > 0 ? (hideSum / Double(hideN) * 10).rounded() / 10 : NSNull(), "hide_ms_max": (hideMax * 10).rounded() / 10,
-         "draw_failed": drawFails, "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
+         "draw_failed": drawFails, "transitions": transitions, "transitions_held_big": heldBig, "ref_outlines": refShown, "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
          "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
     }
 }
@@ -755,7 +799,11 @@ struct Tracker {
                     let rg = ev["range"] as? [Int], col = ev["color"] as? String, op = ev["opacity"] as? Double ?? 0.22
                     let ell = (ev["shape"] as? String) == "ellipse"
                     let sl = ev["src"] as? [String] ?? [], sq = seq
-                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell) }
+                    let dkind = (ev["doc"] as? [String: Any])?["kind"] as? String
+                    let isText = !ell && (dkind == nil || dkind == "line")
+                    let nl = ev["nlines"] as? Int
+                    let ref = (ev["ref"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText, nlines: nl, ref: ref) }
                 }
             }
             if native && !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
