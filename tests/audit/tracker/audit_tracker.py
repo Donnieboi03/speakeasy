@@ -23,6 +23,10 @@ def main():
     for k in ("cpu", "cpu_pct", "rss_mb", "mem_mb"):
         v = [l[k] for l in lines if isinstance(l.get(k), (int, float))]
         if v: out[f"{k}_max"] = max(v); out[f"{k}_median"] = statistics.median(v)
+    out["method_mix"] = dict(Counter(str(l.get("method")) for l in lines if "method" in l))
+    for i, l in enumerate(lines):
+        if l.get("method") == "doc" and not l.get("rect") and l.get("visible") is not False: out["problems"].append(f"#{i} doc frame without rect")
+        if any(isinstance(v, str) and ("/Users/" in v or v.endswith((".pdf", ".md"))) for v in l.values()): out["problems"].append(f"#{i} raw path in tracker log")
     out["missing_wanted_keys"] = [k for k in WANT if k not in out["keys"]]
     out["last"] = lines[-1] if lines else None
     if os.path.exists(tp):

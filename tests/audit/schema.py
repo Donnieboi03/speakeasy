@@ -49,6 +49,11 @@ REQUIRED = {
     "focus_tags": ((bool,), _spoken, "SPEAKEASY_FOCUS_TAGS on"),
     "focus_fallback": ((str, type(None)), _spoken, "focus mapping fallback/method summary"),
     "focus_tag_hit_rate": (NUM + (type(None),), lambda l: l.get("focus_tags") is True and (l.get("focus_events") or 0) > 0, "share of sentences mapped via tags"),
+    "doc_source": ((str, type(None)), _spoken, "where the source document came from (preview, vscode, browser, browser-file, ...)"),
+    "doc_path_hash": ((str, type(None)), lambda l: bool(l.get("doc_source")), "hash of the document path, never the path"),
+    "page": ((int, type(None)), lambda l: False, "1-based PDF page"),
+    "figures_found": ((int, type(None)), lambda l: False, "figures parsed on the page/file"),
+    "doc_map_method": ((str, type(None)), lambda l: False, "how the selection was located in the doc"),
     "verbatim_blocks": ((list, type(None)), lambda l: l.get("command") in ("rewrite", "speak", "selection") and l.get("backend") != "none", "kinds of verbatim blocks read near word-for-word"),
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
@@ -72,6 +77,8 @@ def validate(l):
     if str(l.get("capture_method", "")).startswith("no-selection") and not l.get("image"): probs.append("no_selection_method_without_image")
     if l.get("capture_method") == "none" and l.get("image"): probs.append("capture_none_but_image_used")
     if l.get("streamed") is True and isinstance(l.get("llm_first_token_ms"), NUM) and isinstance(l.get("first_sentence_ms"), NUM) and l["first_sentence_ms"] < l["llm_first_token_ms"]: probs.append("first_sentence_before_first_token")
+    if isinstance(l.get("doc_path_hash"), str) and ("/" in l["doc_path_hash"] or "." in l["doc_path_hash"]): probs.append("doc_path_hash_looks_like_path")
+    if isinstance(l.get("figures_found"), int) and l["figures_found"] < 0: probs.append("figures_found_negative")
     if l.get("focus_tags") is False and l.get("focus_tag_hit_rate") not in (None, 0): probs.append("tag_hit_rate_without_tags")
     if isinstance(l.get("focus_tag_hit_rate"), NUM) and not 0 <= l["focus_tag_hit_rate"] <= 1: probs.append("tag_hit_rate_out_of_range")
     g = l.get("vision_gate")
