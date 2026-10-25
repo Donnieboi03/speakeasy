@@ -531,18 +531,24 @@ def ground_label(sentence, fig, panel_hint=None):
     top = [c for c in cands if (c[0], c[1]) == key0]
     fa = (fig["bbox"][2] - fig["bbox"][0]) * (fig["bbox"][3] - fig["bbox"][1])
     objs = [o for o in fig.get("objects") or [] if (o[2] - o[0]) * (o[3] - o[1]) < 0.35 * fa]
+    panels = [p["bbox"] for p in fig.get("panels") or []]
+    def panel_of(lr):
+        cx, cy = (lr[0] + lr[2]) / 2, (lr[1] + lr[3]) / 2
+        return next((p for p in panels if p[0] <= cx <= p[2] and p[1] <= cy <= p[3]), None)
     def hood(lr):
+        pl = panel_of(lr)                    # never reach across a panel boundary (Fig. 4a "WANDmini" grabbed a 4b box)
+        objs_l = [o for o in objs if pl is None or _inside(o[:4], pl, 2)]
         def dist(o):
             dx = max(o[0] - lr[2], lr[0] - o[2], 0); dy = max(o[1] - lr[3], lr[1] - o[3], 0); return (dx * dx + dy * dy) ** 0.5
         h = max(6.0, lr[3] - lr[1])
-        near = sorted([o for o in objs if dist(o) <= 14 and (o[2] - o[0]) * (o[3] - o[1]) > 4 * (lr[2] - lr[0]) * h],
+        near = sorted([o for o in objs_l if dist(o) <= 14 and (o[2] - o[0]) * (o[3] - o[1]) > 4 * (lr[2] - lr[0]) * h],
                       key=lambda o: (dist(o) > 0, (o[2] - o[0]) * (o[3] - o[1])))
         if near: return _union([near[0][:4], lr]), True
         return [lr[0] - 2 * h, lr[1] - 1.5 * h, lr[2] + 2 * h, lr[3] + 1.5 * h], False
     scored = [(hood(c[2][:4]), c) for c in top]
     (r, attached), c = max(scored, key=lambda x: x[0][1])
     l = c[2]
-    fb = fig["bbox"]
+    fb = panel_of(l[:4]) or fig["bbox"]
     r = [max(fb[0], r[0]), max(fb[1], r[1]), min(fb[2], r[2]), min(fb[3], r[3])]
     return r, l[4], round(-c[1], 2), attached
 
