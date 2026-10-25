@@ -109,6 +109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 struct OnboardingView: View {
     @State var ax = Permissions.accessibility
     @State var sr = Permissions.screenRecording
+    let srAtLaunch = Permissions.screenRecordingAtLaunch
     let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -116,9 +117,18 @@ struct OnboardingView: View {
             row("Accessibility", "To read the selected text and where it is on screen.", ax) { Permissions.promptAccessibility(); Permissions.openAccessibilitySettings() }
             row("Screen Recording", "To see charts and figures, and to keep the highlight on the text.", sr) { Permissions.promptScreenRecording(); Permissions.openScreenRecordingSettings() }
             Text("Hotkey: Control-Option-S (change it from the menu bar icon).").font(.footnote).foregroundStyle(.secondary)
+            if !srAtLaunch {
+                // macOS applies a new Screen Recording grant only to a fresh process (the check can stay false until then)
+                HStack { Text(sr ? "Screen Recording granted. Relaunch Speakeasy to use it." : "Already turned Screen Recording on? Relaunch to apply it.").font(.footnote); Spacer(); Button("Relaunch") { relaunch() } }
+            }
         }
         .padding(20).frame(width: 440)
         .onReceive(timer) { _ in ax = Permissions.accessibility; sr = Permissions.screenRecording }
+    }
+    func relaunch() {
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 0.5; /usr/bin/open \"$0\"", Bundle.main.bundlePath]
+        try? p.run(); NSApp.terminate(nil)
     }
     func row(_ t: String, _ why: String, _ ok: Bool, _ grant: @escaping () -> Void) -> some View {
         HStack {

@@ -27,5 +27,5 @@ exec "$R/python/bin/python3" "$B/speakeasy.py" "$@"
 SH
 chmod +x "$RES/backend/speakeasy"
 find "$RES" -name __pycache__ -type d -prune -exec rm -rf {} +
-codesign --force --deep -s - "$APP"
+codesign --force -s - -i com.donnieboi03.speakeasy --requirements '=designated => identifier "com.donnieboi03.speakeasy"' "$APP"
 echo "bundled Python $("$PY" -c 'import sys;print(sys.version.split()[0])') into $APP"

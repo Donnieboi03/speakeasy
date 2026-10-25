@@ -6,7 +6,8 @@ import CoreGraphics
 
 struct Permissions {
     static var accessibility: Bool { AXIsProcessTrusted() }
-    static var screenRecording: Bool { CGPreflightScreenCaptureAccess() }
+    static var screenRecording: Bool { CGPreflightScreenCaptureAccess() }     // polled every second by the onboarding window
+    static let screenRecordingAtLaunch = CGPreflightScreenCaptureAccess()
     static func promptAccessibility() {
         let options = [kAXTrustedCheckOptionPrompt.takeUnretainedValue(): true] as CFDictionary
         AXIsProcessTrustedWithOptions(options)
