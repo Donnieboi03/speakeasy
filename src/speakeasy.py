@@ -231,7 +231,7 @@ STOP = _threading.Event()   # set by SIGTERM (stop / hotkey toggle)
 SINK = None            # callable(sentence) while streaming to TTS, else None
 
 def keep_alive():
-    return os.environ.get("SPEAKEASY_KEEP_ALIVE", "30m")
+    return os.environ.get("SPEAKEASY_KEEP_ALIVE", "2h")
 
 def _ollama_base():
     from urllib.parse import urlsplit
@@ -253,6 +253,16 @@ def prewarm(models):
             pass
     for m in models:
         if m: threading.Thread(target=go, args=(m,), daemon=True).start()
+
+def prewarm_tts(a=None):
+    """Fire-and-forget tiny Kokoro request at hotkey time: pages the voice model back in while the LLM starts."""
+    if os.environ.get("SPEAKEASY_TTS", "say").lower() != "kokoro" or os.environ.get("SPEAKEASY_PREWARM", "1") == "0" \
+            or getattr(a, "dry_run", False):
+        return
+    def go():
+        try: os.remove(_kokoro_synth("Ok.", 1.0, timeout=20))
+        except Exception: pass
+    _threading.Thread(target=go, daemon=True).start()
 
 def chat_stream(model, system, content, timeout, rec, t_req):
     """Yield content deltas from an OpenAI-compatible SSE stream. Overall deadline = timeout."""
@@ -286,6 +296,7 @@ def chat_stream(model, system, content, timeout, rec, t_req):
             if d:
                 if rec.get("llm_first_token_ms") is None:
                     rec["llm_first_token_ms"] = int((time.time() - t_req) * 1000)
+                    if rec.get("_t0"): rec["llm_request_at_ms"] = int((t_req - rec["_t0"]) * 1000)   # run start -> LLM request sent
                 yield d
     finally:
         try: resp.close()
@@ -1232,6 +1243,10 @@ class Releaser:
                 if len(self.buf) >= limit:
                     cands = [c.end() for c in _CLAUSE.finditer(self.buf) if c.end() >= limit * 0.8]
                     cut = cands[0] if cands else None
+                    if cut is None and not self.out and not self.held and len(self.buf.split()) >= 9:
+                        # first audio: a short first chunk synthesises in ~0.3 s; do not wait for the sentence to end
+                        sp = [m.end() for m in re.finditer(r"\s+", self.buf) if m.end() >= 36]
+                        cut = sp[0] if sp else None
             if cut is not None and self.buf[:cut].count("[") > self.buf[:cut].count("]") \
                     and cut - self.buf[:cut].rfind("[") < 24:
                 cut = None                       # never cut inside a [L..]/[R..] focus tag
@@ -2573,7 +2588,10 @@ class Speaker:
             t1 = time.time()
             try:
                 path = _kokoro_synth(t, speed)
-                self.synth_ms += int((time.time() - t1) * 1000)
+                ms = int((time.time() - t1) * 1000)
+                self.synth_ms += ms
+                if self.timing.get("first_synth_ms") is None:
+                    self.timing.update(first_synth_ms=ms, first_chunk_chars=len(t), first_chunk_queued_ms=int((t1 - self.t0) * 1000))
                 self.pq.put(("wav", path, rect, t))
             except Exception as e:
                 self.warn = f"kokoro unavailable, fell back to say: {type(e).__name__}: {e}"[:200]
@@ -3018,6 +3036,7 @@ def main(argv=None):
     spk = None
     if a.cmd in ("speak", "selection"):
         prewarm([model_name()] + ([vision_model()] if img else []))
+        prewarm_tts(a)
     global FOCUS
     FOCUS = None
     if a.cmd in ("speak", "selection"):
@@ -3169,6 +3188,9 @@ def main(argv=None):
     if timing.get("capture_ms") is None: timing["capture_ms"] = 0
     if a.cmd == "selection" and timing.get("copy_ms") is None: timing["copy_ms"] = 0
     timing["llm_first_token_ms"] = rec.get("llm_first_token_ms"); timing["first_sentence_ms"] = rec.get("first_sentence_ms")
+    for k in ("first_synth_ms", "first_chunk_chars", "first_chunk_queued_ms"):
+        rec[k] = timing.get(k)
+    rec["llm_request_at_ms"] = rec.get("llm_request_at_ms")
     rec["tts_first_audio_ms"] = timing.get("tts_first_audio_ms")
     rec["timings"] = timing
     rec["capture_ms"] = timing["capture_ms"]; rec["copy_ms"] = timing.get("copy_ms")

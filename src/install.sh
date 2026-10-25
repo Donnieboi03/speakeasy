@@ -216,12 +216,13 @@ local TRACKER_PID = os.getenv("HOME") .. "/.speakeasy/tracker.pid"
 function speakeasyTrackerPid()
   local f = io.open(TRACKER_PID, "r"); if not f then return nil end
   local p = tonumber((f:read("*l") or ""):match("%d+")); f:close()
-  if p and os.execute("/bin/kill -0 " .. p .. " 2>/dev/null") then return p end
+  -- os.execute's status is unreliable inside Hammerspoon (that made every start log FAILED); hs.execute reports it
+  if p then local _, ok = hs.execute("/bin/kill -0 " .. p .. " 2>/dev/null"); if ok then return p end end
   return nil
 end
 function speakeasyTrackerKill()
   local p = speakeasyTrackerPid()
-  if p then os.execute("/bin/kill " .. p .. " 2>/dev/null") end
+  if p then hs.execute("/bin/kill " .. p .. " 2>/dev/null") end
   os.remove(TRACKER_PID)
 end
 -- did the tracker's native panel draw this sentence? (it writes overlay.json on its first draw of each seq)

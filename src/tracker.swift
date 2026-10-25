@@ -159,6 +159,32 @@ final class Live: NSObject {
     var logN = 0
     var drawnSeq = -2
     var axFail = ""
+    var axMisses = 0                     // consecutive AX misses; at 2 "no-bounds" the app has no text geometry (Electron): stop asking
+    var axDead = false
+    var deltaOK = false                  // scroll-delta predictions match OCR: OCR can slow down
+    var stallN = 0, stallMax = 0.0, lastWork = "idle"
+    var hb: Timer? = nil
+    var winTimer: DispatchSourceTimer? = nil
+    // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
+    func startWinWatch(_ wid: CGWindowID) {
+        let t = DispatchSource.makeTimerSource(queue: DispatchQueue.global(qos: .userInteractive))
+        t.schedule(deadline: .now(), repeating: .milliseconds(25))
+        let pid = srcPid
+        t.setEventHandler {
+            guard let w = windowState(wid) else { return }
+            let fr = w.front && w.onScreen
+            let appFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
+            let t0 = now()
+            DispatchQueue.main.async {
+                let L = Live.shared
+                if L.winFront != fr {
+                    if !fr && L.shown { L.hideTrigger = (appFront ? (w.onScreen ? "window-switch" : "not-frontmost") : "app-switch", t0) }
+                    L.winFront = fr; L.winFrame = w.frame; L.apply()
+                }
+            }
+        }
+        t.resume(); winTimer = t
+    }
 
     func rec(_ o: [String: Any]) {
         if logN > 6000 { return }
@@ -195,6 +221,14 @@ final class Live: NSObject {
         }
         startTap()
         startAXObserver()
+        var last = now()
+        hb = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in   // main-thread stall detector
+            guard let s = self else { return }
+            let t = now(), late = (t - last - 0.05) * 1000; last = t
+            if late > 100 { s.stallN += 1; s.stallMax = max(s.stallMax, late)
+                s.rec(["event": "main-stall", "late_ms": late.rounded(), "after": s.lastWork]) }
+        }
+        RunLoop.main.add(hb!, forMode: .common)
         // No view display link: it only ticks while the panel is on screen, so a hidden panel was never shown (draws: 0).
         // Coalesce instead: apply at most once per main-loop turn.
     }
@@ -229,7 +263,7 @@ final class Live: NSObject {
         return "scrolled-off"
     }
     func flush() {
-        dirty = false
+        dirty = false; lastWork = "flush"
         guard let p = panel else { return }
         let show = rect != nil && front && winFront && !hiddenByKey && scanVisible
         if show, let r = rect {
@@ -274,6 +308,7 @@ final class Live: NSObject {
     }
     // ---- scans from the tracker loop ----
     func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?) {
+        lastWork = "scan"
         if capTs > 0 && capTs < lastMove { return }               // screenshot taken before the last scroll: stale
         if visible, let r = r {
             if let old = rect, abs(pred) >= 20, method != "ax" {
@@ -282,6 +317,7 @@ final class Live: NSObject {
                 if k > 0.2 && k < 5 { if predCont { kCont = 0.5 * kCont + 0.5 * k } else { kLine = 0.5 * kLine + 0.5 * k } }
             }
             if method == "ocr" || method == "doc" { ocrHits += 1 } else if method == "ax" { axHits += 1 }
+            if src == "scroll-delta", let old = rect { deltaOK = abs(old.minY - r.minY) <= 12 && abs(old.minX - r.minX) <= 12 }
             pred = 0; rect = r; scanVisible = true; hiddenByKey = false; src = method
         } else {
             if scanVisible { hideTrigger = (reason ?? "scrolled-off", now()) }
@@ -308,20 +344,42 @@ final class Live: NSObject {
         }
         axGood = false
         if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" }
-        let ok = requeryAX()
-        if ok { axHits += 1 }
-        rec(["event": "ax-range", "seq": s, "range": range ?? NSNull(), "hit": ok, "why": ok ? NSNull() : axFail])
-        apply()
+        apply()                                                   // draw the event box now; AX refines it later
+        if axDead { rec(["event": "ax-range", "seq": s, "hit": false, "why": "ax-disabled"]); return }
+        guard let el = axEl, let rg = range, rg.count == 2 else {
+            axFail = axEl == nil ? "no-element" : "no-range"
+            rec(["event": "ax-range", "seq": s, "range": range ?? NSNull(), "hit": false, "why": axFail]); return
+        }
+        let t0 = now()
+        DispatchQueue.global(qos: .userInteractive).async {        // AX IPC to a busy app can take 100s of ms: never on main
+            let r = axBounds(el, rg[0], rg[1])
+            DispatchQueue.main.async {
+                guard self.seq == s else { return }
+                let ok = self.takeAX(r)
+                if ok { self.axHits += 1; self.apply() }
+                self.rec(["event": "ax-range", "seq": s, "range": rg, "hit": ok, "why": ok ? NSNull() : self.axFail, "ax_ms": ((now() - t0) * 10000).rounded() / 10])
+            }
+        }
+    }
+    func takeAX(_ b: CGRect?) -> Bool {
+        guard let r = b else {
+            axFail = "no-bounds"; axGood = false; axMisses += 1
+            if axMisses >= 2 && !axDead { axDead = true; gAxDead = true; rec(["event": "ax-disabled", "why": "no-bounds x2 (app exposes no text geometry)"]) }
+            return false
+        }
+        axMisses = 0
+        if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axFail = "too-wide \(Int(r.width))"; axGood = false; return false }
+        axFail = ""
+        if let w = winFrame, !w.intersects(r) { if scanVisible { hideTrigger = ("scrolled-off", now()) }; scanVisible = false; axGood = true; return true }
+        rect = r; axGood = true; scanVisible = true; src = "ax"; return true
     }
     @discardableResult
     func requeryAX() -> Bool {
         guard let el = axEl else { axFail = "no-element"; axGood = false; return false }
         guard let rg = range, rg.count == 2 else { axFail = "no-range"; axGood = false; return false }
-        guard let r = axBounds(el, rg[0], rg[1]) else { axFail = "no-bounds"; axGood = false; return false }
-        if let w = winFrame, !(r.width < w.width * 0.6 || r.width < 320) { axFail = "too-wide \(Int(r.width))"; axGood = false; return false }
-        axFail = ""
-        if let w = winFrame, !w.intersects(r) { if scanVisible { hideTrigger = ("scrolled-off", now()) }; scanVisible = false; axGood = true; return true }
-        rect = r; axGood = true; scanVisible = true; src = "ax"; return true
+        if axDead { return false }
+        lastWork = "ax-requery"
+        return takeAX(axBounds(el, rg[0], rg[1]))
     }
     // ---- events ----
     func startTap() {
@@ -373,7 +431,7 @@ final class Live: NSObject {
         var obs: AXObserver?
         let cb: AXObserverCallback = { _, _, note, _ in
             let s = Live.shared
-            if s.range == nil || !s.axGood && s.axEvents > 5 && s.axFail != "" { s.axEvents += 1; return }   // nothing to re-query
+            if s.axDead || s.range == nil || !s.axGood { s.axEvents += 1; return }   // only re-query while AX is working
             s.axEvents += 1
             let t0 = now()
             let ok = s.range != nil && s.requeryAX()
@@ -396,6 +454,7 @@ final class Live: NSObject {
          "scroll_delta_hits": deltaHits,
          "scroll_lag_avg_ms": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(), "scroll_lag_max_ms": (lagMax * 10).rounded() / 10,
          "hide_ms_avg": hideN > 0 ? (hideSum / Double(hideN) * 10).rounded() / 10 : NSNull(), "hide_ms_max": (hideMax * 10).rounded() / 10,
+         "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
          "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
     }
 }
@@ -453,6 +512,7 @@ func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CG
     if rms > 10 { return nil }
     return (CGRect(x: sc * tg[0] + ox, y: sc * tg[1] + oy, width: sc * (tg[2] - tg[0]), height: sc * (tg[3] - tg[1])), P.count, rms)
 }
+var gAxDead = false   // set on main when the app has no AX text geometry; the scan loop then skips AX lookups
 func recognise(_ img: CGImage, frame: CGRect, accurate: Bool) -> [OLine] {
     let req = VNRecognizeTextRequest()
     req.recognitionLevel = accurate ? .accurate : .fast
@@ -601,7 +661,7 @@ struct Tracker {
         let pid = pid_t(a["pid"] ?? "0") ?? 0
         let home = a["home"] ?? (NSHomeDirectory() + "/.speakeasy")
         let fps = max(0.5, min(10, Double(a["fps"] ?? "5") ?? 5))   // text-recognition scans per second
-        let tickS = 0.08                                               // frontmost / window checks: every 80 ms
+        let tickS = 0.08                                               // loop tick; window front checks also run on their own 25 ms timer
         var lastScan = 0.0, lastTick = now()
         let accurate = (a["ocr"] ?? "fast") == "accurate"     // fast first; accurate is the retry when fast misses
         let focusPath = home + "/focus.json", trackPath = home + "/track.json"
@@ -609,7 +669,7 @@ struct Tracker {
         // element focused at hotkey time; only when already trusted (launched by Hammerspoon), never prompt
         let axEl = pid > 0 && AXIsProcessTrusted() ? focusedElement(pid) : nil
         let native = (a["overlay"] ?? "native") == "native"
-        if native { await MainActor.run { Live.shared.setup(home: home, pid: pid, el: axEl) } }
+        if native { await MainActor.run { Live.shared.setup(home: home, pid: pid, el: axEl); Live.shared.startWinWatch(wid) } }
 
         // ScreenCaptureKit: find our window once
         var filter: SCContentFilter? = nil
@@ -685,17 +745,17 @@ struct Tracker {
             if showing {
                 activeS += tick - prevTick
                 let ws = windowState(wid)
-                var liveAx = false
+                var liveAx = false, deltaOK = false
                 if native, let w = ws {
                     let fr = w.front && w.onScreen
                     let appFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
-                    liveAx = await MainActor.run { () -> Bool in
+                    (liveAx, deltaOK) = await MainActor.run { () -> (Bool, Bool) in
                         let L = Live.shared; L.winFrame = w.frame
                         if L.winFront != fr {
                             if !fr && L.shown { L.hideTrigger = (appFront ? (w.onScreen ? "window-switch" : "not-frontmost") : "app-switch", now()) }
                             L.winFront = fr; L.apply()
                         }
-                        return L.axGood }
+                        return (L.axGood, L.deltaOK) }
                 }
                 let seqChanged = (lastOut["seq"] as? Int) != seq
                 let wasHiddenForFront = (lastOut["reason"] as? String).map { ["not-frontmost", "not-on-screen", "window-gone"].contains($0) } ?? false
@@ -703,13 +763,13 @@ struct Tracker {
                     // hide at once (checked every tick, no debounce)
                     out["visible"] = false; out["reason"] = ws == nil ? "window-gone" : (ws!.onScreen ? "not-frontmost" : "not-on-screen"); hidden += 1
                     if let w = ws, w.onScreen { out["front_owner"] = w.frontOwner; out["front_id"] = w.frontId }
-                } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= (liveAx ? 2.0 : 1.0 / fps)) {   // AX follows events; OCR is a slow drift check
+                } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= (liveAx ? 2.0 : deltaOK ? 1.0 : 1.0 / fps)) {   // scroll-delta confirmed by OCR: 1 scan/s   // AX follows events; OCR is a slow drift check
                     out = lastOut                                        // between scans: keep the last answer
                 } else {
                     scanned = true; frames += 1; lastScan = tick
                     let frame = ws!.frame; winFrame = frame
                     var found: CGRect? = nil, method = ""
-                    if let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
+                    if !gAxDead, let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
                         let content = CGRect(x: frame.minX, y: frame.minY + 24, width: frame.width, height: frame.height - 24)
                         // web views often report the whole column/container: only trust tight AX boxes, else use word boxes
                         if content.intersects(r) { if r.width < frame.width * 0.6 || r.width < 320 { found = r.intersection(frame); method = "ax" } }
