@@ -88,7 +88,9 @@ set_cfg SPEAKEASY_VISION auto
 set_cfg SPEAKEASY_FOCUS on
 set_cfg SPEAKEASY_FOCUS_TAGS off
 set_cfg SPEAKEASY_TRACK on
-set_cfg SPEAKEASY_TRACK_FPS 3
+set_cfg SPEAKEASY_TRACK_FPS 5
+# old default (3) -> 5 scans/s while speaking
+if grep -qx 'SPEAKEASY_TRACK_FPS=3' "$CONFIG" 2>/dev/null; then sed -i '' 's/^SPEAKEASY_TRACK_FPS=3$/SPEAKEASY_TRACK_FPS=5/' "$CONFIG"; fi
 set_cfg SPEAKEASY_FOCUS_COLOR "#3B82F6"
 set_cfg SPEAKEASY_FOCUS_OPACITY 0.22
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
@@ -149,15 +151,34 @@ local focusCanvas, focusTimer, focusKey = nil, nil, nil
 local focusCur = nil            -- the focus event currently shown (pid, seq), so tracker updates can be matched
 local srcWinId = nil            -- the window the selection came from (locked at hotkey time)
 local trackerHidden = false     -- the live tracker said the text is not visible
-local frontTimer = nil
+local srcPid = nil              -- its app
 local function srcIsFront()
   if not srcWinId then return true end
   local fw = hs.window.frontmostWindow()
   return fw ~= nil and fw:id() == srcWinId
 end
+-- Instant hide/show on app or window switches: event-driven (no polling).
+local function frontSet(isFront)
+  if not focusCanvas then return end
+  if isFront and not trackerHidden then focusCanvas:show() else focusCanvas:hide() end
+end
+speakeasyAppWatcher = hs.application.watcher.new(function(_, ev, app)
+  if not focusCanvas or not srcPid or not app then return end
+  if ev == hs.application.watcher.deactivated and app:pid() == srcPid then frontSet(false)
+  elseif ev == hs.application.watcher.activated then
+    if app:pid() ~= srcPid then frontSet(false) else frontSet(srcIsFront()) end
+  end
+end)
+speakeasyAppWatcher:start()
+speakeasyWinFilter = hs.window.filter.new(true)
+speakeasyWinFilter:subscribe(hs.window.filter.windowFocused, function(w)
+  if focusCanvas and srcWinId then frontSet(w ~= nil and w:id() == srcWinId) end
+end)
+speakeasyWinFilter:subscribe(hs.window.filter.windowUnfocused, function(w)
+  if focusCanvas and srcWinId and w and w:id() == srcWinId then frontSet(false) end
+end)
 local function focusClear()
   if focusTimer then focusTimer:stop(); focusTimer = nil end
-  if frontTimer then frontTimer:stop(); frontTimer = nil end
   trackerHidden = false
   if focusCanvas then focusCanvas:delete(); focusCanvas = nil end
   focusCur = nil
@@ -190,12 +211,6 @@ local function focusShow(e)
   focusTimer = hs.timer.doAfter(math.max(1, left), focusClear)   -- watchdog if speakeasy dies
   -- hide the box whenever the source window is not frontmost (works with or without the live tracker)
   if not srcIsFront() then focusCanvas:hide() end
-  if not frontTimer then
-    frontTimer = hs.timer.doEvery(0.3, function()
-      if not focusCanvas then return end
-      if not srcIsFront() then focusCanvas:hide() elseif not trackerHidden then focusCanvas:show() end
-    end)
-  end
 end
 local function focusRead()
   local f = io.open(os.getenv("HOME") .. "/.speakeasy/focus.json", "r")
@@ -232,12 +247,13 @@ end
 local function startTracker(win)
   if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
   srcWinId = win and win:id() or nil
+  srcPid = win and win:application() and win:application():pid() or nil
   if not TRACK_ON then hslog("tracker off (SPEAKEASY_TRACK)"); return end
   if not win then hslog("tracker not started: no focused window"); return end
   if not hs.fs.attributes(TRACKER) then hslog("tracker not started: %s missing (re-run install.sh)", TRACKER); return end
   local app = win:application()
   local args = { "--window-id", tostring(win:id()), "--pid", tostring(app and app:pid() or 0),
-    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "3") }
+    "--home", os.getenv("HOME") .. "/.speakeasy", "--fps", cfg("SPEAKEASY_TRACK_FPS", "5") }
   speakeasyTracker = hs.task.new(TRACKER, function(code, out, err)
     hslog("tracker exited code=%s %s", tostring(code), ((err or "") .. (out or "")):gsub("%s+$", ""):sub(1, 300))
   end, args)

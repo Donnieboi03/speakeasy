@@ -166,10 +166,21 @@ func refind(_ lines: [OLine], target: [String], near: CGRect?) -> CGRect? {
 // ---------------- main ----------------
 @main
 struct Tracker {
-    static func main() async {
+    // CoreGraphics / WindowServer must be initialised before any CGWindowList, ScreenCaptureKit or AX call, otherwise a
+    // bare CLI dies with "Assertion failed: (did_initialize), function CGS_REQUIRE_INIT". So: become a (hidden,
+    // never-activating) NSApplication, touch the display, run the tracker on a background task and keep the main run loop alive.
+    static func main() {
         var a: [String: String] = [:]
         var it = CommandLine.arguments.dropFirst().makeIterator()
         while let k = it.next() { if k.hasPrefix("--") { a[String(k.dropFirst(2))] = it.next() ?? "" } }
+        let app = NSApplication.shared
+        app.setActivationPolicy(.prohibited)          // no Dock icon, never steals focus
+        _ = CGMainDisplayID()
+        let args = a
+        Task.detached { await Tracker.run(args); exit(0) }
+        app.run()
+    }
+    static func run(_ a: [String: String]) async {
         // Offline check: --ocr-image file.png --find "text" [--frame x,y,w,h]
         if let p = a["ocr-image"] {
             guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: p) as CFURL, nil),
@@ -200,7 +211,9 @@ struct Tracker {
         guard let widS = a["window-id"], let wid = CGWindowID(widS) else { FileHandle.standardError.write("usage: speakeasy-track --window-id N --pid P [--home DIR] [--fps 3]\n".data(using: .utf8)!); exit(2) }
         let pid = pid_t(a["pid"] ?? "0") ?? 0
         let home = a["home"] ?? (NSHomeDirectory() + "/.speakeasy")
-        let fps = max(0.5, min(10, Double(a["fps"] ?? "3") ?? 3))
+        let fps = max(0.5, min(10, Double(a["fps"] ?? "5") ?? 5))   // text-recognition scans per second
+        let tickS = 0.08                                               // frontmost / window checks: every 80 ms
+        var lastScan = 0.0, lastTick = now()
         let accurate = (a["ocr"] ?? "fast") == "accurate"     // fast first; accurate is the retry when fast misses
         let focusPath = home + "/focus.json", trackPath = home + "/track.json"
         try? FileManager.default.createDirectory(atPath: home + "/logs", withIntermediateDirectories: true)
@@ -220,6 +233,8 @@ struct Tracker {
         var lastBox: CGRect? = nil, lastOut: [String: Any] = [:]
         var baseline: Set<String>? = nil
         var missRun = 0
+        var frameLogN = 0
+        var lastAccurate = 0.0
         var maxRss = 0.0
         var activeS = 0.0
         var errNote: String? = filter == nil ? "window not shareable (Screen Recording permission?)" : nil
@@ -228,6 +243,7 @@ struct Tracker {
         while true {
             let tick = now()
             if tick - t0 > 900 { break }
+            let prevTick = lastTick; lastTick = tick
             let ev = readJSON(focusPath) ?? [:]
             let state = ev["state"] as? String ?? ""
             let epid = ev["pid"] as? Int ?? -1
@@ -239,17 +255,26 @@ struct Tracker {
             if epid > 0 && kill(pid_t(epid), 0) != 0 && state == "show" && tick - t0 > 2 { exitReason = "speaker-died"; break }   // speaker died
             if state == "show" && (seq != lastSeq || epid != lastPid) { lastSeq = seq; lastPid = epid; missRun = 0 }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
+            var scanned = false
+            var winFrame: CGRect? = nil
             if state == "show" {
-                frames += 1
+                activeS += tick - prevTick
                 let ws = windowState(wid)
+                let seqChanged = (lastOut["seq"] as? Int) != seq
+                let wasHiddenForFront = (lastOut["reason"] as? String).map { ["not-frontmost", "not-on-screen", "window-gone"].contains($0) } ?? false
                 if ws == nil || !ws!.onScreen || !ws!.front {
+                    // hide at once (checked every tick, no debounce)
                     out["visible"] = false; out["reason"] = ws == nil ? "window-gone" : (ws!.onScreen ? "not-frontmost" : "not-on-screen"); hidden += 1
+                } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= 1.0 / fps) {
+                    out = lastOut                                        // between scans: keep the last answer
                 } else {
-                    let frame = ws!.frame
+                    scanned = true; frames += 1; lastScan = tick
+                    let frame = ws!.frame; winFrame = frame
                     var found: CGRect? = nil, method = ""
                     if let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
                         let content = CGRect(x: frame.minX, y: frame.minY + 24, width: frame.width, height: frame.height - 24)
-                        if content.intersects(r) { found = r.intersection(frame); method = "ax" }
+                        // web views often report the whole column/container: only trust tight AX boxes, else use word boxes
+                        if content.intersects(r) { if r.width < frame.width * 0.6 || r.width < 320 { found = r.intersection(frame); method = "ax" } }
                         else { out["visible"] = false; out["reason"] = "scrolled-off" }
                     }
                     if found == nil && out["visible"] == nil, let flt = filter, let target = ev["src"] as? [String], !target.isEmpty {
@@ -264,7 +289,8 @@ struct Tracker {
                             let o0 = now()
                             var lines = recognise(img, frame: frame, accurate: accurate)
                             var hit = refind(lines, target: target, near: lastBox)
-                            if hit == nil && !accurate {
+                            if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
+                                lastAccurate = tick
                                 lines = recognise(img, frame: frame, accurate: true); hit = refind(lines, target: target, near: lastBox)
                             }
                             ocrMs += (now() - o0) * 1000; ocrN += 1
@@ -273,7 +299,7 @@ struct Tracker {
                             if let r = hit { found = r; method = "ocr" }
                             else {
                                 let inter = Double(all.intersection(baseline!).count), uni = Double(max(1, all.union(baseline!).count))
-                                out["reason"] = inter / uni < 0.25 ? "content-changed" : "scrolled-off"
+                                out["reason"] = inter / uni < 0.35 ? "content-changed" : "scrolled-off"
                             }
                         } else { errNote = "capture failed (Screen Recording permission?)" }
                     }
@@ -284,7 +310,8 @@ struct Tracker {
                         out["rect"] = [Double(r.minX).rounded(), Double(r.minY).rounded(), Double(r.width).rounded(), Double(r.height).rounded()]
                     } else if out["reason"] != nil || out["visible"] != nil {
                         missRun += 1; misses += 1
-                        if missRun >= 2 { out["visible"] = false } else { out = lastOut }  // debounce one-frame misses
+                        // tab switch / new page: hide on the first differing frame; scrolled-off: allow one-frame misses
+                        if missRun >= 2 || (out["reason"] as? String) == "content-changed" { out["visible"] = false } else { out = lastOut }
                     }
                 }
             } else {
@@ -296,14 +323,26 @@ struct Tracker {
                 guard let a = x["rect"] as? [Double], let b = y["rect"] as? [Double] else { return (x["rect"] == nil) == (y["rect"] == nil) }
                 return zip(a, b).allSatisfy { abs($0 - $1) <= 2 }
             }
-            if !out.isEmpty && !same(out, lastOut) {
+            let changed = !out.isEmpty && !same(out, lastOut)
+            if changed {
                 var w = out; w["ts"] = (now() * 1000).rounded() / 1000
                 writeJSONAtomic(w, trackPath); lastOut = out
             }
+            // per-frame log (every scan and every visibility/position change), capped per run
+            if (scanned || changed) && frameLogN < 3000 && state == "show" {
+                frameLogN += 1
+                var fr: [String: Any] = ["ts": (now() * 1000).rounded() / 1000, "event": "frame", "tracker_pid": Int(getpid()), "seq": seq,
+                                         "scan": scanned, "visible": out["visible"] ?? NSNull(), "ms": Int((now() - tick) * 1000)]
+                if let m = out["method"] { fr["method"] = m }
+                if let r = out["rect"] { fr["rect"] = r }
+                if let r = out["reason"] { fr["reason"] = r }
+                if scanned, let w = winFrame { fr["win"] = [Int(w.minX), Int(w.minY), Int(w.width), Int(w.height)] }
+                appendLine(fr, home + "/logs/tracker.jsonl")
+            }
             maxRss = max(maxRss, rss_mb())
             let dt = now() - tick
-            if state == "show" { activeS += max(dt, 1.0 / fps) }
-            let wait = max(0.02, 1.0 / fps - dt)
+            _ = scanned
+            let wait = max(0.01, tickS - dt)
             try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
         }
         writeJSONAtomic(["visible": false, "reason": "tracker-exit", "seq": lastSeq, "focus_pid": lastPid, "ts": now()], trackPath)
