@@ -33,6 +33,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         m.addItem(withTitle: "Read selection", action: #selector(read), keyEquivalent: "").target = self
         m.addItem(withTitle: "Stop", action: #selector(stop), keyEquivalent: "").target = self
         m.addItem(.separator())
+        for (title, key) in [("Highlight text", "SPEAKEASY_TEXT_HIGHLIGHT"), ("Figure cues", "SPEAKEASY_FIGURE_CUES")] {
+            let it = NSMenuItem(title: title, action: #selector(toggleCue(_:)), keyEquivalent: "")
+            it.target = self; it.representedObject = key; it.state = Config.on(key) ? .on : .off; m.addItem(it)
+        }
+        m.addItem(.separator())
         m.addItem(withTitle: "Permissions…", action: #selector(showOnboarding), keyEquivalent: "").target = self
         m.addItem(withTitle: "Hotkey…", action: #selector(showSettings), keyEquivalent: "").target = self
         m.addItem(.separator())
@@ -40,6 +45,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.menu = m
         KeyboardShortcuts.onKeyUp(for: .readSelection) { [weak self] in self?.reader.toggle() }
         if !Permissions.accessibility || !Permissions.screenRecording { showOnboarding() }   // shows a window; prompts only on click
+    }
+    @objc func toggleCue(_ it: NSMenuItem) {
+        guard let key = it.representedObject as? String else { return }
+        let on = !Config.on(key); Config.set(key, on ? "on" : "off"); it.state = on ? .on : .off
     }
     @objc func read() { reader.toggle() }
     @objc func stop() { reader.stop() }
@@ -84,5 +93,24 @@ struct OnboardingView: View {
             Spacer()
             if !ok { Button("Grant…", action: grant) }
         }
+    }
+}
+
+/// ~/.speakeasy/config KEY=VALUE lines (read by the backend on every run).
+enum Config {
+    static var path: String { NSHomeDirectory() + "/.speakeasy/config" }
+    static func lines() -> [String] { ((try? String(contentsOfFile: path, encoding: .utf8)) ?? "").components(separatedBy: "\n") }
+    static func on(_ key: String) -> Bool {
+        for l in lines() where l.trimmingCharacters(in: .whitespaces).hasPrefix(key + "=") {
+            let v = l.split(separator: "=", maxSplits: 1).last.map { $0.trimmingCharacters(in: CharacterSet(charactersIn: " \"'")).lowercased() } ?? "on"
+            return !["off", "0", "false", "no"].contains(v)
+        }
+        return true
+    }
+    static func set(_ key: String, _ value: String) {
+        var ls = lines().filter { !$0.trimmingCharacters(in: .whitespaces).hasPrefix(key + "=") }
+        while ls.last == "" { ls.removeLast() }
+        ls.append("\(key)=\(value)")
+        try? (ls.joined(separator: "\n") + "\n").write(toFile: path, atomically: true, encoding: .utf8)
     }
 }

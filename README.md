@@ -96,3 +96,10 @@ Paths are home-relative (`~/...`) or hashed (`doc_path_hash`); window titles are
 ## Focus box
 
 The focus box is drawn only by the native tracker (`~/.speakeasy/bin/speakeasy-track`, an `NSPanel` it moves itself on scroll/AX events and corrects with on-screen text recognition). Hammerspoon only binds the hotkey and starts/stops the tracker and the backend; it draws nothing and installs no scroll or key event taps. The old Hammerspoon canvas overlay, its 300 ms fallback and `SPEAKEASY_OVERLAY` were removed: if the panel cannot draw, the run logs `draw-failed` (tracker.jsonl) and `NATIVE PANEL FAILED TO DRAW` (hs.log). `SPEAKEASY_FOCUS=off` or `SPEAKEASY_TRACK=off` turns the box off.
+
+### Highlight settings
+
+- `SPEAKEASY_TEXT_HIGHLIGHT=on|off` (default on): the soft tinted band over the sentence being read (low-alpha fill, rounded, no border; forward-only), plus the faint dashed outline when a sentence refers back to earlier lines.
+- `SPEAKEASY_FIGURE_CUES=on|off` (default on): the outline / circle on the figure or table part being explained. While a figure cue is shown the text band and the dashed outline are not, so there is one cue at a time.
+
+Both live in `~/.speakeasy/config` and can be toggled from the menu-bar app ("Highlight text", "Figure cues"). Each run logs `text_highlight` and `figure_cues` in runs.jsonl; tracker `draw` records carry `cue: text|figure`, and a suppressed cue logs `cue-off`. Design rationale and evidence: [docs/research/highlighting.md](docs/research/highlighting.md).

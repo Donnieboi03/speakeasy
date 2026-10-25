@@ -111,6 +111,9 @@ Setup takes three steps. First install the dependencies with pip from the requir
 def home():
     return os.path.expanduser(os.environ.get("SPEAKEASY_HOME") or "~/.speakeasy")
 
+def _on(key, default="on"):
+    return os.environ.get(key, default).strip().lower() not in ("off", "0", "false", "no")
+
 def load_config():
     """Defaults from $SPEAKEASY_HOME/config (KEY=VALUE lines). Real env vars win."""
     try:
@@ -1222,6 +1225,9 @@ class Focus:
         if getattr(rect, "doc", None): ev["doc"] = rect.doc          # page-space target + text anchors for the tracker
         if getattr(rect, "shape", None): ev["shape"] = rect.shape
         if getattr(rect, "nlines", None): ev["nlines"] = rect.nlines
+        dk = (getattr(rect, "doc", None) or {}).get("kind")
+        ev["cue"] = "figure" if (dk and dk != "line") or ev.get("shape") == "ellipse" else "text"
+        ev["draw"] = _on("SPEAKEASY_FIGURE_CUES" if ev["cue"] == "figure" else "SPEAKEASY_TEXT_HIGHLIGHT")
         if getattr(rect, "ref", None) and not getattr(rect, "doc", None): ev["ref"] = rect.ref; ev["ref_src"] = getattr(rect, "ref_src", None)
         fut = getattr(rect, "pending", None)
         hold = getattr(rect, "hold", None)
@@ -3162,6 +3168,7 @@ def main(argv=None):
     track = os.environ.get("SPEAKEASY_TRACK", "on").lower() not in ("off", "0", "false", "no")
     RUN_META.update(run_id=getattr(a, "run_id", None) or uuid.uuid4().hex[:12],
                     app=getattr(a, "app", None) or os.environ.get("SPEAKEASY_APP", "cli"),
+                    text_highlight=_on("SPEAKEASY_TEXT_HIGHLIGHT"), figure_cues=_on("SPEAKEASY_FIGURE_CUES"),
                     overlay=("swift-panel" if track else "off")
                             if os.environ.get("SPEAKEASY_FOCUS", "on").lower() not in ("off", "0", "false", "no") else "off")
     if docmap is not None:

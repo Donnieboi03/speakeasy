@@ -169,6 +169,7 @@ final class Live: NSObject {
     var refPanel: NSPanel? = nil
     let refShape = CAShapeLayer()
     var refShown = 0, transitions = 0, heldBig = 0
+    var cue = "text", suppressed = false
     var runId = ""
     var winTimer: DispatchSourceTimer? = nil
     // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
@@ -247,6 +248,20 @@ final class Live: NSObject {
         CATransaction.commit()
         isEllipse = ellipse
     }
+    // Text: a soft tinted band (low-alpha fill, rounded, no border). Figure/table parts: a distinct outline or circle.
+    func cueStyle(figure: Bool, color: String?) {
+        var r = 0.23, g = 0.51, b = 0.96
+        if let c = color, c.count == 7, let v = Int(c.dropFirst(), radix: 16) { r = Double((v >> 16) & 255) / 255; g = Double((v >> 8) & 255) / 255; b = Double(v & 255) / 255 }
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        if figure {
+            shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.06)
+            shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0.9); shape.lineWidth = 2
+        } else {
+            shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.16)
+            shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0); shape.lineWidth = 0
+        }
+        CATransaction.commit()
+    }
     func frameFor(_ r: CGRect) -> NSRect {
         let H = NSScreen.screens.first?.frame.height ?? 0
         let (dx, dy): (CGFloat, CGFloat) = isEllipse ? (r.width * 0.12 + 6, r.height * 0.12 + 6) : (4, 2)
@@ -274,7 +289,7 @@ final class Live: NSObject {
     func flush() {
         dirty = false; lastWork = "flush"; lastFlush = now()
         guard let p = panel else { return }
-        let show = rect != nil && front && winFront && !hiddenByKey && scanVisible
+        let show = rect != nil && front && winFront && !hiddenByKey && scanVisible && !suppressed
         if show, let r = rect {
             let f = frameFor(r)
             CATransaction.begin(); CATransaction.setDisableActions(true)
@@ -287,7 +302,7 @@ final class Live: NSObject {
             if !shown || abs(f.minY - lastDrawn.minY) > 2 || abs(f.minX - lastDrawn.minX) > 2 || abs(f.width - lastDrawn.width) > 2 || abs(f.height - lastDrawn.height) > 2 {
                 draws += 1
                 let H = NSScreen.screens.first?.frame.height ?? 0
-                rec(["event": "draw", "seq": seq, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
+                rec(["event": "draw", "seq": seq, "cue": cue, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
                      "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
                      "on_screen": p.isVisible])
                 shown = true; lastDrawn = f
@@ -365,8 +380,12 @@ final class Live: NSObject {
         _ = my; DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { p.orderOut(nil) }
     }
     func event(seq s: Int, rect r0: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool,
-               isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil) {
+               isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil, figure: Bool = false, drawOn: Bool = true) {
         var r = r0
+        cue = figure ? "figure" : "text"; suppressed = !drawOn
+        cueStyle(figure: figure, color: color)
+        if figure { refPanel?.orderOut(nil) }                    // one cue at a time: no text outline while a figure part is boxed
+        if !drawOn { rec(["event": "cue-off", "seq": s, "cue": cue]) }
         // never flash a big provisional box between sentences: a text sentence's box must fit its own lines
         if let n = r0, isText {
             let nr = n.offsetBy(dx: off.x, dy: off.y)
@@ -380,7 +399,7 @@ final class Live: NSObject {
         }
         if let rf = ref { showRef(rf) }
         seq = s
-        style(color: color, opacity: opacity, ellipse: ellipse)
+        isEllipse = ellipse
         range = rg
         if range == nil, let base = selBase, let first = srcLines.first, !first.isEmpty {
             // place the sentence's source lines inside the selected text -> an absolute AX range
@@ -399,7 +418,7 @@ final class Live: NSObject {
         if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" }
         apply()                                                   // draw the event box now; AX refines it later
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {   // no fallback box any more: fail loudly instead
-            guard self.seq == s, self.drawnSeq != s, self.rect != nil, self.front, self.winFront, self.scanVisible, !self.hiddenByKey else { return }
+            guard self.seq == s, self.drawnSeq != s, self.rect != nil, !self.suppressed, self.front, self.winFront, self.scanVisible, !self.hiddenByKey else { return }
             let why = self.panel == nil ? "no panel" : (self.panel!.isVisible ? "visible but no draw record" : "panel not on screen")
             self.drawFails += 1
             self.rec(["event": "draw-failed", "seq": s, "why": why, "after_ms": 300])
@@ -804,8 +823,9 @@ struct Tracker {
                     let dkind = (ev["doc"] as? [String: Any])?["kind"] as? String
                     let isText = !ell && (dkind == nil || dkind == "line")
                     let nl = ev["nlines"] as? Int
+                    let cueFig = (ev["cue"] as? String) == "figure", drawOn = ev["draw"] as? Bool ?? true
                     let ref = (ev["ref"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
-                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText, nlines: nl, ref: ref) }
+                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn) }
                 }
             }
             if native && !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
