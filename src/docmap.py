@@ -10,8 +10,9 @@ Paths are never logged; only a short hash.
 """
 import hashlib, json, os, re, subprocess, sys, tempfile, time, urllib.parse, urllib.request
 
-CAP_RE = re.compile(r"^\s*(?:fig(?:ure)?s?\.?)\s*(\d+)\s*[.:|\-\u2013\u2014]?\s*(.*)$", re.I)
-TAB_RE = re.compile(r"^\s*table\s*(\d+)\s*[.:|\-\u2013\u2014]?\s*(.*)$", re.I)
+# captions need a separator after the number ("Figure 3:", "Fig. 3.", "Table 2 |"), so prose like "Table 2 summarizes" is not one
+CAP_RE = re.compile(r"^\s*(?:fig(?:ure)?s?\.?)\s*(\d+)\s*(?:[.:|\u2013\u2014]|\s-\s|$)\s*(.*)$", re.I)
+TAB_RE = re.compile(r"^\s*table\s*(\d+)\s*(?:[.:|\u2013\u2014]|\s-\s|$)\s*(.*)$", re.I)
 PANEL_RE = re.compile(r"^\s*\(?([a-hA-H])\)\s*$|^\s*\(([a-h])\)\s+\S")
 REF_RE = re.compile(r"\b(fig(?:ure)?s?\.?|table)\s*(\d+)\s*(?:\(?([a-h])\)?(?![a-z]))?", re.I)
 PANEL_REF_RE = re.compile(r"\b(?:panel|subfigure|part)\s*\(?([a-h])\)?(?![a-z])", re.I)
@@ -87,7 +88,9 @@ def parse_pdf(path):
             cap = [round(v, 1) for v in _union([lines[i][:4] for i in bl])]
             text = " ".join(lines[i][4] for i in bl)
             # figure: graphics directly above the caption (chain upward); table: content below
-            cand = sorted([g for g in gfx if g[3] <= cap[1] + 8 and g[3] >= cap[1] - 0.7 * H], key=lambda g: -g[3]) if kind == "figure" \
+            # (graphics that run into the caption are clipped at its top)
+            cand = sorted([[g[0], g[1], g[2], min(g[3], cap[1] - 2)] for g in gfx if g[1] < cap[1] - 20 and g[3] >= cap[1] - 0.7 * H
+                           and not (g[3] > cap[3] + 20)], key=lambda g: -g[3]) if kind == "figure" \
                 else sorted([g for g in gfx if g[1] >= cap[3] - 8 and g[1] <= cap[3] + 0.7 * H], key=lambda g: g[1])
             body = None
             for g in cand:
@@ -101,7 +104,7 @@ def parse_pdf(path):
                 top = max([l[3] for l in above if cap[1] - l[3] > 30] or [None]) if above else None
                 if top is not None and cap[1] - top > 40: body = [cap[0], top + 2, cap[2], cap[1] - 2]
             fb = [round(v, 1) for v in (body or cap)]
-            labels = [{"l": (PANEL_RE.match(l[4]).group(1) or PANEL_RE.match(l[4]).group(2)).lower(), "r": l[:4]}
+            labels = [] if kind == "table" else [{"l": (PANEL_RE.match(l[4]).group(1) or PANEL_RE.match(l[4]).group(2)).lower(), "r": l[:4]}
                       for l in lines if PANEL_RE.match(l[4]) and len(l[4]) <= 40 and body
                       and l[0] >= fb[0] - 6 and l[2] <= fb[2] + 6 and l[1] >= fb[1] - 6 and l[3] <= fb[3] + 6]
             seen = set(); labels = [x for x in labels if not (x["l"] in seen or seen.add(x["l"]))]
@@ -227,7 +230,8 @@ def resolve(hint, mode="local"):
     if u:
         p = _from_url(u)
         if p: return "browser-file", p, "url"
-        if mode == "all" and re.match(r"^https://", u) and urllib.parse.urlparse(u).path.lower().endswith(".pdf"):
+        pth = urllib.parse.urlparse(u).path.lower()
+        if mode == "all" and re.match(r"^https://", u) and (pth.endswith(".pdf") or "/pdf/" in pth or title.lower().rstrip().endswith(".pdf")):
             return "browser", u, "url"
         return None, None, "browser: not a public pdf" if mode == "all" else "browser: web off (SPEAKEASY_DOC_READ=local)"
     return None, None, "no document"
@@ -243,7 +247,7 @@ def fetch_pdf(url, tmpdir, max_mb=40, timeout=8):
     class NoRedir(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, hdrs, newurl):
             a, b = urllib.parse.urlparse(req.full_url), urllib.parse.urlparse(newurl)
-            if b.scheme != "https" or b.netloc != a.netloc or not b.path.lower().endswith(".pdf"): return None
+            if b.scheme != "https" or b.netloc != a.netloc or re.search(r"log ?in|sign ?in|auth|sso|account", b.path, re.I): return None
             return super().redirect_request(req, fp, code, msg, hdrs, newurl)
     op = urllib.request.build_opener(NoRedir)
     req = urllib.request.Request(url, headers={"User-Agent": "speakeasy/1 (local reader)"})
