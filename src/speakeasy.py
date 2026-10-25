@@ -1261,7 +1261,7 @@ class Focus:
         ev["doc"]["label"] = (ev["doc"].get("label") or "") + " (grounded)"
         t = self._doc_transform()
         if t and t != "pending": ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]
-        self.methods["ground-florence"] = self.methods.get("ground-florence", 0) + 1
+        k = "ground-" + GROUNDER.mode(); self.methods[k] = self.methods.get(k, 0) + 1          # ground-vlm | ground-florence
         self.rec["ground_ms"] = fut.ms
         return True
     def clear(self):
