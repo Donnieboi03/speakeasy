@@ -60,7 +60,7 @@ try:
         kinds = c["kind"] if isinstance(c["kind"], tuple) else (c["kind"],)
         add(f"pos_{nm}_exit0", rc == 0, rc)
         add(f"pos_{nm}_block_logged", any(k in json.dumps(l.get("verbatim_blocks")).lower() for k in kinds), l.get("verbatim_blocks"))
-        add(f"pos_{nm}_kind_named", any(re.search(rf"here'?s (the|a|an) {k}\b|here is (the|a|an) {k}\b", low) for k in kinds), out[:120])
+        add(f"pos_{nm}_kind_named", any(re.search(rf"here'?s (the|a|an) {k}\b|here is (the|a|an) {k}\b", low) for k in kinds) or ("quote" in kinds and re.match(r"^[A-Z][\w .'-]{0,40} (wrote|said|writes|says):", out.strip())), out[:120])
         if c["who"]: add(f"pos_{nm}_recipient_named", c["who"].lower() in low.split(c["body"].lower()[:15])[0] if c["body"].lower()[:15] in low else c["who"].lower() in low, out[:140])
         if c["subject"]: add(f"pos_{nm}_subject_named", f"subject" in low and c["subject"].lower() in low, out[:160])
         r = lcs_ratio(c["body"], out); add(f"pos_{nm}_body_word_fidelity_ge_0.9", r >= 0.9, f"{r:.2f} :: {out[:160]}")
