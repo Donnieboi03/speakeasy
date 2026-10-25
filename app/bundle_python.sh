@@ -22,7 +22,7 @@ cat > "$RES/backend/speakeasy" <<'SH'
 # launcher for the bundled backend: bundled CPython, bundled tracker
 B="$(cd "$(dirname "$0")" && pwd)"; R="$(dirname "$B")"
 export SPEAKEASY_DOC_PYTHON="${SPEAKEASY_DOC_PYTHON:-$R/python/bin/python3}"
-export SPEAKEASY_TRACKER="${SPEAKEASY_TRACKER:-$(dirname "$R")/MacOS/speakeasy-track}"
+export SPEAKEASY_TRACKER="${SPEAKEASY_TRACKER:-$(dirname "$R")/Helpers/SpeakeasyTracker.app/Contents/MacOS/speakeasy-track}"
 exec "$R/python/bin/python3" "$B/speakeasy.py" "$@"
 SH
 chmod +x "$RES/backend/speakeasy"

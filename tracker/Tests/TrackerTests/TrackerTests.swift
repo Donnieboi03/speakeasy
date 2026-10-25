@@ -44,3 +44,44 @@ final class TrackerTests: XCTestCase {
         if let r = r { XCTAssertGreaterThanOrEqual(r.minY, 19); XCTAssertLessThanOrEqual(r.minY, 41) }
     }
 }
+
+final class LifetimeTests: XCTestCase {
+    func testVerdict() {
+        let alive: (pid_t) -> Bool = { $0 != 99 }
+        XCTAssertNil(lifeVerdict(elapsed: 5, maxLife: 960, ppid: 50, parentPid: 50, sourcePid: 60, alive: alive))
+        XCTAssertEqual(lifeVerdict(elapsed: 961, maxLife: 960, ppid: 50, parentPid: 50, sourcePid: 60, alive: alive), "max-life")
+        XCTAssertEqual(lifeVerdict(elapsed: 5, maxLife: 960, ppid: 1, parentPid: 99, sourcePid: 60, alive: alive), "parent-exited")
+        XCTAssertEqual(lifeVerdict(elapsed: 5, maxLife: 960, ppid: 1, parentPid: 50, sourcePid: 60, alive: alive), "orphaned")
+        XCTAssertEqual(lifeVerdict(elapsed: 5, maxLife: 960, ppid: 50, parentPid: 50, sourcePid: 99, alive: alive), "source-exited")
+    }
+
+    // The real binary must die on SIGTERM, when its parent dies, and at its max lifetime, even while stuck.
+    var bin: URL { Bundle(for: LifetimeTests.self).bundleURL.deletingLastPathComponent().appendingPathComponent("speakeasy-track") }
+    func spawn(_ args: [String]) throws -> Process {
+        let p = Process(); p.executableURL = bin; p.arguments = ["--selftest-hang", "1"] + args
+        p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+        try p.run(); return p
+    }
+    func waitExit(_ p: Process, _ s: Double) -> Bool {
+        let end = Date().addingTimeInterval(s)
+        while p.isRunning && Date() < end { usleep(50_000) }
+        if p.isRunning { kill(p.processIdentifier, SIGKILL); return false }
+        return true
+    }
+    func testExitsOnSigterm() throws {
+        let p = try spawn([]); usleep(800_000)
+        XCTAssertTrue(p.isRunning)
+        p.terminate()
+        XCTAssertTrue(waitExit(p, 4), "tracker ignored SIGTERM")
+    }
+    func testExitsAtMaxLife() throws {
+        XCTAssertTrue(waitExit(try spawn(["--max-life", "1"]), 6), "tracker outlived --max-life")
+    }
+    func testExitsWhenParentDies() throws {
+        let parent = Process(); parent.executableURL = URL(fileURLWithPath: "/bin/sleep"); parent.arguments = ["30"]; try parent.run()
+        let p = try spawn(["--parent-pid", String(parent.processIdentifier)]); usleep(800_000)
+        XCTAssertTrue(p.isRunning)
+        parent.terminate(); parent.waitUntilExit()
+        XCTAssertTrue(waitExit(p, 5), "tracker outlived its parent")
+    }
+}

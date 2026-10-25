@@ -783,6 +783,50 @@ func refind(_ lines: [OLine], target: [String], near: CGRect?) -> CGRect? {
     return box
 }
 
+// ---------------- lifetime ----------------
+/// Why the tracker must stop now, or nil. Pure so it is unit-tested. An orphan (parent gone, ppid 1) or a tracker
+/// past its max lifetime must never linger: a stray one kept LaunchServices thinking Speakeasy was running.
+func lifeVerdict(elapsed: Double, maxLife: Double, ppid: pid_t, parentPid: pid_t, sourcePid: pid_t, alive: (pid_t) -> Bool) -> String? {
+    if elapsed > maxLife { return "max-life" }
+    if parentPid > 0 && !alive(parentPid) { return "parent-exited" }
+    if parentPid > 0 && ppid == 1 { return "orphaned" }
+    if sourcePid > 0 && !alive(sourcePid) { return "source-exited" }
+    return nil
+}
+final class LifeFlag: @unchecked Sendable { var v = false }
+enum Lifetime {
+    static let stopping = LifeFlag()
+    nonisolated(unsafe) static var reason: String? = nil
+    nonisolated(unsafe) static var keep: [AnyObject] = []
+    static let graceS = 2.0
+    /// Ask the run loop to stop (it logs its exit), then hard-exit after a grace period whatever it is blocked on.
+    static func stop(_ why: String) {
+        if stopping.v { return }
+        reason = why; stopping.v = true
+        DispatchQueue.global().asyncAfter(deadline: .now() + graceS) { _exit(0) }
+    }
+    static func install(_ a: [String: String]) {
+        signal(SIGTERM, SIG_IGN); signal(SIGINT, SIG_IGN); signal(SIGHUP, SIG_IGN)
+        for sg in [SIGTERM, SIGINT, SIGHUP] {
+            let src = DispatchSource.makeSignalSource(signal: sg, queue: .global())
+            src.setEventHandler { stop(sg == SIGTERM ? "sigterm" : sg == SIGINT ? "sigint" : "sighup") }
+            src.resume(); keep.append(src)
+        }
+        let env = ProcessInfo.processInfo.environment
+        let maxLife = Double(a["max-life"] ?? env["SPEAKEASY_TRACK_MAX_S"] ?? "") ?? 960     // the read loop itself stops at 900 s
+        let parent = pid_t(a["parent-pid"] ?? "") ?? 0
+        let source = a["selftest-hang"] != nil || a["window-id"] != nil ? (pid_t(a["pid"] ?? "") ?? 0) : 0
+        let t0 = Date()
+        let timer = DispatchSource.makeTimerSource(queue: .global())
+        timer.schedule(deadline: .now() + 0.5, repeating: 0.5)
+        timer.setEventHandler {
+            if let why = lifeVerdict(elapsed: Date().timeIntervalSince(t0), maxLife: maxLife, ppid: getppid(), parentPid: parent,
+                                     sourcePid: source, alive: { kill($0, 0) == 0 || errno == EPERM }) { stop(why) }
+        }
+        timer.resume(); keep.append(timer)
+    }
+}
+
 // ---------------- main ----------------
 @main
 struct Tracker {
@@ -793,11 +837,15 @@ struct Tracker {
         var a: [String: String] = [:]
         var it = CommandLine.arguments.dropFirst().makeIterator()
         while let k = it.next() { if k.hasPrefix("--") { a[String(k.dropFirst(2))] = it.next() ?? "" } }
+        Lifetime.install(a)                           // SIGTERM, parent/source death and a hard max lifetime, independent of run()
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)           // no Dock icon; the overlay panel never activates
         _ = CGMainDisplayID()
         let args = a
-        Task.detached { await Tracker.run(args); exit(0) }
+        Task.detached {
+            if args["selftest-hang"] != nil { while true { try? await Task.sleep(nanoseconds: 1_000_000_000) } }   // tests only
+            await Tracker.run(args); exit(0)
+        }
         app.run()
     }
     static func run(_ a: [String: String]) async {
@@ -902,16 +950,12 @@ struct Tracker {
         var errNote: String? = filter == nil ? "window not shareable (Screen Recording permission?)" : nil
 
         var exitReason = "max-time"
-        signal(SIGTERM, SIG_IGN); signal(SIGINT, SIG_IGN)
         final class Flag: @unchecked Sendable { var v = false }
         let term = Flag()
         var sigSrcs: [DispatchSourceSignal] = []
-        for sg in [SIGTERM, SIGINT] {
-            let src = DispatchSource.makeSignalSource(signal: sg, queue: .global())
-            src.setEventHandler { term.v = true }; src.resume(); sigSrcs.append(src)
-        }
+        _ = sigSrcs
         while true {
-            if term.v { exitReason = "sigterm"; break }
+            if term.v || Lifetime.stopping.v { exitReason = term.v ? "sigterm" : (Lifetime.reason ?? "lifetime"); break }
             let tick = now()
             if tick - t0 > 900 { break }
             let prevTick = lastTick; lastTick = tick

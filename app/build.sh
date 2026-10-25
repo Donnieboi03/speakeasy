@@ -11,7 +11,24 @@ cp "$(swift build -c release --show-bin-path)/Speakeasy" "$APP/Contents/MacOS/Sp
 BUILD_ID="$(git rev-parse --short HEAD 2>/dev/null || echo src)-$(shasum -a 256 ../src/tracker.swift | cut -c1-8)"
 TSRC="$(mktemp -t speakeasy_track_src).swift"
 sed "s/^let BUILD = \"dev\"/let BUILD = \"$BUILD_ID\"/" ../src/tracker.swift > "$TSRC"
-swiftc -O -parse-as-library -swift-version 5 "$TSRC" -o "$APP/Contents/MacOS/speakeasy-track"
+# The tracker is a nested background-only helper app, NOT in Contents/MacOS: an AppKit process running from the main
+# app's MacOS dir registered with LaunchServices as Speakeasy itself, so `open Speakeasy.app` only activated a stray tracker.
+HELPER="$APP/Contents/Helpers/SpeakeasyTracker.app"
+mkdir -p "$HELPER/Contents/MacOS"
+swiftc -O -parse-as-library -swift-version 5 "$TSRC" -o "$HELPER/Contents/MacOS/speakeasy-track"
+cat > "$HELPER/Contents/Info.plist" <<HPL
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleIdentifier</key><string>com.donnieboi03.speakeasy.tracker</string>
+<key>CFBundleName</key><string>SpeakeasyTracker</string>
+<key>CFBundleExecutable</key><string>speakeasy-track</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>LSBackgroundOnly</key><true/>
+<key>LSUIElement</key><true/>
+<key>LSMinimumSystemVersion</key><string>14.0</string>
+</dict></plist>
+HPL
 rm -f "$TSRC"
 cp NOTICE "$APP/Contents/Resources/NOTICE"
 cat > "$APP/Contents/Info.plist" <<PL
@@ -38,7 +55,7 @@ PL
 # (or sign with a real identity: SPEAKEASY_SIGN_ID="Developer ID Application: ..." / a self-signed code-signing cert).
 SIGN_ID="${SPEAKEASY_SIGN_ID:--}"
 REQ='designated => identifier "com.donnieboi03.speakeasy"'
-codesign --force -s "$SIGN_ID" -i com.donnieboi03.speakeasy.tracker "$APP/Contents/MacOS/speakeasy-track"
+codesign --force -s "$SIGN_ID" -i com.donnieboi03.speakeasy.tracker "$HELPER"
 if [ "$SIGN_ID" = "-" ]; then codesign --force -s - -i com.donnieboi03.speakeasy --requirements "=$REQ" "$APP"
 else codesign --force -s "$SIGN_ID" -i com.donnieboi03.speakeasy "$APP"; fi
 codesign -dr - "$APP" 2>&1 | grep designated

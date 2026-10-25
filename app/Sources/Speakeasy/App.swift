@@ -32,6 +32,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     let statsLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
 
     func applicationDidFinishLaunching(_ n: Notification) {
+        DispatchQueue.global().async { Reader.killStaleTrackers() }
         item = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
         item.button?.image = NSImage(systemSymbolName: "text.bubble", accessibilityDescription: "Speakeasy")
         let m = NSMenu()

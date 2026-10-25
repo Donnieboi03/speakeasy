@@ -18,7 +18,8 @@ final class Reader {
         return Bundle.main.resourcePath.map { $0 + "/backend/speakeasy" } ?? cli
     }
     var trackerPath: String {
-        let b = Bundle.main.executableURL!.deletingLastPathComponent().appendingPathComponent("speakeasy-track").path
+        // a nested background-only helper app, never Contents/MacOS: a tracker there registered with LaunchServices as Speakeasy
+        let b = Bundle.main.bundlePath + "/Contents/Helpers/SpeakeasyTracker.app/Contents/MacOS/speakeasy-track"
         return FileManager.default.isExecutableFile(atPath: b) ? b : home + "/bin/speakeasy-track"
     }
     var speaking: Bool {
@@ -199,11 +200,23 @@ final class Reader {
         if let b = w[kCGWindowBounds as String] as? NSDictionary { CGRectMakeWithDictionaryRepresentation(b, &f) }
         return (wid, f)
     }
+    /// At launch no read is running, so every speakeasy-track is stale (e.g. orphaned by a crash): TERM, then KILL.
+    static func killStaleTrackers() {
+        for sig in ["-TERM", "-KILL"] {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/usr/bin/pkill"); p.arguments = [sig, "-x", "speakeasy-track"]
+            p.standardOutput = FileHandle.nullDevice; p.standardError = FileHandle.nullDevice
+            try? p.run(); p.waitUntilExit()
+            if p.terminationStatus != 0 { break }        // nothing matched: done
+            Thread.sleep(forTimeInterval: 1.0)
+        }
+        try? FileManager.default.removeItem(atPath: NSHomeDirectory() + "/.speakeasy/tracker.pid")
+    }
     func startTracker(pid: pid_t, wid: Int?) {
         killTracker()
         guard Config.on("SPEAKEASY_FOCUS"), Config.on("SPEAKEASY_TRACK"), let wid = wid else { return }
         tracker = run(trackerPath, ["--window-id", String(wid), "--pid", String(pid), "--home", home,
-                                    "--fps", Config.value("SPEAKEASY_TRACK_FPS") ?? "5", "--overlay", "native", "--run-id", runId], stdin: nil)
+                                    "--fps", Config.value("SPEAKEASY_TRACK_FPS") ?? "5", "--overlay", "native", "--run-id", runId,
+                                    "--parent-pid", String(getpid())], stdin: nil)
         if let t = tracker { try? String(t.processIdentifier).write(toFile: home + "/tracker.pid", atomically: true, encoding: .utf8) }
     }
 
