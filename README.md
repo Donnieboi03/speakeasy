@@ -46,3 +46,20 @@ These are black-box tests written independently of the implementation. `tests/ru
 - Ollama 3B text runner: about 2 GB resident (the vision model loads on demand, about 3 GB more).
 - Kokoro server: about 0.7 GB physical footprint (only about 0.2 GB shows as RSS, because MLX memory is Metal-backed).
 
+
+## Document-aware focus (PDF / Markdown)
+
+When the selection comes from a PDF or Markdown file, speakeasy reads the file itself (read-only, local) to get exact
+line, figure, caption and panel positions. The narration names figures by label ("In Figure 4b, ...") and the highlight
+box targets the exact line, figure or panel; the live tracker maps page coordinates to the screen from recognised text anchors.
+
+- Finding the file: Preview and other native document windows via the window's `AXDocument`; Cursor / VS Code via the
+  window title plus a search of recent workspace folders (used only when exactly one file matches); browsers via the
+  focused web area's URL (a `file://` URL, or with `SPEAKEASY_DOC_READ=all` a public `https://….pdf` downloaded without
+  cookies or auth into the temp dir as `speakeasy_doc_*`, removed after a day). Otherwise the screenshot behaviour is unchanged.
+- `SPEAKEASY_DOC_READ=local|all|off` (default `local`). Parsed documents are cached in `~/.speakeasy/cache/doc/`.
+  The lookup runs alongside the audio; the prompt waits at most `SPEAKEASY_DOC_WAIT_MS` (80 ms) and never for a first-time parse.
+- Logged per run: `doc_source`, `doc_path_hash` (never the path), `page`, `figures_found`, `doc_map_method`, `doc_ms`, `doc_cache`.
+- PDF parsing uses [PyMuPDF](https://pymupdf.readthedocs.io/), installed into the Kokoro venv by `install.sh`.
+  PyMuPDF is licensed under **AGPL-3.0** (or a commercial licence); that is fine for local personal use, but keep it in
+  mind before redistributing a bundle that includes it. Markdown parsing is stdlib only.

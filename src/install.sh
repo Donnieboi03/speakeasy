@@ -6,7 +6,7 @@ HOME_DIR="${SPEAKEASY_HOME:-$HOME/.speakeasy}"
 MODEL="${SPEAKEASY_MODEL:-qwen2.5:3b-instruct}"
 VMODEL="${SPEAKEASY_VISION_MODEL:-qwen2.5vl:3b}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
-cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
+cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then
@@ -83,11 +83,17 @@ PL
 else
   echo "Kokoro venv not found at $TTS_VENV; using macOS say. (Optional: python3 -m venv $TTS_VENV && $TTS_VENV/bin/pip install mlx-audio, then re-run.)"
 fi
+# Document-aware focus (PDF parsing): PyMuPDF in the Kokoro venv (AGPL-3.0; fine for local personal use)
+if [ -x "$TTS_VENV/bin/python" ]; then
+  "$TTS_VENV/bin/python" -c 'import pymupdf' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pymupdf >/dev/null 2>&1 \
+    && echo "PyMuPDF ready for document-aware focus" || echo "NOTE: PyMuPDF not installed; PDF figure mapping off (Markdown still works)"
+fi
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 set_cfg SPEAKEASY_VISION auto
 set_cfg SPEAKEASY_FOCUS on
 set_cfg SPEAKEASY_FOCUS_TAGS off
 set_cfg SPEAKEASY_TRACK on
+set_cfg SPEAKEASY_DOC_READ local
 set_cfg SPEAKEASY_TRACK_FPS 5
 # old default (3) -> 5 scans/s while speaking
 if grep -qx 'SPEAKEASY_TRACK_FPS=3' "$CONFIG" 2>/dev/null; then sed -i '' 's/^SPEAKEASY_TRACK_FPS=3$/SPEAKEASY_TRACK_FPS=5/' "$CONFIG"; fi
@@ -364,7 +370,32 @@ local function axSelectionRect()
   return nil
 end
 
+-- Document-aware focus: tell speakeasy which document the window shows (read-only AX queries, no AppleScript).
+local DOCHINT = "/tmp/speakeasy_cap_doc.json"
+local DOC_READ = cfg("SPEAKEASY_DOC_READ", "local")
+local function writeDocHint(win)
+  os.remove(DOCHINT)
+  if DOC_READ == "off" or not win or not hs.accessibilityState() then return end
+  pcall(function()
+    local app = win:application()
+    local h = { app = app and app:name() or "", bundle = app and app:bundleID() or "", title = win:title() or "" }
+    local axw = hs.axuielement.windowElement(win)
+    if axw then h.ax_document = axw:attributeValue("AXDocument") end
+    -- browsers: the URL of the web area that holds the focused element
+    local el = hs.axuielement.systemWideElement():attributeValue("AXFocusedUIElement")
+    for _ = 1, 40 do
+      if not el then break end
+      if el:attributeValue("AXRole") == "AXWebArea" then
+        local u = el:attributeValue("AXURL"); h.url = type(u) == "table" and u.url or (type(u) == "string" and u or nil); break
+      end
+      el = el:attributeValue("AXParent")
+    end
+    local f = io.open(DOCHINT, "w"); if f then f:write(hs.json.encode(h)); f:close() end
+  end)
+end
+
 local function run(args, method, rect, t0)
+  if hs.fs.attributes(DOCHINT) then table.insert(args, "--doc-hint"); table.insert(args, DOCHINT) end
   table.insert(args, "--capture-method"); table.insert(args, method)
   if rect then table.insert(args, "--capture-rect"); table.insert(args, string.format("%d,%d,%d,%d", rect.x, rect.y, rect.w, rect.h)) end
   if method == "bounds" and hs.fs.attributes(LINES) then table.insert(args, "--line-bounds"); table.insert(args, LINES) end
@@ -407,6 +438,7 @@ hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   focusClear(); os.remove(LINES)
   local t0 = hs.timer.secondsSinceEpoch()
   startTracker(hs.window.focusedWindow())      -- lock onto the source window now; it idles until the first sentence plays
+  writeDocHint(hs.window.focusedWindow())
   if CAPTURE == "off" then return run({ "selection" }, "none", nil, t0) end
   if CAPTURE == "select" then return interactive(t0) end
   if CAPTURE == "mouse" then

@@ -102,6 +102,39 @@ func focusedElement(_ pid: pid_t) -> AXUIElement? {
 
 // ---------------- OCR ----------------
 struct OLine { let text: String; let toks: Set<String>; let box: CGRect }   // box in screen points (top-left origin)
+
+// Document-aware focus: speakeasy sends a target in PDF page space plus text anchors (page lines with their page rects).
+// Match anchors to recognised lines, fit page->screen (uniform scale + offset), map the target (exact line / figure / panel).
+func docMap(_ lines: [OLine], _ doc: [String: Any]) -> (CGRect, Int, Double)? {
+    guard let tg = doc["target"] as? [Double], tg.count == 4, let anc = doc["anchors"] as? [[Any]] else { return nil }
+    var P: [(Double, Double)] = [], S: [(Double, Double)] = []
+    for a in anc {
+        guard a.count == 5, let t = a[4] as? String else { continue }
+        let c = a[0..<4].compactMap { ($0 as? Double) ?? ($0 as? Int).map(Double.init) }
+        if c.count != 4 { continue }
+        let at = Set(tokens(t)); if at.count < 3 { continue }
+        let cands = lines.filter { l in
+            let inter = Double(l.toks.intersection(at).count)
+            return inter / Double(max(1, at.count)) >= 0.75 && inter / Double(max(1, l.toks.count)) >= 0.6 }
+        if cands.count != 1 { continue }
+        let b = cands[0].box
+        // OCR line boxes start at the first glyph: use the left edge and vertical centre
+        P.append((c[0], (c[1] + c[3]) / 2)); S.append((Double(b.minX), Double(b.midY)))
+    }
+    let n = Double(P.count); if P.count < 2 { return nil }
+    let mpx = P.map { $0.0 }.reduce(0, +) / n, mpy = P.map { $0.1 }.reduce(0, +) / n
+    let msx = S.map { $0.0 }.reduce(0, +) / n, msy = S.map { $0.1 }.reduce(0, +) / n
+    var num = 0.0, den = 0.0
+    for (p, q) in zip(P, S) { num += (p.0 - mpx) * (q.0 - msx) + (p.1 - mpy) * (q.1 - msy); den += pow(p.0 - mpx, 2) + pow(p.1 - mpy, 2) }
+    if den < 100 { return nil }
+    let sc = num / den; if sc <= 0 { return nil }
+    let ox = msx - sc * mpx, oy = msy - sc * mpy
+    var err = 0.0
+    for (p, q) in zip(P, S) { err += pow(sc * p.0 + ox - q.0, 2) + pow(sc * p.1 + oy - q.1, 2) }
+    let rms = (err / n).squareRoot()
+    if rms > 10 { return nil }
+    return (CGRect(x: sc * tg[0] + ox, y: sc * tg[1] + oy, width: sc * (tg[2] - tg[0]), height: sc * (tg[3] - tg[1])), P.count, rms)
+}
 func recognise(_ img: CGImage, frame: CGRect, accurate: Bool) -> [OLine] {
     let req = VNRecognizeTextRequest()
     req.recognitionLevel = accurate ? .accurate : .fast
@@ -190,6 +223,10 @@ struct Tracker {
             for acc in [false, true] {
                 let t0 = now(); let lines = recognise(img, frame: frame, accurate: acc); let ms = (now() - t0) * 1000
                 let hit = refind(lines, target: (a["find"] ?? "").components(separatedBy: "\n"), near: nil)
+                if let dp = a["doc"], let d = readJSON(dp) {
+                    if let (r, k, e) = docMap(lines, d) { print("{\"level\":\"\(acc ? "accurate" : "fast")\",\"doc_rect\":[\(Int(r.minX)),\(Int(r.minY)),\(Int(r.width)),\(Int(r.height))],\"anchors\":\(k),\"rms\":\(String(format: "%.1f", e))}") }
+                    else { print("{\"doc_rect\":null}") }
+                }
                 if a["debug"] != nil { for l in lines { print("  \(Int(l.box.minY)) \(Int(l.box.height)) \(l.text)") } }
                 print("{\"level\":\"\(acc ? "accurate" : "fast")\",\"ocr_ms\":\(Int(ms)),\"lines\":\(lines.count),\"hit\":\(hit.map { "[\(Int($0.minX)),\(Int($0.minY)),\(Int($0.width)),\(Int($0.height))]" } ?? "null")}")
             }
@@ -227,7 +264,7 @@ struct Tracker {
             filter = SCContentFilter(desktopIndependentWindow: w)
         }
         let t0 = now(), cpu0 = cpu_s()
-        var frames = 0, axHits = 0, ocrHits = 0, misses = 0, hidden = 0
+        var frames = 0, axHits = 0, ocrHits = 0, docHits = 0, misses = 0, hidden = 0
         var ocrMs = 0.0, capMs = 0.0, ocrN = 0
         var lastSeq = -1, lastPid = -1, lastShowTs = now(), lastClear: Double? = nil
         var lastBox: CGRect? = nil, lastOut: [String: Any] = [:]
@@ -288,7 +325,11 @@ struct Tracker {
                             capMs += (now() - c0) * 1000
                             let o0 = now()
                             var lines = recognise(img, frame: frame, accurate: accurate)
-                            var hit = refind(lines, target: target, near: lastBox)
+                            var hit: CGRect? = nil
+                            if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm) {
+                                hit = r.intersection(frame); method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10
+                            }
+                            if hit == nil { hit = refind(lines, target: target, near: lastBox) }
                             if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
                                 lastAccurate = tick
                                 lines = recognise(img, frame: frame, accurate: true); hit = refind(lines, target: target, near: lastBox)
@@ -296,7 +337,7 @@ struct Tracker {
                             ocrMs += (now() - o0) * 1000; ocrN += 1
                             let all = Set(lines.flatMap { $0.toks })
                             if baseline == nil { baseline = all }
-                            if let r = hit { found = r; method = "ocr" }
+                            if let r = hit { found = r; if method.isEmpty { method = "ocr" } }
                             else {
                                 let inter = Double(all.intersection(baseline!).count), uni = Double(max(1, all.union(baseline!).count))
                                 out["reason"] = inter / uni < 0.35 ? "content-changed" : "scrolled-off"
@@ -305,7 +346,7 @@ struct Tracker {
                     }
                     if let r = found {
                         missRun = 0; lastBox = r
-                        if method == "ax" { axHits += 1 } else { ocrHits += 1 }
+                        if method == "ax" { axHits += 1 } else if method == "doc" { docHits += 1 } else { ocrHits += 1 }
                         out["visible"] = true; out["method"] = method
                         out["rect"] = [Double(r.minX).rounded(), Double(r.minY).rounded(), Double(r.width).rounded(), Double(r.height).rounded()]
                     } else if out["reason"] != nil || out["visible"] != nil {
@@ -347,10 +388,10 @@ struct Tracker {
         }
         writeJSONAtomic(["visible": false, "reason": "tracker-exit", "seq": lastSeq, "focus_pid": lastPid, "ts": now()], trackPath)
         let wall = max(0.001, now() - t0), active = frames
-        let hits = axHits + ocrHits
+        let hits = axHits + ocrHits + docHits
         var st: [String: Any] = ["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": exitReason, "focus_pid": lastPid, "window_id": Int(wid), "wall_s": (wall * 10).rounded() / 10,
                                  "frames": active, "fps": (Double(active) / max(0.001, activeS) * 100).rounded() / 100, "active_s": (activeS * 10).rounded() / 10,
-                                 "ax_hits": axHits, "ocr_hits": ocrHits, "misses": misses, "hidden_frames": hidden,
+                                 "ax_hits": axHits, "ocr_hits": ocrHits, "doc_hits": docHits, "misses": misses, "hidden_frames": hidden,
                                  "refind_hit_rate": hits + misses > 0 ? (Double(hits) / Double(hits + misses) * 100).rounded() / 100 : NSNull(),
                                  "ocr_ms_avg": ocrN > 0 ? (ocrMs / Double(ocrN)).rounded() : NSNull(),
                                  "capture_ms_avg": ocrN > 0 ? (capMs / Double(ocrN)).rounded() : NSNull(),
