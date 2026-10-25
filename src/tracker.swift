@@ -170,6 +170,11 @@ final class Live: NSObject {
     let refShape = CAShapeLayer()
     var refShown = 0, transitions = 0, heldBig = 0
     var cue = "text", suppressed = false
+    var hScrollOK = false                // horizontal deltas only once OCR confirmed the content really moves sideways
+    var stuckY = 0                       // +1/-1: content did not move under deltas of that sign (document edge)
+    var predX = 0.0, predAt = 0.0, rejX = 0.0
+    var wantScan = false                 // a scroll just happened / was rejected: confirm position at once
+    var rejN: [String: Int] = [:], rejTotal = 0, lastRejLog = 0.0, corrections = 0
     var runId = ""
     var winTimer: DispatchSourceTimer? = nil
     // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
@@ -289,8 +294,15 @@ final class Live: NSObject {
     func flush() {
         dirty = false; lastWork = "flush"; lastFlush = now()
         guard let p = panel else { return }
-        let show = rect != nil && front && winFront && !hiddenByKey && scanVisible && !suppressed
-        if show, let r = rect {
+        var inWin = true
+        if let r = rect, let w = winFrame {
+            let vis = r.intersection(w)
+            inWin = !vis.isNull && vis.width * vis.height >= 0.3 * r.width * r.height
+            if !inWin && shown { hideTrigger = ("out-of-window", now()); rec(["event": "box-out-of-window", "rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)]]); wantScan = true }
+        }
+        let show = rect != nil && front && winFront && !hiddenByKey && scanVisible && !suppressed && inWin
+        if show, var r = rect {
+            if let w = winFrame { r = r.intersection(w) }                 // clamp to the window
             let f = frameFor(r)
             CATransaction.begin(); CATransaction.setDisableActions(true)
             p.setFrame(f, display: false)
@@ -331,9 +343,37 @@ final class Live: NSObject {
         pendingScroll.removeAll()
     }
     // ---- scans from the tracker loop ----
+    func reject(_ why: String) {
+        rejN[why, default: 0] += 1; rejTotal += 1
+        let t = now()
+        if t - lastRejLog > 0.5 { lastRejLog = t; rec(["event": "scroll-rejected", "reason": why, "counts": rejN]); rejN = [:] }
+    }
     func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?) {
         lastWork = "scan"
         if capTs > 0 && capTs < lastMove { return }               // screenshot taken before the last scroll: stale
+        wantScan = false
+        if visible, let r = r, let old = rect {
+            let ex = r.minX - old.minX, ey = r.minY - old.minY
+            // verify the prediction: content that did not move under accepted deltas -> that direction is stuck (edge)
+            if abs(pred) >= 30 {
+                let actual = pred + ey
+                if abs(actual) < 0.3 * abs(pred) { stuckY = pred > 0 ? 1 : -1; rec(["event": "scroll-stuck", "dir": stuckY, "pred": Int(pred), "actual": Int(actual)]) }
+                else { stuckY = 0 }
+            }
+            if abs(predX) >= 30 {
+                let ax = predX + ex
+                hScrollOK = abs(ax) >= 0.5 * abs(predX)
+            } else if abs(rejX) >= 30 && abs(ex) >= 0.5 * abs(rejX) && (ex > 0) == (rejX > 0) {
+                hScrollOK = true; rec(["event": "hscroll-confirmed", "rejected_dx": Int(rejX), "moved": Int(ex)])   // it really scrolls sideways
+            }
+            if stuckY != 0 && abs(pred) < 30 && abs(ey) >= 30 { stuckY = 0 }          // content moved after all (e.g. more loaded)
+            rejX = 0
+            if abs(ex) > 8 || abs(ey) > 8 {
+                corrections += 1
+                rec(["event": "correction", "dx": Int(ex), "dy": Int(ey), "from": src, "to": method, "after_ms": Int((now() - predAt) * 1000)])
+            }
+            predX = 0
+        }
         if visible, let r = r {
             if let old = rect, abs(pred) >= 20, method != "ax" {
                 let actual = pred + (r.minY - old.minY)
@@ -494,14 +534,26 @@ final class Live: NSObject {
             return
         }
         guard let w = winFrame, w.contains(ev.location) else { return }
-        let dy = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
-        let dx = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
-        if dx == 0 && dy == 0 { return }
+        let dy0 = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis1))
+        let dx0 = Double(ev.getIntegerValueField(.scrollWheelEventPointDeltaAxis2))
+        if dx0 == 0 && dy0 == 0 { return }
         scrollEvents += 1
-        lastMove = now()
         let cont = ev.getIntegerValueField(.scrollWheelEventIsContinuous) != 0
         let k = cont ? kCont : kLine
-        off.x += dx * k; off.y += dy * k
+        // Never trust deltas blindly: a trackpad keeps sending them when the content cannot move (sideways in a page
+        // that does not scroll horizontally, past the end, rubber-band and momentum after an edge).
+        var ddx = dx0, ddy = dy0
+        if ddx != 0 && !hScrollOK { reject("horizontal"); rejX += ddx * k; ddx = 0 }
+        if ddy != 0 && stuckY != 0 && (ddy > 0) == (stuckY > 0) {
+            let mom = ev.getIntegerValueField(.scrollWheelEventMomentumPhase) != 0
+            reject(mom ? "overscroll" : "no-content-move"); ddy = 0
+        }
+        if ddy != 0 && (ddy > 0) != (stuckY > 0) && stuckY != 0 { stuckY = 0 }      // reversing direction: content can move again
+        if ddx == 0 && ddy == 0 { wantScan = true; return }
+        lastMove = now(); predAt = now(); wantScan = true
+        predX += ddx * k
+        off.x += ddx * k; off.y += ddy * k
+        let dx = ddx, dy = ddy
         if range != nil && axGood && requeryAX() { axHits += 1; apply(scrollTs: ev.timestamp); return }   // exact: ask the app
         if let r = rect { rect = r.offsetBy(dx: dx * k, dy: dy * k); src = "scroll-delta"; deltaHits += 1 }
         pred += dy * k; predCont = cont
@@ -535,7 +587,7 @@ final class Live: NSObject {
          "scroll_delta_hits": deltaHits,
          "scroll_lag_avg_ms": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(), "scroll_lag_max_ms": (lagMax * 10).rounded() / 10,
          "hide_ms_avg": hideN > 0 ? (hideSum / Double(hideN) * 10).rounded() / 10 : NSNull(), "hide_ms_max": (hideMax * 10).rounded() / 10,
-         "draw_failed": drawFails, "transitions": transitions, "transitions_held_big": heldBig, "ref_outlines": refShown, "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
+         "draw_failed": drawFails, "scroll_rejected": rejTotal, "corrections": corrections, "transitions": transitions, "transitions_held_big": heldBig, "ref_outlines": refShown, "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
          "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
     }
 }
@@ -835,17 +887,17 @@ struct Tracker {
             if showing {
                 activeS += tick - prevTick
                 let ws = windowState(wid)
-                var liveAx = false, deltaOK = false
+                var liveAx = false, deltaOK = false, wantNow = false
                 if native, let w = ws {
                     let fr = w.front && w.onScreen
                     let appFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
-                    (liveAx, deltaOK) = await MainActor.run { () -> (Bool, Bool) in
+                    (liveAx, deltaOK, wantNow) = await MainActor.run { () -> (Bool, Bool, Bool) in
                         let L = Live.shared; L.winFrame = w.frame
                         if L.winFront != fr {
                             if !fr && L.shown { L.hideTrigger = (appFront ? (w.onScreen ? "window-switch" : "not-frontmost") : "app-switch", now()) }
                             L.winFront = fr; L.apply()
                         }
-                        return (L.axGood, L.deltaOK) }
+                        let wn = L.wantScan && now() - L.lastMove > 0.06; return (L.axGood, L.deltaOK, wn) }
                 }
                 let seqChanged = (lastOut["seq"] as? Int) != seq
                 let wasHiddenForFront = (lastOut["reason"] as? String).map { ["not-frontmost", "not-on-screen", "window-gone"].contains($0) } ?? false
@@ -853,7 +905,7 @@ struct Tracker {
                     // hide at once (checked every tick, no debounce)
                     out["visible"] = false; out["reason"] = ws == nil ? "window-gone" : (ws!.onScreen ? "not-frontmost" : "not-on-screen"); hidden += 1
                     if let w = ws, w.onScreen { out["front_owner"] = w.frontOwner; out["front_id"] = w.frontId }
-                } else if !(seqChanged || wasHiddenForFront || tick - lastScan >= (liveAx ? 2.0 : deltaOK ? 1.0 : 1.0 / fps)) {   // scroll-delta confirmed by OCR: 1 scan/s   // AX follows events; OCR is a slow drift check
+                } else if !(seqChanged || wasHiddenForFront || (wantNow && tick - lastScan > 0.1) || tick - lastScan >= (liveAx ? 2.0 : deltaOK ? 1.0 : 1.0 / fps)) {   // scroll-delta confirmed by OCR: 1 scan/s   // AX follows events; OCR is a slow drift check
                     out = lastOut                                        // between scans: keep the last answer
                 } else {
                     scanned = true; frames += 1; lastScan = tick
