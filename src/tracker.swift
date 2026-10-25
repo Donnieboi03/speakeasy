@@ -164,6 +164,7 @@ final class Live: NSObject {
     var deltaOK = false                  // scroll-delta predictions match OCR: OCR can slow down
     var stallN = 0, stallMax = 0.0, lastWork = "idle"
     var hb: Timer? = nil
+    var lastFlush = 0.0
     var winTimer: DispatchSourceTimer? = nil
     // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
     func startWinWatch(_ wid: CGWindowID) {
@@ -251,7 +252,10 @@ final class Live: NSObject {
         if let t = scrollTs { pendingScroll.append(t) }
         if dirty { return }
         dirty = true
-        if Thread.isMainThread { flush() } else { DispatchQueue.main.async { self.flush() } }
+        // coalesce: a trackpad sends 60-120 scroll events/s (plus momentum); move the panel at most once per ~8 ms
+        let wait = max(0, 0.008 - (now() - lastFlush))
+        if wait == 0 && Thread.isMainThread { flush() }
+        else { DispatchQueue.main.asyncAfter(deadline: .now() + wait) { self.flush() } }
     }
     @objc func tickLink(_ l: AnyObject) { if dirty { flush() } }
     func hideReason() -> String {
@@ -263,7 +267,7 @@ final class Live: NSObject {
         return "scrolled-off"
     }
     func flush() {
-        dirty = false; lastWork = "flush"
+        dirty = false; lastWork = "flush"; lastFlush = now()
         guard let p = panel else { return }
         let show = rect != nil && front && winFront && !hiddenByKey && scanVisible
         if show, let r = rect {
@@ -297,13 +301,12 @@ final class Live: NSObject {
             hideTrigger = nil
         }
         let n = uptimeNs()
+        var bmax = 0.0, bn = 0
         for t in pendingScroll where t > 0 && n > t {
             let ms = Double(n - t) / 1e6
-            if ms < 5000 {
-                lagN += 1; lagSum += ms; lagMax = max(lagMax, ms)
-                rec(["event": "scroll", "scroll_lag_ms": (ms * 10).rounded() / 10, "src": src])
-            }
+            if ms < 5000 { lagN += 1; lagSum += ms; lagMax = max(lagMax, ms); bmax = max(bmax, ms); bn += 1 }
         }
+        if bn > 0 { rec(["event": "scroll", "scroll_lag_ms": (bmax * 10).rounded() / 10, "events": bn, "src": src]) }   // one record per panel move
         pendingScroll.removeAll()
     }
     // ---- scans from the tracker loop ----

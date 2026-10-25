@@ -213,17 +213,21 @@ local function shapeFrame(r)
 end
 -- The tracker runs detached (nohup) so a Hammerspoon reload never kills an active read; its pid lives in tracker.pid.
 local TRACKER_PID = os.getenv("HOME") .. "/.speakeasy/tracker.pid"
+local pidCache = { t = 0 }
 function speakeasyTrackerPid()
+  local nowT = hs.timer.secondsSinceEpoch()
+  if nowT - pidCache.t < 1 then return pidCache.p end      -- hs.execute blocks the Lua thread: check at most once a second
+  pidCache.t = nowT; pidCache.p = nil
   local f = io.open(TRACKER_PID, "r"); if not f then return nil end
   local p = tonumber((f:read("*l") or ""):match("%d+")); f:close()
   -- os.execute's status is unreliable inside Hammerspoon (that made every start log FAILED); hs.execute reports it
-  if p then local _, ok = hs.execute("/bin/kill -0 " .. p .. " 2>/dev/null"); if ok then return p end end
+  if p then local _, ok = hs.execute("/bin/kill -0 " .. p .. " 2>/dev/null"); if ok then pidCache.p = p; return p end end
   return nil
 end
 function speakeasyTrackerKill()
   local p = speakeasyTrackerPid()
   if p then hs.execute("/bin/kill " .. p .. " 2>/dev/null") end
-  os.remove(TRACKER_PID)
+  os.remove(TRACKER_PID); pidCache.t = 0
 end
 -- did the tracker's native panel draw this sentence? (it writes overlay.json on its first draw of each seq)
 local function nativeDrew(e)
@@ -390,7 +394,16 @@ speakeasyKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(
   end
   return false
 end)
-speakeasyKeyTap:start()
+-- These are active (filtering) taps: every scroll/key event on the Mac waits for Hammerspoon's Lua thread. Run them only
+-- while Hammerspoon's own box is on screen; the native tracker panel has its own listen-only tap.
+speakeasyScrollTap:stop(); speakeasyKeyTap:stop()
+if speakeasyTapGate then speakeasyTapGate:stop() end
+speakeasyTapGate = hs.timer.doEvery(0.2, function()
+  local want = focusCanvas ~= nil
+  if want ~= speakeasyScrollTap:isEnabled() then
+    if want then speakeasyScrollTap:start(); speakeasyKeyTap:start() else speakeasyScrollTap:stop(); speakeasyKeyTap:stop() end
+  end
+end)
 local function startTracker(win)
   speakeasyTrackerKill()
   srcWinId = win and win:id() or nil
