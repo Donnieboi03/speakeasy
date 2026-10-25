@@ -214,6 +214,7 @@ def resolve(hint, mode="local"):
     if p and re.search(r"\.(pdf|md|markdown|mdx)$", p, re.I):
         return ("preview" if "preview" in app.lower() else "ax-document"), p, "ax"
     if re.search(r"cursor|code", app, re.I):
+        title = re.sub(r"^\s*(?:\[preview\]\s*|preview\s+)", "", title, flags=re.I)      # Markdown preview tabs
         m = re.match(r"^[\u25cf\s]*([^\s\u2014][^\u2014]*?\.(?:md|markdown|mdx|pdf))(?:\s*\([^)]*\))?\s+[\u2014-]\s+(.+?)(?:\s+[\u2014-]\s+.*)?$", title)
         if m:
             name, proj = m.group(1).strip(), m.group(2).strip()
@@ -283,7 +284,9 @@ def figure_context(figs, limit=8):
     for f in figs[:limit]:
         if not f.get("label"): continue
         pn = ", ".join(p["label"] for p in f.get("panels") or [])
-        out.append(f"{f['label']}" + (f" (panels {pn})" if pn else "") + ": " + re.sub(r"\s+", " ", f.get("caption") or "")[:160])
+        cap = re.sub(r"\s+", " ", f.get("caption") or "")
+        cap = re.sub(r"^\s*(?:fig(?:ure)?s?\.?|table)\s*\d+\s*[.:|\-\u2013\u2014]?\s*", "", cap, flags=re.I)
+        out.append(f"{f['label']}" + (f" (panels {pn})" if pn else "") + ": " + cap[:160])
     return out
 
 def find_ref(sentence, figs, last=None):
