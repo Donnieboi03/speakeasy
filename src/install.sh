@@ -6,7 +6,7 @@ HOME_DIR="${SPEAKEASY_HOME:-$HOME/.speakeasy}"
 MODEL="${SPEAKEASY_MODEL:-qwen3-vl:4b-instruct}"
 VMODEL="${SPEAKEASY_VISION_MODEL:-qwen3-vl:4b-instruct}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
-cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/stats.py" "$SRC/pdfpage.py" "$SRC/selog.py" "$SRC/observe.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
+cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/stats.py" "$SRC/pdfpage.py" "$SRC/selog.py" "$SRC/observe.py" "$SRC/provider.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then

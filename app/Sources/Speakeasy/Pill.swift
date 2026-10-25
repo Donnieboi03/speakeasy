@@ -8,7 +8,9 @@ final class PillModel: ObservableObject {
     @Published var textHighlight = Config.on("SPEAKEASY_TEXT_HIGHLIGHT")
     @Published var figureCues = Config.on("SPEAKEASY_FIGURE_CUES")
     var onStop: (() -> Void)?
+    @Published var cloud = Cloud.anyOn
     var onArea: (() -> Void)?
+    var onCloud: (() -> Void)?
 }
 
 final class Pill {
@@ -19,7 +21,7 @@ final class Pill {
 
     func set(_ s: String) {
         if s == "idle" { model.state = "idle"; hide(); return }
-        model.state = s; show()
+        model.state = s; model.cloud = Cloud.anyOn; show()
         if s == "thinking" && poll == nil {             // the backend reports "speaking" in ~/.speakeasy/state.json
             poll = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in self?.readState() }
         }
@@ -31,13 +33,13 @@ final class Pill {
     }
     func show() {
         if panel == nil {
-            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 250, height: 44),
+            let p = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 272, height: 44),
                             styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             p.isFloatingPanel = true; p.level = .statusBar; p.backgroundColor = .clear; p.isOpaque = false; p.hasShadow = true
             p.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary]
             p.isMovableByWindowBackground = true; p.hidesOnDeactivate = false
             p.contentView = NSHostingView(rootView: PillView(model: model))
-            if let s = NSScreen.main?.visibleFrame { p.setFrameOrigin(NSPoint(x: s.midX - 125, y: s.minY + 24)) }
+            if let s = NSScreen.main?.visibleFrame { p.setFrameOrigin(NSPoint(x: s.midX - 136, y: s.minY + 24)) }
             panel = p
         }
         panel?.orderFrontRegardless()
@@ -57,9 +59,14 @@ struct PillView: View {
                 .onAppear { pulse = true }
             if model.state == "speaking" { Bars() } else { Text(label).font(.system(size: 13, weight: .medium)) }
             Spacer(minLength: 4)
+            if model.cloud {
+                Image(systemName: "cloud.fill").foregroundStyle(.orange).help("Cloud (OpenRouter) is on: this read may leave your Mac")
+            }
             Menu {
                 Toggle("Highlight text", isOn: Binding(get: { model.textHighlight }, set: { model.textHighlight = $0; Config.set("SPEAKEASY_TEXT_HIGHLIGHT", $0 ? "on" : "off") }))
                 Toggle("Figure cues", isOn: Binding(get: { model.figureCues }, set: { model.figureCues = $0; Config.set("SPEAKEASY_FIGURE_CUES", $0 ? "on" : "off") }))
+                Divider()
+                Button(model.cloud ? "Cloud (OpenRouter): on…" : "Cloud (OpenRouter)…") { model.onCloud?() }
             } label: { Image(systemName: "gearshape") }
             .menuStyle(.borderlessButton).menuIndicator(.hidden).fixedSize().help("Highlight settings")
             Button { model.onArea?() } label: { Image(systemName: "viewfinder") }
@@ -68,7 +75,7 @@ struct PillView: View {
                 .buttonStyle(.borderless).help("Stop reading")
         }
         .foregroundStyle(.white)
-        .padding(.horizontal, 14).frame(width: 250, height: 44)
+        .padding(.horizontal, 14).frame(width: 272, height: 44)
         .background(Capsule().fill(Color.black.opacity(0.82)))
     }
 }

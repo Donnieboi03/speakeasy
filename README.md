@@ -117,3 +117,14 @@ For PDFs and pages where selecting text is awkward: press Control-Option-A (or "
 
 - [open-wispr](https://github.com/human37/open-wispr) (MIT): the menu-bar app's package layout, status-bar controller and recording-pill pattern. See `app/NOTICE`.
 - [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT), [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0/BSD), [Kokoro](https://github.com/hexgrad/kokoro) via [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Ollama](https://ollama.com), [python-build-standalone](https://github.com/astral-sh/python-build-standalone).
+
+## Optional cloud (OpenRouter)
+
+Off by default; everything runs locally unless you turn it on. Bring your own key, like Raycast or open-wispr:
+
+- Menu bar → **Cloud (OpenRouter)…** (or pill gear): toggle *Rewrite* (sends the selected text) and/or *Figure grounding* (sends figure screenshots), pick a model, paste a key. A cloud icon shows on the pill while on.
+- Or from a terminal: `security add-generic-password -U -s speakeasy-openrouter -a openrouter -w` (prompts for the key), then add `SPEAKEASY_LLM=openrouter`, `SPEAKEASY_GROUND=openrouter`, `SPEAKEASY_OR_MODEL=google/gemini-2.5-flash` lines to `~/.speakeasy/config`.
+- The key lives only in the login Keychain (`SPEAKEASY_OR_KEY` env overrides for testing); config holds on/off and the model.
+- OpenAI-compatible `/chat/completions` with streaming; falls back to the local model on any error, no key, or no first token within `SPEAKEASY_OR_TIMEOUT` (8 s). Only `https` public hosts are accepted for `SPEAKEASY_OR_URL`.
+- Logs record `llm_provider`, `llm_provider_model`, `llm_fallback`, `ground_provider_configured`; never text or the key.
+- Grounding eval: `python3 tools/ground_eval.py --pdf paper.pdf --provider openrouter --model google/gemini-2.5-flash --yes-paid` (paid calls; refuses without `--yes-paid`).

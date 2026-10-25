@@ -4,6 +4,7 @@ import argparse, base64, json, os, re, signal, subprocess, sys, tempfile, time, 
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 from selog import DEFAULT_URL, DEFAULT_MODEL
+import provider
 CHUNK = 6000
 
 SYSTEM_PROMPT = """You turn written text (usually AI chat output) into a short script that will be READ ALOUD by a text-to-speech voice. The listener cannot see the screen.
@@ -156,19 +157,38 @@ def vision_prompt():
 def llm_call(text, timeout):
     return chat(model_name(), system_prompt(text), user_msg(text), timeout)
 
-def chat(model, system, content, timeout):
+def _endpoint(model, stream, purpose="llm", local=False):
+    """(url, headers, body extras, model, provider): OpenRouter when switched on (provider.py), else the local server."""
+    c = None if local else provider.cloud(purpose)
+    if c:
+        url, h, m = c
+        return url + "/chat/completions", h, {}, m, "openrouter"
     url = os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/")
     if not url.endswith("/chat/completions"):
         url += "/chat/completions"
-    body = {"model": model, "temperature": 0, "stream": False, "keep_alive": keep_alive(),
+    h = {}
+    key = os.environ.get("SPEAKEASY_API_KEY")
+    if key: h["Authorization"] = "Bearer " + key
+    return url, h, {"keep_alive": keep_alive()}, model, "local"
+
+def _note_provider(prov, model, fell_back=None):
+    RUN_META.setdefault("llm_provider", prov); RUN_META.setdefault("llm_provider_model", model)
+    if fell_back: RUN_META["llm_fallback"] = fell_back
+
+def chat(model, system, content, timeout, local=False):
+    url, h, extra, m, prov = _endpoint(model, False, local=local)
+    body = {"model": m, "temperature": 0, "stream": False, **extra,
             "messages": [{"role": "system", "content": system},
                          {"role": "user", "content": content}]}
-    headers = {"Content-Type": "application/json"}
-    key = os.environ.get("SPEAKEASY_API_KEY")
-    if key:
-        headers["Authorization"] = "Bearer " + key
+    headers = {"Content-Type": "application/json", **h}
     req = urllib.request.Request(url, json.dumps(body).encode(), headers)
-    data = _deadline_fetch(req, timeout)
+    try:
+        data = _deadline_fetch(req, min(timeout, CLOUD_TIMEOUT) if prov != "local" else timeout)
+        _note_provider(prov, m)
+    except (OSError, ValueError, TimeoutError) as e:
+        if prov == "local": raise
+        _note_provider("local", model, f"openrouter: {type(e).__name__}")   # cloud failed: the local model answers
+        return chat(model, system, content, timeout, local=True)
     out = data["choices"][0]["message"]["content"]
     if not isinstance(out, str):
         raise ValueError("bad LLM response")
@@ -231,18 +251,31 @@ def prewarm_tts(a=None):
         except Exception: pass
     _threading.Thread(target=go, daemon=True).start()
 
-def chat_stream(model, system, content, timeout, rec, t_req):
-    """Yield content deltas from an OpenAI-compatible SSE stream. Overall deadline = timeout."""
-    url = os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/")
-    if not url.endswith("/chat/completions"):
-        url += "/chat/completions"
-    body = {"model": model, "temperature": 0, "stream": True, "keep_alive": keep_alive(),
+CLOUD_TIMEOUT = float(os.environ.get("SPEAKEASY_OR_TIMEOUT", "8"))   # first byte from OpenRouter, else the local model answers
+
+def chat_stream(model, system, content, timeout, rec, t_req, local=False):
+    """Yield content deltas from an OpenAI-compatible SSE stream. Overall deadline = timeout.
+    OpenRouter (when on) falls back to the local model if it fails or is slow before the first token."""
+    url, h, extra, m, prov = _endpoint(model, True, local=local)
+    if prov != "local":
+        got = False
+        try:
+            for d in _stream(url, h, extra, m, system, content, timeout, rec, t_req, first_byte=CLOUD_TIMEOUT):
+                got = True; yield d
+            _note_provider(prov, m); return
+        except (OSError, ValueError, TimeoutError) as e:
+            if got: raise                                   # mid-stream: the caller's normal error path
+            _note_provider("local", model, f"openrouter: {type(e).__name__}")
+        yield from chat_stream(model, system, content, timeout, rec, t_req, local=True); return
+    _note_provider(prov, m)
+    yield from _stream(url, h, extra, m, system, content, timeout, rec, t_req)
+
+def _stream(url, h, extra, model, system, content, timeout, rec, t_req, first_byte=None):
+    body = {"model": model, "temperature": 0, "stream": True, **extra,
             "messages": [{"role": "system", "content": system}, {"role": "user", "content": content}]}
-    headers = {"Content-Type": "application/json", "Accept": "text/event-stream"}
-    key = os.environ.get("SPEAKEASY_API_KEY")
-    if key: headers["Authorization"] = "Bearer " + key
+    headers = {"Content-Type": "application/json", "Accept": "text/event-stream", **h}
     deadline = time.time() + timeout
-    resp = urllib.request.urlopen(urllib.request.Request(url, json.dumps(body).encode(), headers), timeout=timeout)
+    resp = urllib.request.urlopen(urllib.request.Request(url, json.dumps(body).encode(), headers), timeout=first_byte or timeout)
     try:
         for raw in resp:
             if STOP is not None and STOP.is_set():
@@ -527,6 +560,7 @@ class Grounder:
         for f in list(self.pending.values()): f.done.set()
     def mode(self):
         m = os.environ.get("SPEAKEASY_GROUND", "auto").lower()
+        if m in ("openrouter", "local"): return "vlm"           # openrouter: the vision call goes to the cloud model
         florence_ok = os.environ.get("SPEAKEASY_FLORENCE", "off").lower() in ("on", "1", "true", "yes")
         if m == "florence" and not florence_ok: return "vlm"     # Florence-2 needs torch (~2 GB RAM): opt-in only
         if m == "auto": return "vlm"
@@ -541,12 +575,15 @@ class Grounder:
             subprocess.run([docmap.venv_python(), "-c", code, pdf, str(page), ",".join(str(v) for v in clip), png,
                             os.path.dirname(os.path.realpath(__file__))], timeout=10, capture_output=True)
             b64 = base64.b64encode(open(png, "rb").read()).decode()
-            url = os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/") + "/chat/completions"
-            body = {"model": vision_model(), "temperature": 0, "max_tokens": 40, "stream": False,
+            c = provider.cloud("ground")
+            url = (c[0] if c else os.environ.get("SPEAKEASY_LLM_URL", DEFAULT_URL).rstrip("/")) + "/chat/completions"
+            gh = {"Content-Type": "application/json", **(c[1] if c else {})}
+            self.provider = "openrouter" if c else "local"
+            body = {"model": c[2] if c else vision_model(), "temperature": 0, "max_tokens": 40, "stream": False,
                     "messages": [{"role": "user", "content": [
                         {"type": "text", "text": 'Locate ' + re.sub(r"[\"{}]", "", text)[:120] + ' in the image. Answer only JSON {"bbox_2d":[x1,y1,x2,y2]} with coordinates 0-1000.'},
                         {"type": "image_url", "image_url": {"url": "data:image/png;base64," + b64}}]}]}
-            r = json.load(urllib.request.urlopen(urllib.request.Request(url, json.dumps(body).encode(), {"Content-Type": "application/json"}), timeout=20))
+            r = json.load(urllib.request.urlopen(urllib.request.Request(url, json.dumps(body).encode(), gh), timeout=20))
             m = re.search(r"\[\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)\s*\]", r["choices"][0]["message"]["content"] or "")
             if m:
                 v = [float(x) / 1000 for x in m.groups()]; w, h = clip[2] - clip[0], clip[3] - clip[1]
@@ -3030,6 +3067,12 @@ def main(argv=None):
         try: docmap.clean_tmp(tempfile.gettempdir())          # our own old downloads, every run (not only download runs)
         except OSError: pass
     load_config()
+    for purpose in ("llm", "ground"):                    # provider per purpose for the log (never the key or text)
+        prov, why = provider.status(purpose)
+        RUN_META[purpose + "_provider_configured"] = prov
+        if why: RUN_META[purpose + "_provider_note"] = why
+    if RUN_META.get("llm_provider_configured") == "openrouter" or RUN_META.get("ground_provider_configured") == "openrouter":
+        RUN_META["or_model"] = os.environ.get("SPEAKEASY_OR_MODEL") or provider.OR_DEFAULT_MODEL
     for legacy in ("/tmp/speakeasy_sel.png", "/tmp/speakeasy_win.png"):   # pre-prefix capture files
         if a.cmd in ("selection", "speak", "rewrite") and os.path.isfile(legacy) and not (a.cmd != "selection" and getattr(a, "image", None) and os.path.realpath(a.image) == os.path.realpath(legacy)):
             try: os.remove(legacy)

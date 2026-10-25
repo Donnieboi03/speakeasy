@@ -26,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var onboarding: NSWindow?
     var settings: NSWindow?
     var statsWin: NSWindow?
+    var cloudWin: NSWindow?
     let reader = Reader()
     let pill = Pill()
     let statsLine = NSMenuItem(title: "", action: nil, keyEquivalent: "")
@@ -48,6 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
         m.addItem(.separator())
         m.addItem(withTitle: "Permissions…", action: #selector(showOnboarding), keyEquivalent: "").target = self
+        m.addItem(withTitle: "Cloud (OpenRouter)…", action: #selector(showCloud), keyEquivalent: "").target = self
         m.addItem(withTitle: "Hotkey…", action: #selector(showSettings), keyEquivalent: "").target = self
         m.addItem(.separator())
         m.addItem(withTitle: "Check for Updates…", action: #selector(checkUpdates), keyEquivalent: "").target = self
@@ -56,6 +58,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         handOverFromHammerspoon()
         reader.onState = { [weak self] s in DispatchQueue.main.async { self?.pill.set(s) } }
         pill.model.onStop = { [weak self] in self?.reader.stop() }
+        pill.model.onCloud = { [weak self] in self?.showCloud() }
         pill.model.onArea = { [weak self] in self?.reader.stop(); self?.reader.startArea() }
         KeyboardShortcuts.onKeyUp(for: .readArea) { [weak self] in self?.reader.startArea() }
         KeyboardShortcuts.onKeyUp(for: .readSelection) { [weak self] in self?.reader.toggle() }
@@ -86,6 +89,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let b = reader.backendPath
         DispatchQueue.global().async { let s = StatsData.load(b); DispatchQueue.main.async { self.statsLine.title = s.menuLine } }
         for it in menu.items { if let k = it.representedObject as? String { it.state = Config.on(k) ? .on : .off } }
+    }
+    @objc func showCloud() {
+        let w = cloudWin ?? NSWindow(contentRect: NSRect(x: 0, y: 0, width: 480, height: 300), styleMask: [.titled, .closable], backing: .buffered, defer: false)
+        w.title = "Speakeasy cloud (OpenRouter)"; w.isReleasedWhenClosed = false
+        w.contentView = NSHostingView(rootView: CloudView(onChange: { [weak self] in self?.pill.model.cloud = Cloud.anyOn }))
+        if cloudWin == nil { w.center() }; cloudWin = w
+        NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
     }
     @objc func checkUpdates() { Updater.check() }
     @objc func read() { reader.toggle() }
