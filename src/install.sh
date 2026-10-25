@@ -11,7 +11,7 @@ cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$S
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then
     # stamp the build: git sha of the source repo when known, else a hash of tracker.swift
-    BUILD_ID="$(git -C "${SPEAKEASY_REPO:-$HOME/speakeasy-repo}" rev-parse --short HEAD 2>/dev/null || true)"
+    BUILD_ID="$(git -C "${SPEAKEASY_REPO:-$SRC/..}" rev-parse --short HEAD 2>/dev/null || true)"   # the repo install.sh runs from
     BUILD_ID="${BUILD_ID:-src}-$(shasum -a 256 "$SRC/tracker.swift" | cut -c1-8)"
     TSRC="$(mktemp -t speakeasy_track_src).swift"
     sed "s/^let BUILD = \"dev\"/let BUILD = \"$BUILD_ID\"/" "$SRC/tracker.swift" > "$TSRC"
