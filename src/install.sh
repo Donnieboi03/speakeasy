@@ -208,6 +208,9 @@ local function focusShow(e)
   local r = e.rect
   if type(r) ~= "table" or #r ~= 4 then return end
   focusShape = (e.shape == "ellipse") and "ellipse" or "rect"
+  -- speakeasy computed this box from the screen at hotkey time: carry the scrolling done since then
+  local so = speakeasyScrollOff or { 0, 0 }
+  r = { r[1] + so[1], r[2] + so[2], r[3], r[4] }
   local f = shapeFrame(r)
   local op = tonumber(e.opacity) or 0.22
   if not focusCanvas then
@@ -254,17 +257,99 @@ local function trackRead()
   if t.focus_pid ~= focusCur.pid or t.seq ~= focusCur.seq then return end
   if raw == trackKey then return end
   trackKey = raw
+  -- a scan whose screenshot predates the last scroll or tab switch is stale: the scroll prediction already moved the box
+  if tonumber(t.cap_ts) and tonumber(t.cap_ts) < (speakeasyLastMove or 0) then return end
   if t.visible == false then trackerHidden = true; focusCanvas:hide()
   elseif type(t.rect) == "table" and #t.rect == 4 then
     local r = t.rect
+    speakeasyScrollCalibrate(r)
     trackerHidden = false
     focusCanvas:frame(shapeFrame(r))
     if srcIsFront() then focusCanvas:show() end
   end
 end
+-- Real-time scroll following: a listen-only scroll tap shifts the box by the scroll delta at once (no screenshot needed);
+-- the scale (points of content per scroll point) is calibrated from the next recognition fit, which also corrects drift.
+speakeasyLastMove = 0
+local scrollK = { [true] = 1.0, [false] = 1.0 }   -- continuous (trackpad) / line (wheel) scale
+local scrollAcc = { dx = 0, dy = 0, cont = true } -- predicted shift since the last recognition fit
+local scrollStats = { n = 0, lagSum = 0, lagMax = 0, t0 = 0 }
+local function scrollFlush()
+  if scrollStats.n > 0 then
+    hslog("scroll-follow: %d events, lag scroll->box avg %.1f ms max %.1f ms, k=%.2f/%.2f", scrollStats.n,
+          scrollStats.lagSum / scrollStats.n, scrollStats.lagMax, scrollK[true], scrollK[false])
+  end
+  scrollStats = { n = 0, lagSum = 0, lagMax = 0, t0 = 0 }
+end
+function speakeasyScrollCalibrate(r)
+  if not focusCanvas then return end
+  local f = shapeFrame(r); local cur = focusCanvas:frame()
+  local pred = scrollAcc.dy
+  if math.abs(pred) >= 20 then
+    local actual = pred + (f.y - cur.y)                    -- what the content really moved
+    local k = scrollK[scrollAcc.cont] * actual / pred
+    if k > 0.2 and k < 5 then scrollK[scrollAcc.cont] = 0.5 * scrollK[scrollAcc.cont] + 0.5 * k end
+    hslog("scroll-follow: fit residual %.0f pt after %.0f pt predicted; k(%s)=%.2f", f.y - cur.y, pred,
+          scrollAcc.cont and "trackpad" or "wheel", scrollK[scrollAcc.cont])
+  end
+  scrollAcc.dx, scrollAcc.dy = 0, 0
+end
+local function overSource()
+  if not srcWinId or not srcIsFront() then return false end
+  local w = hs.window.get(srcWinId); if not w then return false end
+  local m = hs.mouse.absolutePosition(); local fr = w:frame()
+  return m.x >= fr.x and m.x <= fr.x + fr.w and m.y >= fr.y and m.y <= fr.y + fr.h
+end
+local P = hs.eventtap.event.properties
+if speakeasyScrollTap then speakeasyScrollTap:stop() end
+speakeasyScrollTap = hs.eventtap.new({ hs.eventtap.event.types.scrollWheel }, function(e)
+  if not focusCanvas or not focusCur or trackerHidden then return false end
+  if not overSource() then return false end
+  local cont = e:getProperty(P.scrollWheelEventIsContinuous) ~= 0
+  local dy = e:getProperty(P.scrollWheelEventPointDeltaAxis1) or 0
+  local dx = e:getProperty(P.scrollWheelEventPointDeltaAxis2) or 0
+  if dy == 0 and dx == 0 then return false end
+  local k = scrollK[cont]
+  local f = focusCanvas:frame()
+  focusCanvas:frame({ x = f.x + dx * k, y = f.y + dy * k, w = f.w, h = f.h })
+  scrollAcc.dy = scrollAcc.dy + dy * k; scrollAcc.dx = scrollAcc.dx + dx * k; scrollAcc.cont = cont
+  speakeasyScrollOff = speakeasyScrollOff or { 0, 0 }
+  speakeasyScrollOff[1] = speakeasyScrollOff[1] + dx * k; speakeasyScrollOff[2] = speakeasyScrollOff[2] + dy * k
+  speakeasyLastMove = hs.timer.secondsSinceEpoch()
+  -- lag: event timestamp (ns since boot) to the box having moved
+  local lag = (hs.timer.absoluteTime() - e:timestamp()) / 1e6
+  if lag >= 0 and lag < 5000 then
+    scrollStats.n = scrollStats.n + 1; scrollStats.lagSum = scrollStats.lagSum + lag
+    if lag > scrollStats.lagMax then scrollStats.lagMax = lag end
+  end
+  if speakeasyScrollFlushT then speakeasyScrollFlushT:stop() end
+  speakeasyScrollFlushT = hs.timer.doAfter(0.6, scrollFlush)
+  return false                                               -- listen only: the scroll goes through untouched
+end)
+speakeasyScrollTap:start()
+-- Tab switches inside the app (Cmd+1..9, Ctrl+Tab, Cmd+Shift+[ ], Cmd+Opt+arrows, Cmd+T/W): hide at once;
+-- the tracker shows the box again when the text is back on screen.
+if speakeasyKeyTap then speakeasyKeyTap:stop() end
+speakeasyKeyTap = hs.eventtap.new({ hs.eventtap.event.types.keyDown }, function(e)
+  if not focusCanvas or not focusCur or not srcIsFront() then return false end
+  local fl = e:getFlags(); local c = hs.keycodes.map[e:getKeyCode()]
+  local tab = (fl.cmd and not fl.alt and c and c:match("^%d$"))
+    or (fl.ctrl and c == "tab")
+    or (fl.cmd and fl.shift and (c == "[" or c == "]"))
+    or (fl.cmd and fl.alt and (c == "left" or c == "right"))
+    or (fl.cmd and (c == "t" or c == "w"))
+    or c == "pageup" or c == "pagedown" or c == "home" or c == "end"
+  if tab then
+    trackerHidden = true; focusCanvas:hide(); speakeasyLastMove = hs.timer.secondsSinceEpoch()
+    hslog("focus hidden on key %s%s", fl.cmd and "cmd+" or (fl.ctrl and "ctrl+" or ""), tostring(c))
+  end
+  return false
+end)
+speakeasyKeyTap:start()
 local function startTracker(win)
   if speakeasyTracker then pcall(function() speakeasyTracker:terminate() end); speakeasyTracker = nil end
   srcWinId = win and win:id() or nil
+  speakeasyScrollOff = { 0, 0 }
   srcPid = win and win:application() and win:application():pid() or nil
   if not TRACK_ON then hslog("tracker off (SPEAKEASY_TRACK)"); return end
   if not win then hslog("tracker not started: no focused window"); return end

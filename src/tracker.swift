@@ -365,6 +365,7 @@ struct Tracker {
                         cfg.showsCursor = false
                         if #available(macOS 14.0, *) { cfg.ignoreShadowsSingleWindow = true }
                         let c0 = now()
+                        out["cap_ts"] = c0                                      // the overlay drops scans older than the last scroll / tab switch
                         if let img = try? await SCScreenshotManager.captureImage(contentFilter: flt, configuration: cfg) {
                             capMs += (now() - c0) * 1000
                             let o0 = now()
