@@ -531,7 +531,8 @@ local function interactive(t0)
   end, { "-i", "-x", SHOT }):start()
 end
 
-hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
+if speakeasyHotkey then speakeasyHotkey:delete() end
+speakeasyHotkey = hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   os.remove("/tmp/speakeasy_sel.png"); os.remove("/tmp/speakeasy_win.png")   -- legacy capture files
   local pidf = os.getenv("HOME") .. "/.speakeasy/speak.pid"
   if hs.fs.attributes(pidf) then
@@ -583,6 +584,8 @@ hs.hotkey.bind({ "ctrl", "alt" }, "S", function()
   end
   run({ "selection" }, "none", nil, t0)
 end)
+-- The Speakeasy menu-bar app owns the hotkey once SPEAKEASY_HOTKEY=app is set in ~/.speakeasy/config.
+if cfg("SPEAKEASY_HOTKEY", "hammerspoon") == "app" and speakeasyHotkey then speakeasyHotkey:delete(); speakeasyHotkey = nil; hslog("hotkey handed to Speakeasy.app") end
 -- end speakeasy
 
     Hammerspoon needs Accessibility AND Screen Recording permission (System Settings > Privacy & Security).

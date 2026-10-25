@@ -13,6 +13,7 @@ import Foundation
 import AppKit
 import ScreenCaptureKit
 import Vision
+import PDFKit
 import ApplicationServices
 import Darwin
 
@@ -428,6 +429,28 @@ struct Tracker {
     static func run(_ a: [String: String]) async {
         // Offline check: --ocr-image file.png --find "text" [--frame x,y,w,h]
         // --ocr-lines file.png --frame x,y,w,h : recognised lines as JSON, boxes in frame coordinates (used for raster figures)
+        // --pdf-lines file.pdf : text lines per page with page-space boxes (top-left origin), via PDFKit (no PyMuPDF needed)
+        if let p = a["pdf-lines"] {
+            guard let doc = PDFDocument(url: URL(fileURLWithPath: p)) else { print("{\"error\":\"bad pdf\"}"); return }
+            var pages: [[String: Any]] = []
+            for i in 0..<doc.pageCount {
+                guard let pg = doc.page(at: i) else { continue }
+                let mb = pg.bounds(for: .mediaBox)
+                var lines: [[Any]] = []
+                if let sel = pg.selection(for: mb) {
+                    for l in sel.selectionsByLine() {
+                        let t = (l.string ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+                        if t.isEmpty { continue }
+                        let b = l.bounds(for: pg)
+                        let x0 = b.minX - mb.minX, y0 = mb.maxY - b.maxY
+                        lines.append([(x0 * 10).rounded() / 10, (y0 * 10).rounded() / 10, ((x0 + b.width) * 10).rounded() / 10, ((y0 + b.height) * 10).rounded() / 10, t])
+                    }
+                }
+                pages.append(["n": i + 1, "w": Double(mb.width), "h": Double(mb.height), "lines": lines, "figures": [Any](), "figs_done": true])
+            }
+            if let d = try? JSONSerialization.data(withJSONObject: ["kind": "pdf", "pages": pages, "engine": "pdfkit"]), let s = String(data: d, encoding: .utf8) { print(s) }
+            return
+        }
         if let p = a["ocr-lines"] {
             guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: p) as CFURL, nil),
                   let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { print("[]"); return }

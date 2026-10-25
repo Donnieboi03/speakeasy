@@ -269,7 +269,18 @@ def load(path, timeout=30, sel_text=""):
         doc = parse_md(path)
     else:
         py = venv_python()
-        if not py: return None, "no-pymupdf"
+        if not py or os.environ.get("SPEAKEASY_PDF_ENGINE", "auto").lower() == "pdfkit":
+            # PDFKit (macOS, via the tracker binary): text lines for every page; figure boxes still need PyMuPDF
+            trk = tracker_bin()
+            if not os.path.exists(trk): return None, "no-pdf-engine"
+            try:
+                r = subprocess.run([trk, "--pdf-lines", path], capture_output=True, timeout=timeout)
+                doc = json.loads(r.stdout.decode() or "{}")
+            except Exception as e:
+                return None, f"pdfkit-failed: {type(e).__name__}"
+            if not doc.get("pages"): return None, "pdfkit-failed"
+            json.dump(doc, open(c, "w"))
+            return doc, "miss-pdfkit"
         tmp = c + f".{os.getpid()}.tmp"
         selp = tmp + ".sel"
         with open(selp, "w") as f: f.write(sel_text or "")
