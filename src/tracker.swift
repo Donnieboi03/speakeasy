@@ -38,7 +38,7 @@ func appendLine(_ obj: [String: Any], _ path: String) {
 }
 let STOP: Set<String> = ["the", "and", "for", "are", "was", "with", "this", "that", "from", "has", "its", "of", "to", "in", "on", "at", "is", "a", "an", "or", "by"]
 func tokens(_ s: String) -> [String] {
-    let low = s.lowercased()
+    let low = s.precomposedStringWithCompatibilityMapping.lowercased()   // NFKC: PDF ligatures (fi, fl) match OCR text
     var out: [String] = []
     var cur = ""
     for ch in low.unicodeScalars {
@@ -526,7 +526,9 @@ struct OLine { let text: String; let toks: Set<String>; let box: CGRect }   // b
 
 // Document-aware focus: speakeasy sends a target in PDF page space plus text anchors (page lines with their page rects).
 // Match anchors to recognised lines, fit page->screen (uniform scale + offset), map the target (exact line / figure / panel).
+var gDocDiag: [String: Int] = [:]
 func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CGRect, Int, Double)? {
+    gDocDiag = [:]
     guard let tg = doc["target"] as? [Double], tg.count == 4, let anc = doc["anchors"] as? [[Any]] else { return nil }
     var P: [(Double, Double)] = [], S: [(Double, Double)] = []
     for a in anc {
@@ -537,7 +539,7 @@ func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CG
         let cands = lines.filter { l in
             let inter = Double(l.toks.intersection(at).count)
             return inter / Double(max(1, at.count)) >= 0.75 && inter / Double(max(1, l.toks.count)) >= 0.6 }
-        if cands.count != 1 { continue }
+        if cands.count != 1 { gDocDiag[cands.isEmpty ? "unmatched" : "ambiguous", default: 0] += 1; continue }
         let b = cands[0].box
         // a line cut by the window/capture edge starts mid-word: its left edge is not the page line's left edge
         if let f = frame, b.minX <= f.minX + 3 || b.maxX >= f.maxX - 3 { continue }
@@ -865,7 +867,7 @@ struct Tracker {
                                    rf.intersection(r).isNull { ok = false }
                                 if ok { hit = vis; method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
                                 else { out["doc_rejected"] = true }
-                            }
+                            } else if ev["doc"] != nil { out["doc_diag"] = gDocDiag }
                             let dk = (ev["doc"] as? [String: Any])?["kind"] as? String
                             let isFig = dk != nil && dk != "line"
                             if hit == nil && isFig {
@@ -884,6 +886,7 @@ struct Tracker {
                             }
                             if continueFig {} else {
                             if hit == nil { hit = refind(lines, target: target, near: lastBox) }
+                            if let h = hit, h.width < 24 || h.height < 7 { hit = nil; out["tiny_hit"] = true }   // a stray word, not the sentence
                             if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
                                 lastAccurate = tick
                                 lines = recognise(img, frame: frame, accurate: true)
@@ -945,6 +948,7 @@ struct Tracker {
                 if let m = out["method"] { fr["method"] = m }
                 if let r = out["rect"] { fr["rect"] = r }
                 if let r = out["reason"] { fr["reason"] = r }
+                for k in ["doc_diag", "doc_rejected", "anchors", "rms"] { if let v = out[k] { fr[k] = v } }
                 if let r = out["front_owner"] { fr["front_owner"] = r; fr["front_id"] = out["front_id"] ?? 0 }
                 if scanned, let w = winFrame { fr["win"] = [Int(w.minX), Int(w.minY), Int(w.width), Int(w.height)] }
                 appendLine(fr, home + "/logs/tracker.jsonl")

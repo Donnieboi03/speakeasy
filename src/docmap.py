@@ -31,7 +31,9 @@ def _key(path):
     return hashlib.sha256(f"{os.path.realpath(path)}|{st.st_size}|{int(st.st_mtime)}".encode()).hexdigest()[:20]
 
 def _toks(s):
-    return [t for t in re.findall(r"[a-z0-9]+", (s or "").lower()) if len(t) > 1]
+    import unicodedata
+    s = unicodedata.normalize("NFKC", s or "")            # PDF ligatures: 'classi\ufb01cation' -> 'classification'
+    return [t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) > 1]
 
 # ---------------- PDF (PyMuPDF; runs in the venv) ----------------
 def _union(rs):

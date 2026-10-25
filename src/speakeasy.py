@@ -867,6 +867,13 @@ class Focus:
         r = getattr(self, "_sr", None)
         if r and out:                                                   # stay inside the selected block (other columns share words)
             out = [i for i in out if docmap._overlap(d["page"]["lines"][i][:4], r)] or out
+        if len(out) > 1:                                    # keep the densest run: stray matches elsewhere on the page made page-tall boxes
+            runs, cur = [], [out[0]]
+            for i in out[1:]:
+                if i - cur[-1] <= 3: cur.append(i)
+                else: runs.append(cur); cur = [i]
+            runs.append(cur)
+            out = max(runs, key=len)
         return out
     def _table_for_selection(self, d):
         if hasattr(self, "_tb"): return self._tb
