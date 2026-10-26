@@ -14,6 +14,8 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 | `llm_client.py` | OpenAI-compatible chat calls (local Ollama or OpenRouter), streaming, hard deadlines, model names |
 | `tts.py` | Speech: `say`, a command template or the Kokoro server; sentence batching, streamed playback, `stop` |
 | `focus.py` | Maps each spoken sentence to source lines / figure parts and writes focus events (`focus.json`, `focus.jsonl`) |
+| `sentence_map.py` | The selection's source sentences (ids, char spans, screen and page line rects) built before speech; forward-only alignment of each spoken chunk to its source span |
+| `textfold.py` | The shared text fold (match key with offsets, fold and match tokens) every text comparison uses; `tracker.swift` carries the same steps |
 | `document.py` | Reads the source PDF / Markdown in the background, figure labels for the prompt, PDF text for Read area |
 | `grounding.py` | Vision-model grounding of a named figure part on the figure crop (`ground_prompt`, `parse_ground_box`) |
 | `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv) |

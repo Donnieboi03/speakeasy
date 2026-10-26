@@ -1,0 +1,18 @@
+[
+ {"input": "classi\ufb01cation", "key": "classification", "tokens": ["classification"], "match_tokens": ["classification"]},
+ {"input": "classi-\nfication", "key": "classification", "tokens": ["classification"], "match_tokens": ["classification"]},
+ {"input": "state-of-the-\nart", "key": "stateoftheart", "tokens": ["state", "of", "theart"], "match_tokens": ["state", "of", "theart"]},
+ {"input": "Line-\nBased", "key": "linebased", "tokens": ["line", "based"], "match_tokens": ["line", "based"]},
+ {"input": "co\u00adoperate", "key": "cooperate", "tokens": ["cooperate"], "match_tokens": ["cooperate"]},
+ {"input": "Twenty-five per cent", "key": "25percent", "tokens": ["25", "percent"], "match_tokens": ["25", "percent"]},
+ {"input": "25 %", "key": "25percent", "tokens": ["25", "percent"], "match_tokens": ["25", "percent"]},
+ {"input": "Fig. 5 | Pipeline", "key": "fig5pipeline", "tokens": ["fig", "5", "pipeline"], "match_tokens": ["fig", "5", "pipeline"]},
+ {"input": "\uff21\uff22\uff23\uff11\uff12", "key": "abc12", "tokens": ["abc12"], "match_tokens": ["abc12"]},
+ {"input": "na\u00efve caf\u00e9", "key": "na\u00efvecaf\u00e9", "tokens": ["na\u00efve", "caf\u00e9"], "match_tokens": ["na\u00efve", "caf\u00e9"]},
+ {"input": "\u201cQuoted\u201d\u2014text", "key": "quotedtext", "tokens": ["quoted", "text"], "match_tokens": ["quoted", "text"]},
+ {"input": "one of the 3 rows", "key": "1ofthe3rows", "tokens": ["1", "of", "the", "3", "rows"], "match_tokens": ["1", "of", "the", "3", "rows"]},
+ {"input": "2.5 kHz", "key": "25khz", "tokens": ["2", "5", "khz"], "match_tokens": ["2", "5", "khz"]},
+ {"input": "a 3 of", "key": "a3of", "tokens": ["a", "3", "of"], "match_tokens": ["3", "of"]},
+ {"input": "Panel (b) at x = 7", "key": "panelbatx7", "tokens": ["panel", "b", "at", "x", "7"], "match_tokens": ["panel", "at", "7"]},
+ {"input": "\u2060\ufeff", "key": "", "tokens": [], "match_tokens": []}
+]

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """speakeasy: rewrite selected text into listenable prose and speak it (entry point: CLI, text cleanup, run log)."""
-import argparse, json, os, re, signal, subprocess, sys, tempfile, threading, time
+import argparse, functools, json, os, re, signal, subprocess, sys, tempfile, threading, time
 
 sys.path.insert(0, os.path.dirname(os.path.realpath(__file__)))
 import provider
@@ -14,6 +14,8 @@ from tts import NOT_ABBREVIATION, sentences, prewarm_tts, speak, Speaker, stop, 
 from grounding import GROUNDER, ground_mode_note, parse_ground_box, ground_prompt
 from document import DocJob, doc_context_text, area_pdf_text
 from focus import Focus, TAG_RX, tagging, numbered, parse_tag, strip_tags, clear_focus_file
+from textfold import fold_key
+from sentence_map import SelectionSpan
 
 __all__ = ["main", "parse_ground_box", "ground_prompt"]
 CHUNK = 6000
@@ -141,9 +143,21 @@ def strip_openers(x, rec=None):
     if rec is not None: rec["openers_removed"] = (rec.get("openers_removed") or 0) + 1
     return rest[:1].upper() + rest[1:]
 
+_source_key = functools.lru_cache(maxsize=8)(fold_key)
+
+def from_source(sentence, source):
+    """The sentence is the selection's own text (its fold key occurs in the selection's key): cleanup keeps it verbatim."""
+    k = fold_key(sentence)
+    return bool(k) and k in _source_key(source or "")
+
+def verbatim_clean(seg):
+    """scrub for source text read verbatim: only characters the fold key ignores change (markdown marks, pipes, dashes)."""
+    return re.sub(r"[ \t]+", " ", re.sub(r"-{2,}|={2,}|\*\*|```|[|#`*]", " ", seg)).strip()
+
 def demeta_text(text, rec, source=""):
     out, total = [], 0
     for x in _sent_split(text):
+        if from_source(x, source): out.append(x); continue
         if rec.get("mode") == "read-through": x = strip_openers(x, rec)
         if not x: continue
         if echoes_prompt(x, source):
@@ -195,9 +209,11 @@ class Releaser:
         self.buf += d
         if not getattr(self, "_op_done", False) and self.rec.get("mode") == "read-through":
             # strip a 'This passage describes ...' opener on the whole buffer before the first chunk is cut
-            if len(self.buf) < 70 and not _SENT_END.search(self.buf): return
+            first_end = _SENT_END.search(self.buf)
+            if len(self.buf) < 70 and not first_end: return
             self._op_done = True
-            self.buf = strip_openers(self.buf, self.rec)
+            if not from_source(self.buf[:first_end.end()] if first_end else self.buf, self.inp):
+                self.buf = strip_openers(self.buf, self.rec)
         while True:
             m = _SENT_END.search(self.buf)
             cut = m.end() if m else None
@@ -224,7 +240,7 @@ class Releaser:
         elif getattr(self, "_sent_ended", True):
             self.cur_tag = None                # a new sentence without its own tag does not inherit the last one
         self._sent_ended = bool(re.search(r"[.!?][\"')\]]*\s*$", seg))   # a clause cut keeps the sentence's tag
-        sseg = scrub(seg)
+        sseg = verbatim_clean(seg) if from_source(seg, self.inp) else scrub(seg)
         if not sseg.strip():
             return
         low = sseg.lower()
@@ -1282,27 +1298,34 @@ def rewrite(text, rec, keep_error=False):
                                else _v_kind(v, getattr(v, "framing", None) or text)) for k, v in segs if k != "plain"]
     parts, streamed_any = [], False
     plain_all = "\n".join("\n".join(v) for k, v in segs if k == "plain")
+    smap = state.FOCUS.smap if state.FOCUS is not None else None
+    span_from = 0                                      # selection char where the next block sentence is looked up
     for k, v in segs:
+        from_lines = k != "plain"                      # sentences built from selection lines carry their selection span
         if k == "plain":
             seg = "\n".join(v).strip()
             if not seg: continue
             if len(seg.split()) <= 15:                 # short framing ("Here's a draft you could send:"): say it as is
                 o = sanitize(_smooth_line(re.sub(r"\s*\n\s*", " ", seg)))
                 if o and not re.search(r"[.!?:]$", o): o += "."
-                outs = [o] if o else []
+                outs = [o] if o else []; from_lines = True
             else:
                 rec.pop("streamed", None)
                 o = _rewrite(seg, rec, keep_error=True)
                 if state.SINK is not None and rec.get("streamed"):
                     streamed_any = True; parts.append(o); continue
-                outs = list(sentences(o)) if o else []
+                outs = (_sent_split(o) if state.FOCUS is not None else list(sentences(o))) if o else []
         else:
             outs = verbatim_speech(k, v, plain_all)
-        for x in outs:
+        for n, x in enumerate(outs):
             if state.SINK is not None and not state.STOP.is_set():
                 if rec.get("first_sentence_ms") is None and rec.get("_t0"):
                     rec["first_sentence_ms"] = int((time.time() - rec["_t0"]) * 1000)
-                state.SINK(x)
+                span = None
+                if smap is not None and from_lines:            # a block's first sentence is its generated framing: no span
+                    span = SelectionSpan() if k != "plain" and n == 0 else smap.find_span(x, span_from)
+                if span is not None and span.start is not None: span_from = span.end
+                state.SINK(x, span)
         parts.append(" ".join(outs))
     if state.SINK is not None:
         rec["streamed"] = True
@@ -1553,14 +1576,14 @@ def main(argv=None):
                 if cm == "area": state.FOCUS.area_clip = fr
             except ValueError:
                 rec["focus_fallback"] = "bad-rect"
-    if streaming:
+    if streaming or state.FOCUS is not None:      # SPEAKEASY_STREAM=0 with focus: the output is spoken sentence by sentence
         speaker = Speaker(args.rate, args.voice, timing, t0, dry=bool(args.dry_run))
         def _term(*_):
             state.STOP.set(); speaker.kill()
             if state.FOCUS is not None: state.FOCUS.clear()
         signal.signal(signal.SIGTERM, _term)
-        state.SINK = speaker.put
-    elif args.cmd in ("speak", "selection"):
+        if streaming: state.SINK = speaker.put
+    if not streaming and args.cmd in ("speak", "selection"):
         rec["stream_note"] = "SPEAKEASY_STREAM=0"
     tmp_crop = None
     if img and args.capture_rect and os.path.exists(img):
@@ -1630,7 +1653,7 @@ def main(argv=None):
     state.SINK = None
     if speaker is not None:
         if not rec.get("streamed") and out and not state.STOP.is_set():
-            for sent in sentences(out):
+            for sent in (_sent_split(out) if state.FOCUS is not None else sentences(out)):   # focus: one sentence per chunk
                 speaker.put(sent)
         speaker.close(); speaker.wait()
     if state.FOCUS is not None:

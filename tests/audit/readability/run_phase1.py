@@ -48,6 +48,15 @@ P2_RUN = {"first_focus_ms", "doc_ready_ms", "doc_parse", "ground_miss_reasons"}
 P2_MAP = {"sent", "score", "runner_up"}          # always present on map records
 P2_SHOW = {"sent"}                                # always present on show records (and hold clears)
 P2_DOC = {"target_src", "split_from"}             # inside show doc
+# Phase 3 (docs/contracts/phase3-sentence-ids.md F): exactly these new keys are allowed (present only on runs with a sentence map).
+P3_RUN = {"sentence_map"}
+P3_MAP = {"sentence_id", "sentence_ids"}
+P3_SHOW = {"sentence_id", "match_score", "runner_up", "rects"}
+ALIGN_METHODS = {"align", "align-fuzzy", "span", "hold", "block"}   # Phase 3 amendment 3: sentence-map assignment methods
+P2_MATCHER = {"overlap", "progress", "doc-line"}
+def p3_method(cur, base):
+    """A Phase 2 matcher method replaced by a Phase 3 assignment method counts as unchanged."""
+    return cur == base or (cur in ALIGN_METHODS and base in P2_MATCHER)
 P2_LABEL_RE = re.compile(r"^(Figure|Table) \d+[a-h]?( row \d+)?( \(grounded\))?$")
 def p2_redact(label):
     """Phase 2 F: the default-mode form of a label (part text after ': ' dropped; null when it cannot be put in the allowed form)."""
@@ -72,9 +81,13 @@ def fig_run(bin_, mock, n=2, clip=None, watch=True, **kw):
             if w: w.__exit__()
         out["rc"].append(rc); out["stderr"].append(se)
         if w: out["ps"] += w.hits; out["live"] += w.focus
+        out.setdefault("n_focus", []).append(len(focus_log(h))); out.setdefault("n_posts", []).append(len([r for r in mock.reqs() if r.get("image") and r["path"].rstrip("/").endswith("chat/completions")]))
     time.sleep(1.0)  # let detached helpers (if any) show up in argv logs
     out["runs"] = [flat(x) for x in runs(h)]; out["focus"] = focus_log(h); out["argv"] = doc_argv(h); out["reqs"] = mock.reqs()
     out["ground_posts"] = [r for r in out["reqs"] if r.get("image") and r["path"].rstrip("/").endswith("chat/completions")]
+    # last (warm) run only: phase 3 amendment 6 lets a late document add figure cues / grounding to later shows of a cold run
+    a = out["n_focus"][-2] if n > 1 else 0; out["focus_warm"] = out["focus"][a:]
+    a = out["n_posts"][-2] if n > 1 else 0; out["ground_posts_warm"] = out["ground_posts"][a:]
     return out
 def ground_spawns(o):
     hits = [a for a in o["argv"] if any("ground.py" in x for x in a)]
@@ -143,7 +156,7 @@ def global_checks():
             (b, c) = out; tag = f"G_same_{cname}_{iname}"
             add(f"{tag}_stdout_stderr_rc", b[:3] == c[:3], "" if b[:3] == c[:3] else f"base={b[:3]!r:.200} cur={c[:3]!r:.200}")
             extra = set(c[3]) - set(b[3]); missing = set(b[3]) - set(c[3])
-            add(f"{tag}_runs_keyset", not missing and not (extra - {"ground_mode_note", "ground_provider", "ground_box_convention"} - P2_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
+            add(f"{tag}_runs_keyset", not missing and not (extra - {"ground_mode_note", "ground_provider", "ground_box_convention"} - P2_RUN - P3_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
                 {"missing": sorted(missing), "extra": sorted(extra)})
             diff = {k: (b[4][k], c[4][k]) for k in STABLE if b[4][k] != c[4][k]}
             add(f"{tag}_runs_stable_values", not diff, diff)
@@ -303,16 +316,18 @@ def florence():
                 lr = o["runs"][-1] if o["runs"] else {}
                 add(f"B_D_{nm}_ground_provider_local", (lr.get("ground_provider") == "local") if gp else ("ground_provider" not in lr), {k: lr.get(k) for k in ("ground_provider", "ground_box_convention", "ground_provider_configured")})
                 add(f"B_D_{nm}_ground_box_convention_xy", (lr.get("ground_box_convention") == "xy") if gp else ("ground_box_convention" not in lr), lr.get("ground_box_convention"))
-        n_auto = len(O["auto"]["ground_posts"])
+        # warm runs only: cold-run grounding counts vary 0..chunks with when the document lands (phase 3 amendment 6)
+        n_auto = len(O["auto"]["ground_posts_warm"])
         for nm in ("unset", "AUTO_upper", "empty", "local", "florence", "vlm", "Florence_mixed", "long_unknown"):
-            add(f"B_{nm}_grounding_same_as_auto", len(O[nm]["ground_posts"]) == n_auto, {"auto": n_auto, nm: len(O[nm]["ground_posts"])})
+            add(f"B_{nm}_grounding_same_as_auto", len(O[nm]["ground_posts_warm"]) == n_auto, {"auto": n_auto, nm: len(O[nm]["ground_posts_warm"])})
         bad = {k: sorted(v) for k, v in methods.items() if k.startswith("ground") and k not in ("ground-vlm", "ground-miss")}
         add("B_focus_methods_only_ground_vlm_or_miss", not bad, bad)
         # legacy env vars have no effect
         for nm, kw in (("SPEAKEASY_FLORENCE_on", {"SPEAKEASY_FLORENCE": "on"}), ("SPEAKEASY_FLORENCE_1", {"SPEAKEASY_FLORENCE": "1"}), ("SPEAKEASY_GROUND_MODEL_set", {"SPEAKEASY_GROUND_MODEL": "microsoft/Florence-2-large"})):
             o = fig_run(CUR, m, SPEAKEASY_GROUND="auto", **kw); g, ps = ground_spawns(o)
             add(f"B_{nm}_no_ground_py", not g and not ps, (g[:1], ps[:1]))
-            add(f"B_{nm}_no_effect_on_grounding", len(o["ground_posts"]) == n_auto and all(r["model"] == "mock-vision" for r in o["ground_posts"]), {"auto": n_auto, "got": [(r["model"]) for r in o["ground_posts"]]})
+            # warm run only (phase 3 amendment 6: cold-run grounding count depends on when the document lands)
+            add(f"B_{nm}_no_effect_on_grounding", len(o["ground_posts_warm"]) == n_auto and all(r["model"] == "mock-vision" for r in o["ground_posts"]), {"auto": n_auto, "got": [(r["model"]) for r in o["ground_posts_warm"]]})
             add(f"B_{nm}_no_ground_mode_note", not any("ground_mode_note" in r for r in o["runs"]), "")
         # config-file route for an unknown value and for SPEAKEASY_FLORENCE
         h = mkhome("cfg"); open(os.path.join(h, "config"), "w").write("SPEAKEASY_GROUND=florence\nSPEAKEASY_FLORENCE=on\n")
@@ -395,6 +410,8 @@ def hammerspoon():
     if not shutil.which("swift"): skip("C_tracker_headless", "no swift toolchain"); return
     T = os.path.join(TMPROOT, "trk"); pkg = os.path.join(T, "pkg"); os.makedirs(T)
     shutil.copytree(os.path.join(REPO, "tracker"), pkg, symlinks=False, ignore=shutil.ignore_patterns(".build"))
+    os.makedirs(os.path.join(T, "tests"), exist_ok=True)
+    for f in glob.glob(os.path.join(REPO, "tests", "*.json")): shutil.copy(f, os.path.join(T, "tests"))
     ts = os.path.join(pkg, "Sources", "speakeasy-track", "tracker.swift")
     if os.path.lexists(ts): os.remove(ts)
     shutil.copy(os.path.join(SRC, "tracker.swift"), ts)
@@ -451,7 +468,8 @@ def dead_code():
         add(f"D_removed_{name}", not any(re.search(rf"^\s*{name}\s*=", t, re.M) for t in allsrc.values()), "")
     add("D_removed_used_say", not any("used_say" in t for t in allsrc.values()), "")
     add("D_removed_if_False", not any(re.search(r"^\s*if False\b", t, re.M) for t in allsrc.values()), "")
-    add("D_kept_NUMW", any(re.search(r"\b_NUMW\b", t) for t in allsrc.values()), "")
+    # widened (Phase 3 contract A step 5): the unused _NUMW table is replaced by the shared fold's number-word table
+    add("D_kept_NUMW", any(re.search(r"\b_NUMW\b|\bNUMBER_WORD_RX\b", t) for t in allsrc.values()), "")
     # superlative note wording (default vs text logging) against the baseline note
     TBL = "| Region | Zorblax latency (ms) |\n|---|---|\n| Quintessa | 180 |\n| Mirevolt | 35 |\n| Plumbrine | 90 |"
     ANS = "Mirevolt has the highest zorblax latency at 35 ms. Quintessa is at 180 ms and Plumbrine at 90 ms."
@@ -535,13 +553,15 @@ def privacy():
         bs, bm = keys(O["base"]["F"], "show"), keys(O["base"]["F"], "map")
         for nm, drop, addk in (("off", {"expires", "border", "ref_src", "text", "src"}, {"text_len", "text_hash", "src_n", "src_hash"}), ("on", {"expires", "border", "ref_src"}, {"text_len", "text_hash", "src_n", "src_hash"})):
             ws = (bs - drop) | addk | P2_SHOW; cs = keys(O[nm]["F"], "show")
-            add(f"E_{nm}_show_keyset_vs_baseline", (ws ^ cs) <= TOL, {"missing": sorted(ws - cs), "extra": sorted(cs - ws)})
+            add(f"E_{nm}_show_keyset_vs_baseline", ((ws ^ cs) - (cs & P3_SHOW)) <= TOL, {"missing": sorted(ws - cs), "extra": sorted(cs - ws)})
             wm = (bm - ({"text"} if nm == "off" else set())) | {"text_len", "text_hash"} | P2_MAP; cm = keys(O[nm]["F"], "map")
-            add(f"E_{nm}_map_keyset_vs_baseline", wm == cm, {"missing": sorted(wm - cm), "extra": sorted(cm - wm)})
+            add(f"E_{nm}_map_keyset_vs_baseline", wm <= cm and (cm - wm) <= P3_MAP, {"missing": sorted(wm - cm), "extra": sorted(cm - wm)})
             cnt = lambda F: {k: len(v) for k, v in by_state(F, lambda x: 1).items()}
             add(f"E_{nm}_same_event_counts_as_baseline", cnt(O[nm]["F"]) == cnt(O["base"]["F"]), (cnt(O[nm]["F"]), cnt(O["base"]["F"])))
         # on-mode text equals baseline text (unchanged values when text logging is on)
-        tx = lambda F: by_state(F, lambda x: (x.get("text"), x.get("src"), x.get("lines"), x.get("method"), x.get("range")))
+        tx = lambda F: by_state(F, lambda x: (x.get("text"), x.get("src"), x.get("lines"), x.get("range")))
+        mt = lambda F: [x.get("method") for x in F if x.get("state") == "map"]
+        add("E_on_map_methods_equal_baseline_or_phase3_assignment", len(mt(O["on"]["F"])) == len(mt(O["base"]["F"])) and all(p3_method(c, b) for c, b in zip(mt(O["on"]["F"]), mt(O["base"]["F"]))), (mt(O["on"]["F"]), mt(O["base"]["F"])))
         add("E_on_texts_equal_baseline", tx(O["on"]["F"]) == tx(O["base"]["F"]), "" if tx(O["on"]["F"]) == tx(O["base"]["F"]) else (tx(O["on"]["F"])["show"][:2], tx(O["base"]["F"])["show"][:2]))
         # PDF figure run: anchors, caption text, doc label; live file keeps src + full anchors
         mf = Mock(MOCK_TEXT=FIG_ANSWER, MOCK_GROUND=GROUND_BOX)
@@ -550,17 +570,19 @@ def privacy():
         finally: mf.stop()
         def anchors(F): return [x["doc"].get("anchors") for x in F if x.get("state") == "show" and isinstance(x.get("doc"), dict) and x["doc"].get("anchors")]
         ab, ao, an = anchors(P["base"]["focus"]), anchors(P["off"]["focus"]), anchors(P["on"]["focus"])
+        # order/count/label comparisons use the warm run: a cold run's show count depends on when the document lands (phase 3 amendment 6)
+        abw, aow, anw = anchors(P["base"]["focus_warm"]), anchors(P["off"]["focus_warm"]), anchors(P["on"]["focus_warm"])
         add("E_pdf_anchors_present", ab and ao and an, (len(ab), len(ao), len(an)))
         add("E_pdf_default_anchors_are_4_number_boxes", ao and all(all(isinstance(a, list) and len(a) == 4 and all(isinstance(v, (int, float)) for v in a) for a in al) for al in ao), ao[:1])
-        add("E_pdf_default_anchors_same_order_count_as_baseline", [[a[:4] for a in al] for al in ab] == ao, (ab[:1], ao[:1]))
-        add("E_pdf_logtext_anchors_exactly_baseline", an == ab, (an[:1], ab[:1]))
+        add("E_pdf_default_anchors_same_order_count_as_baseline", abw and [[a[:4] for a in al] for al in abw] == aow, (len(abw), len(aow), abw[:1], aow[:1]))
+        add("E_pdf_logtext_anchors_exactly_baseline", abw and anw == abw, (len(abw), len(anw), anw[:1], abw[:1]))
         hits = {f: sentinel_hits(t) for f, t in L.all_text_under(os.path.join(P["off"]["home"], "logs")).items() if sentinel_hits(t)}
         add("E_pdf_default_no_caption_or_src_text_in_logs", not hits, hits)
         labs = lambda F: [x["doc"].get("label") for x in F if x.get("state") == "show" and isinstance(x.get("doc"), dict)]
         # Phase 2 F: default-mode labels are the redacted form of the baseline label; with SPEAKEASY_LOG_TEXT=1 they are unchanged
-        add("E_pdf_doc_label_default_is_redacted_baseline", labs(P["off"]["focus"]) == [p2_redact(l) for l in labs(P["base"]["focus"])] and labs(P["off"]["focus"]), (labs(P["off"]["focus"]), labs(P["base"]["focus"])))
+        add("E_pdf_doc_label_default_is_redacted_baseline", labs(P["off"]["focus_warm"]) == [p2_redact(l) for l in labs(P["base"]["focus_warm"])] and labs(P["off"]["focus_warm"]), (labs(P["off"]["focus_warm"]), labs(P["base"]["focus_warm"])))
         add("E_pdf_doc_label_default_matches_F_pattern", all(l is None or (isinstance(l, str) and P2_LABEL_RE.match(l)) for l in labs(P["off"]["focus"]) + [((s.get("doc") or {}).get("label")) for s in P["off"]["live"] if s.get("state") == "show"]), labs(P["off"]["focus"])[:4])
-        add("E_pdf_doc_label_logtext_unchanged", labs(P["on"]["focus"]) == labs(P["base"]["focus"]) and labs(P["on"]["focus"]), (labs(P["on"]["focus"]), labs(P["base"]["focus"])))
+        add("E_pdf_doc_label_logtext_unchanged", labs(P["on"]["focus_warm"]) == labs(P["base"]["focus_warm"]) and labs(P["on"]["focus_warm"]), (labs(P["on"]["focus_warm"]), labs(P["base"]["focus_warm"])))
         livesh = [s for s in P["off"]["live"] if s.get("state") == "show"]
         add("E_pdf_live_file_has_src_and_full_anchors", livesh and all(s.get("src") for s in livesh) and all(len(a) == 5 and isinstance(a[4], str) for s in livesh for a in (s.get("doc") or {}).get("anchors") or []) and any((s.get("doc") or {}).get("anchors") for s in livesh), [s.get("doc", {}).get("anchors", [])[:1] for s in livesh][:1])
         add("E_pdf_live_file_no_text_either_mode", not any("text" in s for s in P["off"]["live"] + P["on"]["live"]), "")
@@ -568,11 +590,11 @@ def privacy():
         bk = set().union(*[set(x) for x in P["base"]["focus"] if x.get("state") == "show"] or [set()]); ck = set().union(*[set(x) for x in P["off"]["focus"] if x.get("state") == "show"] or [set()])
         ws = (bk - {"expires", "border", "ref_src", "text", "src"}) | {"text_len", "text_hash", "src_n", "src_hash"}
         ws |= P2_SHOW
-        add("E_pdf_show_keyset_vs_baseline", (ws ^ ck) <= {"hold", "late_fit"}, {"missing": sorted(ws - ck), "extra": sorted(ck - ws)})
+        add("E_pdf_show_keyset_vs_baseline", ((ws ^ ck) - (ck & P3_SHOW)) <= {"hold", "late_fit"}, {"missing": sorted(ws - ck), "extra": sorted(ck - ws)})
         dk = lambda o: set().union(*[set(x["doc"]) for x in o["focus"] if x.get("state") == "show" and isinstance(x.get("doc"), dict)] or [set()])
         add("E_pdf_show_doc_keyset_vs_baseline", not (dk(P["base"]) - dk(P["off"])) and not (dk(P["off"]) - dk(P["base"]) - P2_DOC), {"missing": sorted(dk(P["base"]) - dk(P["off"])), "extra": sorted(dk(P["off"]) - dk(P["base"]) - P2_DOC)})
         rk = lambda o: set(o["runs"][-1]) if o["runs"] else set()
-        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN)})
+        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN)})
     finally: m.stop()
     # dry-run: never writes the live focus file
     m = Mock(MOCK_TEXT=SENT_ANSWER)
@@ -692,9 +714,13 @@ def renames():
     code2 = r'''
 import sys, json; sys.path.insert(0, sys.argv[1]); import docmap
 S = ["Figure 4b shows the WANDmini.", "Fig. 5 | Drowsiness Detector", "The drowsiness score in Figure 4b climbs steadily after minute 30.", "", "(a) Alpha power by condition."]
-print(json.dumps([repr(docmap._toks(s)) for s in S]))'''
+print(json.dumps([docmap._toks(s) for s in S]))'''
     r = [subprocess.run([PY3, "-B", "-c", code2, root], capture_output=True, text=True, env=env_for(mkhome("g")), timeout=60) for root in (os.path.join(BASE, "src"), SRC)]
-    add("G_docmap_toks_identical", r[0].returncode == 0 and (r[0].stdout, r[0].returncode) == (r[1].stdout, r[1].returncode), r[1].stderr[-160:])
+    # widened (Phase 3 amendment 1): match tokens now keep single digits; otherwise _toks must equal the baseline's
+    try: t0, t1 = json.loads(r[0].stdout), json.loads(r[1].stdout)
+    except ValueError: t0 = t1 = None
+    same = t0 is not None and t1 is not None and [[t for t in x if not (len(t) == 1 and t.isdigit())] for x in t1] == t0 and "5" in t1[1]
+    add("G_docmap_toks_identical", r[0].returncode == 0 and r[1].returncode == 0 and same, (t0, t1, r[1].stderr[-160:]))
 
 # ================================================================ H. documentation
 @section("H")

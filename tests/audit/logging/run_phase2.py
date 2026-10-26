@@ -51,6 +51,15 @@ def p2_redact(label):
 LABEL_RE = re.compile(r"^(Figure|Table) \d+$")
 BLOCK_KINDS = {"paragraph", "caption", "figure", "table"}
 NEW_RUN_KEYS = {"first_focus_ms", "doc_ready_ms", "doc_parse", "ground_miss_reasons"}
+# Phase 3 (docs/contracts/phase3-sentence-ids.md F): exactly these new keys are allowed (present only on runs with a sentence map).
+P3_RUN = {"sentence_map"}
+P3_MAP = {"sentence_id", "sentence_ids"}
+P3_SHOW = {"sentence_id", "match_score", "runner_up", "rects"}
+ALIGN_METHODS = {"align", "align-fuzzy", "span", "hold", "block"}   # Phase 3 amendment 3: sentence-map assignment methods
+P2_MATCHER = {"overlap", "progress", "doc-line"}
+def p3_method(cur, base):
+    """A Phase 2 matcher method replaced by a Phase 3 assignment method counts as unchanged."""
+    return cur == base or (cur in ALIGN_METHODS and base in P2_MATCHER)
 def target_src_ok(v):
     if not isinstance(v, str): return False
     if v in TARGET_SRC_FIXED: return True
@@ -231,6 +240,8 @@ def tracker_exe():
     if not shutil.which("swift"): TRK["why"] = "no swift toolchain"; return None
     T = os.path.join(TMPROOT, "trk"); pkg = os.path.join(T, "pkg"); os.makedirs(T, exist_ok=True)
     shutil.copytree(os.path.join(REPO, "tracker"), pkg, symlinks=False, ignore=shutil.ignore_patterns(".build"))
+    os.makedirs(os.path.join(T, "tests"), exist_ok=True)
+    for f in glob.glob(os.path.join(REPO, "tests", "*.json")): shutil.copy(f, os.path.join(T, "tests"))
     ts = os.path.join(pkg, "Sources", "speakeasy-track", "tracker.swift")
     if os.path.lexists(ts): os.remove(ts)
     shutil.copy(os.path.join(SRC, "tracker.swift"), ts)
@@ -691,7 +702,7 @@ def focus_checks():
     # coverage: the scenarios really exercised the interesting branches
     allF = [x for o in ALL for x in o["focus"]]
     meths = {x.get("method") for x in allF if x.get("state") == "map"}
-    add("A_cov_overlap_or_progress_maps_seen", bool(meths & {"overlap", "progress"}), sorted(map(str, meths)))
+    add("A_cov_overlap_or_progress_maps_seen", bool(meths & ({"overlap", "progress"} | ALIGN_METHODS)), sorted(map(str, meths)))  # phase 3 amendment 3: sentence-map runs log the align family
     add("A_cov_float_scores_seen", any(isnum(x.get("score")) for x in allF if x.get("state") == "map"), "")
     add("A_cov_runner_up_float_seen", any(isnum(x.get("runner_up")) for x in allF if x.get("state") == "map"), "")
     tags = [x for x in maps(S["tags"][0]) if str(x.get("method")).startswith("tag")]
@@ -981,7 +992,7 @@ def additive():
         "fig5_cap": lambda b: bench_case("x_cap", f5, 1, [cap, cap + 1], "Figure 5 shows the drowsiness detector pipeline. In panel a, ear recordings are re-referenced and filtered. Panel b shows cross-validation.", bin_=b),
         "sentfig": lambda b: sentfig_case("x_sf", bin_=b, SPEAKEASY_GROUND="local"),
     }
-    ALLOW = {"runs": NEW_RUN_KEYS, "map": {"sent", "score", "runner_up"}, "show": {"sent"}, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
+    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
     for nm, fn in pairs.items():
         b, c = fn(BIN_BASE), fn(CUR)
         def keys(runs_, st):
@@ -1001,7 +1012,7 @@ def additive():
         tg = lambda o, red: [(x["doc"].get("kind"), red(x["doc"].get("label")), x["doc"].get("target")) for x in docshows(o) if "(grounded)" not in str(x["doc"].get("label"))]
         add(f"X_{nm}_same_doc_targets_as_baseline_labels_redacted", tg(b[-1], p2_redact) == tg(c[-1], lambda l: l) and tg(b[-1], p2_redact), (tg(b[-1], p2_redact)[:2], tg(c[-1], lambda l: l)[:2]))
         meth = lambda o: [x.get("method") for x in maps(o)]
-        add(f"X_{nm}_same_map_methods_as_baseline", meth(b[-1]) == meth(c[-1]), (meth(b[-1]), meth(c[-1])))
+        add(f"X_{nm}_same_map_methods_as_baseline", len(meth(b[-1])) == len(meth(c[-1])) and all(p3_method(y, x) for x, y in zip(meth(b[-1]), meth(c[-1]))), (meth(b[-1]), meth(c[-1])))
         stdout = lambda o: o["stdout"]
         add(f"X_{nm}_same_stdout_rc_as_baseline", (stdout(b[-1]), b[-1]["rc"]) == (stdout(c[-1]), c[-1]["rc"]), (b[-1]["rc"], c[-1]["rc"]))
 

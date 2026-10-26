@@ -4,14 +4,13 @@ import speakeasy_state as state
 from speakeasy_state import docmap
 from selog import home, _on, text_logging_on
 from grounding import GROUNDER
+from sentence_map import Alignment, SentenceMap, SelectionSpan
 
 def tagging():
     """Ask the model for [L]/[R] focus tags? Opt-in (SPEAKEASY_FOCUS_TAGS=on): tags cost first-audio time
     and accuracy on small models, so by default the prompt is untouched and sentences are mapped afterwards."""
     return state.FOCUS is not None and state.FOCUS.tags
 
-_NUMW = {w: str(i) for i, w in enumerate("zero one two three four five six seven eight nine ten eleven twelve "
-         "thirteen fourteen fifteen sixteen seventeen eighteen nineteen twenty".split())}
 _FEATURE_STOPWORDS = {"the", "and", "thi", "tha", "wit", "for", "are", "was", "fro", "has", "have", "its", "into", "also", "than",
           "then", "there", "their", "they", "which", "while", "when", "will", "can", "not", "but", "you", "your", "all",
           "one", "more", "most", "some", "each", "about", "over", "only", "like", "just", "very", "use", "uses", "used"}
@@ -137,8 +136,9 @@ def source_lines(text):
 def numbered(text):
     return "\n".join(f"L{i}: {l}" for i, l in enumerate(source_lines(text), 1))
 
-def _token_stems(s):
-    return {w[:5] for w in re.findall(r"[a-z0-9]{3,}", s.lower())} - {"the", "and", "thi", "tha", "wit", "for", "are", "was", "fro"}
+def _union_xywh(rs):
+    x0 = min(r[0] for r in rs); y0 = min(r[1] for r in rs)
+    return [x0, y0, max(r[0] + r[2] for r in rs) - x0, max(r[1] + r[3] for r in rs) - y0]
 
 class FocusRect(list):
     src = None
@@ -147,6 +147,8 @@ class FocusRect(list):
     shape = None
     pending = None
     sent = None
+    rects = None                         # screen [x, y, w, h] per band line (text bands with line bounds)
+    sentence = None                      # (sentence_id, match_score, runner_up) when the run has a sentence map
 
 LOGGED_LABEL_RE = re.compile(r"(Figure|Table) \d+[a-h]?( row \d+)?( \(grounded\))?")
 
@@ -183,7 +185,14 @@ class Focus:
         self.match_score = self.match_runner_up = None
         self.ground_requests = []                       # every grounding request submitted this run
         self.prev_start, self.ref_lines, self.map_note = 1, None, None
-        self.toks = [_token_stems(l) for l in self.lines]
+        self.sentence_id = self.sentence_ids = None
+        self.prev_band, self.prev_sentence = None, (None, [])
+        self.smap, self.smap_ms, self._attach_lock = None, 0, threading.Lock()
+        if self.lines:                                  # before the first chunk; never waits for the document
+            t0 = time.time()
+            self.smap = SentenceMap(text, line_bounds)
+            self.smap_ms = int((time.time() - t0) * 1000)
+            self._log_sentence_map()
         self.tags = os.environ.get("SPEAKEASY_FOCUS_TAGS", "off").lower() in ("on", "1", "true", "yes")
         self.feats = [_match_features(l) for l in self.lines]
         df = {}
@@ -242,10 +251,154 @@ class Focus:
     def _norm_rect(self, x0, y0, x1, y1):
         x, y, w, h = self.rect
         return [x + x0 * w, y + y0 * h, max(20.0, (x1 - x0) * w), max(14.0, (y1 - y0) * h)]
+    def _log_sentence_map(self):
+        """focus-log sentence_map record (counts only) and the runs-log summary; again when page rects attach."""
+        summary = dict(self.smap.summary(), ms=self.smap_ms)
+        self.rec["sentence_map"] = summary
+        try:
+            d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "focus.jsonl"), "a") as f:
+                f.write(json.dumps({"state": "sentence_map", **summary, "ts": round(time.time(), 3), "pid": os.getpid()}) + "\n")
+        except OSError: pass
+    def _attach_page(self):
+        """Page rects join the map once the document job has matched a page (shows before that are screen-only)."""
+        if self.smap is None or self.smap.page_line_of_key is not None or state.DOC is None: return
+        d = state.DOC.get()
+        if not d or not d.get("page"): return
+        with self._attach_lock:                                         # chunks are located and shown on two threads
+            if self.smap.page_line_of_key is not None: return
+            t0 = time.time()
+            self.smap.attach_page(d["page"], self._sel_region(d))
+            self.smap_ms += int((time.time() - t0) * 1000)
+            self._log_sentence_map()
+    def _assign(self, sentence, tag):
+        """C.1 / C.3 / E: (method, alignment, back-reference alignment) for one chunk."""
+        m = self.smap
+        self._attach_page()
+        if isinstance(tag, SelectionSpan):
+            a = m.span_alignment(tag) if tag.start is not None else None
+            if a: return "span", a, None
+            return self._fallback(None)
+        t = parse_tag(tag) if isinstance(tag, str) else tag
+        a = None
+        if self.tags and t and t[0] == "L" and m.line_spans:
+            a = m.align(sentence, *m.line_window(t[1], t[2]))
+        a = a or m.align(sentence)
+        if a and a.kind == "verbatim": return "align", a, None
+        if self._text_table_rows() and not self._has_page():           # C.4.3 (amendment 5): the row line the chunk names
+            row = self._named_row(sentence)
+            if row is None: return self._fallback(None)
+            ka, kb = m.key_range(*m.line_spans[row])
+            return "overlap", Alignment("row", ka, kb, self.match_score, self.match_runner_up), None
+        if a: return "align-fuzzy", a, None
+        return self._fallback(m.align_back(sentence))
+    def _has_page(self):
+        d = state.DOC.get() if state.DOC is not None else None
+        return bool(d and d.get("page"))
+    def _text_table_rows(self):
+        """Selection lines of a pipe- or tab-separated text table (separator rows excluded), or [] for other text."""
+        if not hasattr(self, "_table_rows"):
+            cells = [i for i, l in enumerate(self.lines) if ("|" in l or "\t" in l) and not re.fullmatch(r"[\s|:\-+]+", l)]
+            self._table_rows = cells if len(cells) >= 2 and len(cells) >= 0.6 * len(self.lines) else []
+        return self._table_rows
+    def _named_row(self, sentence):
+        """The one table row a chunk names by its label or distinctive cells (the Phase 2 line scores), or None."""
+        sc, _ = self._scores(sentence)
+        rows = self._text_table_rows()
+        best = max(rows, key=lambda i: sc[i])
+        if sc[best] < 1.0 or any(sc[i] >= max(0.8, 0.6 * sc[best]) for i in rows if i != best): return None
+        others = [sc[i] for i in rows if i != best]
+        self.match_score, self.match_runner_up = round(sc[best], 2), round(max(others), 2) if others else None
+        return best
+    def _fallback(self, back):
+        """Hold the current band (a back-reference, or a read-through / verbatim chunk below 0.6), else the whole block."""
+        holds = self.rec.get("mode") in ("read-through", "verbatim", "table") and os.environ.get("SPEAKEASY_READ_MODE", "read").lower() != "summary"
+        if self.prev_band is not None and (back is not None or holds): return "hold", None, back
+        return "block", None, None
+    def _locate_sentence(self, method, a, back):
+        """Screen rect for an assigned chunk: one rect per band line (unmerged), the union as the rect."""
+        self.n += 1
+        m = self.smap
+        if a is not None:
+            band = dict(m.band_for(a), how="verbatim" if a.kind in ("verbatim", "span") else "row" if a.kind == "row" else "fuzzy")
+            if a.kind != "row": m.commit(a)                             # an explanation names table rows in any order
+            ids = m.sentence_ids(a.key_start, a.key_end)
+            primary = m.primary_sentence(a.key_start, a.key_end)
+            self.sentence_id = m.sentences[primary]["id"] if primary is not None else None
+            self.sentence_ids = [m.sentences[i]["id"] for i in ids]
+            self.match_score = round(a.score, 2); self.match_runner_up = None if a.runner_up is None else round(a.runner_up, 2)
+            self.prev_band, self.prev_sentence = band, (self.sentence_id, self.sentence_ids)
+        elif method == "hold":                                          # page rects may have joined since it was assigned
+            band = dict(self.prev_band, how="hold", page_lines=m.band_for_keys(self.prev_band["keys"])["page_lines"])
+            self.sentence_id, self.sentence_ids = self.prev_sentence
+        else:
+            band = dict(m.block_band(), how="block"); self.sentence_id, self.sentence_ids = None, []
+            self.prev_band, self.prev_sentence = band, (None, [])
+        sel = band["sel_lines"]
+        self.last_lines = [sel[0] + 1, sel[-1] + 1] if sel else None
+        if self.last_lines: self.prev_start, self.prev_line = self.last_lines
+        self.map_note = "ref-back" if back is not None else "forward"
+        if band["rects"]:
+            rect = _union_xywh(band["rects"])
+        else:                                                           # no line bounds: the span's share of the selection
+            x, y, w, h = self.rect
+            cs, ce = band["char_span"] or (0, len(self.text_all))
+            f0, f1 = cs / max(1, len(self.text_all)), ce / max(1, len(self.text_all))
+            rect = [x, y + f0 * h, w, max(14.0, (f1 - f0) * h)]
+        r = FocusRect(rect)
+        if band["rects"]: r.rects = [[round(v, 1) for v in b] for b in band["rects"]]
+        r.nlines = len(band["rects"]) or len(band["page_lines"]) or len(sel) or None
+        r.src = [_rendered_line(self.lines[i]) for i in sel][:6] if sel else None
+        if m.ax_base is not None and band["char_span"]:
+            r.rng = [m.ax_base + band["char_span"][0], band["char_span"][1] - band["char_span"][0]]
+        if back is not None:
+            ref = m.band_for(back)
+            if ref["sel_lines"]: self.ref_lines = [ref["sel_lines"][0] + 1, ref["sel_lines"][-1] + 1]
+            if ref["rects"]: r.ref = [round(v, 1) for v in _union_xywh(ref["rects"])]
+            elif self.ref_lines: r.ref = [round(v, 1) for v in self._line_rect(*self.ref_lines)]
+        r.band = band
+        return r, method
+    def _band_target(self, r, method, sentence):
+        """C.4 on an assigned chunk: its text band (method stays the assignment method, F amendment 3) or a Phase 2
+        figure / table cue (doc-<kind>, no score)."""
+        try:
+            nr, doc_method = self._doc_target(r, method, sentence, r.band)
+        except Exception as e:                                         # document mapping never breaks speech
+            self.rec["doc_note"] = f"focus: {type(e).__name__}: {e}"[:160]
+            return r, method
+        if nr is r: return r, method
+        nr.sent, nr.band, nr.ref = r.sent, r.band, getattr(r, "ref", None)
+        if (nr.doc or {}).get("kind") == "line":                       # D: len(rects) when rects is present, else len(doc.lines)
+            nr.sentence, nr.nlines = r.sentence, len(nr.rects) if nr.rects else len(nr.doc["lines"])
+            return nr, method
+        nr.sentence = (r.sentence[0], None, None)
+        return nr, doc_method
+    def _late_page(self, rect, text):
+        """A band located before the document was read: page rects join it when it starts playing (B, document not ready)."""
+        band = getattr(rect, "band", None)
+        if self.smap is None or band is None or rect.doc is not None: return rect
+        self._attach_page()
+        if self.smap.page_line_of_key is None: return rect
+        rect.band = dict(band, page_lines=self.smap.band_for_keys(band["keys"])["page_lines"])
+        return self._band_target(rect, None, text)[0]
     def locate(self, sentence, tag):
         """(rect, method); the rect also carries .src (source lines, for the live tracker to re-find on screen)
         and .rng (absolute AX character range of those lines, when the hotkey supplied per-line offsets)."""
         self.ref_lines = None; self.map_note = None; self.match_score = self.match_runner_up = None
+        self.sentence_id = self.sentence_ids = None
+        if self.smap is not None:
+            try:
+                assigned = self._assign(sentence, tag)
+            except Exception as e:                                     # alignment never breaks speech: Phase 2 matcher
+                self.rec["doc_note"] = f"align: {type(e).__name__}: {e}"[:160]
+                assigned = None
+            if assigned is not None:
+                r, method = self._locate_sentence(*assigned)
+                r.sent = self.n - 1
+                table_row = assigned[0] == "overlap"                           # a Phase 2 table cue: no show score
+                r.sentence = (self.sentence_id, None if table_row else self.match_score, None if table_row else self.match_runner_up)
+                return self._band_target(r, method, sentence)
+        if isinstance(tag, SelectionSpan): tag = None
         rect, method = self._locate(sentence, tag)
         r = FocusRect(rect)
         r.nlines = (self.last_lines[1] - self.last_lines[0] + 1) if self.last_lines else None
@@ -291,6 +444,11 @@ class Focus:
             runs.append(cur)
             out = max(runs, key=len)
         return out
+    def _selection_page_lines(self):
+        """Page lines of the whole selection: the sentence map's page alignment when attached, else by text (Phase 2)."""
+        if self.smap is not None and self.smap.page_line_of_key is not None:
+            return self.smap.block_band()["page_lines"]
+        return self._doc_lines(1, len(self.lines))
     def _table_for_selection(self, d):
         if hasattr(self, "_tb"): return self._tb
         self._tb = None
@@ -404,16 +562,19 @@ class Focus:
             t = docmap.fit(pairs)
             if t and t[3] < 12: self._dt = t; self.rec["doc_transform"] = "line-bounds"
         return self._dt
-    def _doc_target(self, r, method, sentence):
+    def _doc_target(self, r, method, sentence, band=None):
+        """Page-space target. band (runs with a sentence map): the chunk's text band; C.4 decides between it and the
+        Phase 2 figure / table cues."""
         d = state.DOC.get() if state.DOC is not None else None
         if not d: return r, method
         f, panel = docmap.find_ref(sentence, d.get("figures") or [], getattr(self, "last_fig", None))
+        verbatim = band is not None and band["how"] == "verbatim"
         if d["kind"] == "md":
             sel = self.text_all.strip()
             # table rows ("| Figure skaters | 24 |") and code / heading lines ("# Figure 9 ...") are text, not figures
             if re.match(r"^\s*(\||#|```|~~~|    \S)", sel) or (f and not any(x.get("label") == f.get("label") for x in d.get("figures") or [])):
                 return r, method
-            if not f:                                                   # only when the selection IS a figure's caption
+            if not f and not verbatim:                                  # only when the selection IS a figure's caption
                 st = set(docmap._toks(sel))
                 for x in d.get("figures") or []:
                     cap = set(docmap._toks(x.get("caption") or ""))
@@ -430,7 +591,11 @@ class Focus:
         fm = self._fig_mode(d)
         if f and f.get("page") != d["page"]["n"]:
             f = None                                                    # drawn on another page: named in speech, not boxed
-        if fm is not None and (f is None or f is fm):
+        named = f is not None and f is not fm and (f.get("kind") == "table" or self._visible(d, f.get("bbox") or [0, 0, 0, 0]))
+        text_band = band is not None and not named and (verbatim or (fm is None and not self._table_for_selection(d)))
+        if text_band:
+            f = None                                                    # C.4.2 / C.4.4 / E: the chunk's own text band
+        elif fm is not None and (f is None or f is fm):
             # the run is about a figure: box the object the sentence names, else its panel, else the whole figure
             f = fm; self.last_fig = fm
             if panel: self.cur_panel = panel                             # "In Figure 4a, ..." holds until another panel is named
@@ -460,7 +625,7 @@ class Focus:
             target_src = _box_target_src(f, kind, panel)
         elif f:
             f = None                                                    # cited but not on screen: stay on the sentence's own lines
-        if tgt is None and not f:
+        if tgt is None and not f and not text_band:
             # a selection inside a table body (row labels, cells): box the table
             tb = self._table_for_selection(d)
             if tb: tgt, kind, label = tb["bbox"], "table", tb["label"]; f = tb; target_src = _box_target_src(tb, kind, None)
@@ -477,31 +642,35 @@ class Focus:
                     self._row_at[f["label"]] = i
                     tgt, kind = rows[i]["rect"], "table_row"; label = f"{f['label']} row {i}"; target_src = "table-rows"
                     header = rows[0]["rect"] if i > 0 else None
-        if tgt is None and self.last_lines:
-            ix = self._doc_lines(*self.last_lines)
-            if ix:
-                ls = [d["page"]["lines"][i] for i in ix]
+        line_ix = None
+        if tgt is None and (band is not None or self.last_lines):
+            line_ix = band["page_lines"] if band is not None else self._doc_lines(*self.last_lines)   # never bag-of-words for a band
+            if line_ix:
+                ls = [d["page"]["lines"][i] for i in line_ix]
                 tgt = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]; kind = "line"; target_src = "lines"
         if not tgt: return r, method
         nr = FocusRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.nlines = getattr(r, "nlines", None); nr.pending = getattr(r, "pending", None)
+        if kind == "line": nr.rects = r.rects
         t = self._doc_transform()
-        if t == "pending":
+        if t == "pending" and not nr.rects:
             nr.hold = tgt; t = None                                     # no box until the capture fit lands (never a wrong one)
-        elif t:
+        elif t == "pending":
+            t = None                                                    # the band's own screen rects draw at once
+        elif t and not nr.rects:
             nr[:] = [round(v, 1) for v in docmap.apply(t, tgt)]
         nr.shape = shape or ("roundrect" if kind in ("figure", "panel", "table") else None)
         if header is not None and t and t != "pending":
             nr.header = [round(v, 1) for v in docmap.apply(t, header)]
         anc = d.get("anchors") or []
         if self.lines:
-            ix = self._doc_lines(1, len(self.lines))
+            ix = self._selection_page_lines()
             own = [[round(v, 1) for v in d["page"]["lines"][i][:4]] + [d["page"]["lines"][i][4][:80]] for i in ix if len(d["page"]["lines"][i][4].strip()) >= 14]
             keys = set(a[4] for a in own)
             anc = (own + [a for a in anc if a[4] not in keys])[:48]
         nr.doc = {"kind": kind, "label": _logged_label(label), "page": d["page"]["n"], "page_size": d.get("page_size"), "target": [round(v, 1) for v in tgt],
                   "anchors": anc, "target_src": target_src}
         if kind in ("figure", "table", "table_row") and f and f.get("split_from"): nr.doc["split_from"] = f["split_from"]
-        if kind == "line": nr.doc["lines"] = [[round(v, 1) for v in d["page"]["lines"][i][:4]] for i in self._doc_lines(*self.last_lines)]
+        if kind == "line": nr.doc["lines"] = [[round(v, 1) for v in d["page"]["lines"][i][:4]] for i in line_ix]
         if kind != "line" and f and f.get("caption"):
             nr.src = [re.sub(r"\s+", " ", f["caption"])[:100]]          # tracker finds the caption when anchors fail
         return nr, ("doc-" + kind) if (t or kind != "line" or getattr(nr, "hold", None) is not None) else method
@@ -601,13 +770,14 @@ class Focus:
         self.methods[method] = self.methods.get(method, 0) + 1
         if self.map_note:
             fm = self.rec.setdefault("focus_map", {}); fm[self.map_note] = fm.get(self.map_note, 0) + 1
+        rec = {"state": "map", "method": method, "lines": self.last_lines, "decision": self.map_note,
+               "ref_trigger": getattr(self, "ref_trigger", None), "ref_lines": self.ref_lines,
+               "text": _log_text(sentence)[:120], "ts": round(time.time(), 3), "pid": os.getpid(),
+               "sent": self.n - 1, "score": self.match_score, "runner_up": self.match_runner_up}
+        if self.smap is not None: rec.update(sentence_id=self.sentence_id, sentence_ids=self.sentence_ids)
         try:                                                       # mapping trace (log only; never shown)
             d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
-            with open(os.path.join(d, "focus.jsonl"), "a") as f:
-                f.write(json.dumps(focus_log_record({"state": "map", "method": method, "lines": self.last_lines, "decision": self.map_note,
-                                                     "ref_trigger": getattr(self, "ref_trigger", None), "ref_lines": self.ref_lines,
-                                                     "text": _log_text(sentence)[:120], "ts": round(time.time(), 3), "pid": os.getpid(),
-                                                     "sent": self.n - 1, "score": self.match_score, "runner_up": self.match_runner_up})) + "\n")
+            with open(os.path.join(d, "focus.jsonl"), "a") as f: f.write(json.dumps(focus_log_record(rec)) + "\n")
         except OSError: pass
     # -- events --
     def _write(self, ev):
@@ -626,6 +796,7 @@ class Focus:
             os.replace(tmp, path)
         except OSError: pass
     def show(self, rect, text):
+        rect = self._late_page(rect, text)
         clamped = False
         clip = getattr(self, "area_clip", None)
         if clip and rect:                       # Read area: the user drew the region; cues never leave it (12 pt slack)
@@ -635,9 +806,16 @@ class Focus:
             if [x0, y0, x1 - x0, y1 - y0] != list(rect):
                 self.rec["area_clamped"] = self.rec.get("area_clamped", 0) + 1
                 nr = FocusRect([x0, y0, x1 - x0, y1 - y0]); nr.__dict__.update(getattr(rect, "__dict__", {}))   # keep doc.target etc.
+                if nr.rects:
+                    inside = [[max(b[0], clip[0] - 12), max(b[1], clip[1] - 12), min(b[0] + b[2], clip[0] + clip[2] + 12), min(b[1] + b[3], clip[1] + clip[3] + 12)]
+                              for b in nr.rects]
+                    nr.rects = [[b[0], b[1], b[2] - b[0], b[3] - b[1]] for b in inside if b[2] - b[0] >= 8 and b[3] - b[1] >= 8] or None
                 rect = nr; clamped = True
         self.events += 1
         ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect], "text": text[:80], **self.style, "sent": rect.sent}
+        if self.smap is not None:
+            ev["sentence_id"], ev["match_score"], ev["runner_up"] = rect.sentence or (None, None, None)
+        if rect.rects: ev["rects"] = rect.rects
         if getattr(rect, "src", None): ev["src"] = rect.src
         ev["range"] = getattr(rect, "rng", None)                    # absolute AX character range, or null when unknown
         if getattr(rect, "doc", None): ev["doc"] = rect.doc          # page-space target + text anchors for the tracker
@@ -655,7 +833,7 @@ class Focus:
         ck = self.rec.setdefault("cue_kinds", {}); ck[ev["cue_kind"]] = ck.get(ev["cue_kind"], 0) + 1
         if ev.get("header"): ck["table_header"] = ck.get("table_header", 0) + 1
         ev["draw"] = _on("SPEAKEASY_FIGURE_CUES" if ev["cue"] == "figure" else "SPEAKEASY_TEXT_HIGHLIGHT")
-        if getattr(rect, "ref", None) and not getattr(rect, "doc", None): ev["ref"] = rect.ref
+        if getattr(rect, "ref", None) and (rect.doc or {}).get("kind") in (None, "line"): ev["ref"] = rect.ref   # C.3 back-reference outline
         fut = getattr(rect, "pending", None)
         hold = getattr(rect, "hold", None)
         if hold is not None:
@@ -719,6 +897,7 @@ class Focus:
     def summary(self):
         for fut in self.ground_requests:               # still unsettled when the runs record is written
             self._ground_missed(fut, "superseded" if fut.done.is_set() else "timeout")
+        if self.smap is not None: self._attach_page()
         tot = sum(self.methods.values())
         self.rec["focus_events"] = self.events
         self.rec["focus_tags"] = self.tags

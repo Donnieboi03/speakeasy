@@ -33,18 +33,126 @@ func writeLine(_ d: Data, _ path: String) {
     if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(d); h.closeFile() }
     else { FileManager.default.createFile(atPath: path, contents: d) }
 }
-let STOP: Set<String> = ["the", "and", "for", "are", "was", "with", "this", "that", "from", "has", "its", "of", "to", "in", "on", "at", "is", "a", "an", "or", "by"]
-func tokens(_ s: String) -> [String] {
-    let low = s.precomposedStringWithCompatibilityMapping.lowercased()   // NFKC: PDF ligatures (fi, fl) match OCR text
-    var out: [String] = []
-    var cur = ""
-    for ch in low.unicodeScalars {
-        if CharacterSet.alphanumerics.contains(ch) { cur.unicodeScalars.append(ch) }
-        else { if !cur.isEmpty { out.append(cur); cur = "" } }
+// ---------------- shared text fold (docs/contracts/phase3-sentence-ids.md A: the same steps as src/textfold.py) ----------------
+let foldUnitWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
+                     "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
+let foldTensWords = ["twenty", "thirty", "forty", "fifty", "sixty", "seventy", "eighty", "ninety"]
+let foldDigitWords = ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine"]
+let foldUnitsLongestFirst = foldUnitWords.sorted { $0.count > $1.count }   // "seventeen" before "seven"
+let foldInvisible: Set<UInt32> = [0xAD, 0x200B, 0x200C, 0x200D, 0x2060, 0xFEFF]
+let foldHyphens: Set<UInt32> = [0x2D, 0x2010, 0x2011]
+func isKeyScalar(_ u: Unicode.Scalar) -> Bool {
+    switch u.properties.generalCategory {
+    case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter, .decimalNumber: return true
+    default: return false
     }
-    if !cur.isEmpty { out.append(cur) }
-    return out.filter { ($0.count >= 2 || $0.first!.isNumber) && !STOP.contains($0) }
 }
+func isLetterScalar(_ u: Unicode.Scalar) -> Bool { isKeyScalar(u) && u.properties.generalCategory != .decimalNumber }
+func isMarkScalar(_ u: Unicode.Scalar) -> Bool {
+    switch u.properties.generalCategory { case .nonspacingMark, .spacingMark, .enclosingMark: return true; default: return false }
+}
+/// Steps 1-5 of the fold: the folded scalars and, for each, the index (unicode scalars) of the original character it came from.
+func foldedScalars(_ text: String) -> ([Unicode.Scalar], [Int]) {
+    let src = Array(text.unicodeScalars)
+    var s: [Unicode.Scalar] = [], o: [Int] = []
+    var i = 0
+    while i < src.count {                                   // 1. NFKC per cluster (a base plus its marks); 2. invisible characters
+        var j = i + 1
+        while j < src.count && isMarkScalar(src[j]) { j += 1 }
+        if j == i + 1 && src[i].value < 0x80 { s.append(src[i]); o.append(i) }
+        else {
+            var v = String.UnicodeScalarView(); v.append(contentsOf: src[i..<j])
+            for u in String(v).precomposedStringWithCompatibilityMapping.unicodeScalars where !foldInvisible.contains(u.value) { s.append(u); o.append(i) }
+        }
+        i = j
+    }
+    func blank(_ u: Unicode.Scalar) -> Bool { u == " " || u == "\t" }
+    var t: [Unicode.Scalar] = [], to: [Int] = []
+    var k = 0
+    while k < s.count {                                     // 3. line-end hyphen rejoin; any other line break is a space
+        if foldHyphens.contains(s[k].value) {
+            var e = k + 1
+            while e < s.count && blank(s[e]) { e += 1 }
+            var brk = false
+            if e < s.count && s[e] == "\r" { e += 1; if e < s.count && s[e] == "\n" { e += 1 }; brk = true }
+            else if e < s.count && s[e] == "\n" { e += 1; brk = true }
+            if brk {
+                while e < s.count && blank(s[e]) { e += 1 }
+                if k > 0 && e < s.count && isLetterScalar(s[k - 1]) && s[e].properties.generalCategory == .lowercaseLetter { k = e; continue }
+            }
+        }
+        if s[k] == "\r" || s[k] == "\n" {
+            t.append(" "); to.append(o[k]); k += (s[k] == "\r" && k + 1 < s.count && s[k + 1] == "\n") ? 2 : 1; continue
+        }
+        t.append(s[k]); to.append(o[k]); k += 1
+    }
+    s = []; o = []
+    for (u, off) in zip(t, to) {                            // 4. default lowercase mapping, one character at a time
+        if u.value < 0x80 { let l = (u.value >= 65 && u.value <= 90) ? Unicode.Scalar(u.value + 32)! : u; s.append(l); o.append(off) }
+        else { for l in u.properties.lowercaseMapping.unicodeScalars { s.append(l); o.append(off) } }
+    }
+    func word(_ i: Int) -> Bool { i >= 0 && i < s.count && isKeyScalar(s[i]) }
+    func has(_ p: Int, _ w: String) -> Bool {
+        let ws = Array(w.unicodeScalars)
+        return p + ws.count <= s.count && zip(s[p..<(p + ws.count)], ws).allSatisfy { $0 == $1 }
+    }
+    var r: [Unicode.Scalar] = [], ro: [Int] = []
+    func emit(_ text: String, _ offs: [Int]) { r.append(contentsOf: text.unicodeScalars); ro.append(contentsOf: offs) }
+    var p = 0
+    while p < s.count {                                     // 5. number words -> digits, per cent / % -> percent (whole words)
+        var end = -1, tens: Int? = nil, unit: Int? = nil, unitAt = 0, small: Int? = nil, centAt = -1
+        if let ti = foldTensWords.firstIndex(where: { has(p, $0) }) {
+            tens = ti + 2; end = p + foldTensWords[ti].unicodeScalars.count
+            var q = end
+            if q < s.count && foldHyphens.contains(s[q].value) { q += 1 } else { while q < s.count && blank(s[q]) { q += 1 } }
+            if q > end, let di = foldDigitWords.firstIndex(where: { has(q, $0) }) { unit = di + 1; unitAt = q; end = q + foldDigitWords[di].unicodeScalars.count }
+        } else if let w = foldUnitsLongestFirst.first(where: { has(p, $0) }) {
+            small = foldUnitWords.firstIndex(of: w)!; end = p + w.unicodeScalars.count
+        } else if has(p, "per") {
+            var q = p + 3
+            while q < s.count && blank(s[q]) { q += 1 }
+            if q > p + 3 && has(q, "cent") { centAt = q; end = q + 4 }
+        } else if s[p] == "%" { end = p + 1 }
+        if end < 0 { r.append(s[p]); ro.append(o[p]); p += 1; continue }
+        let keep = { r.append(contentsOf: s[p..<end]); ro.append(contentsOf: o[p..<end]) }
+        if s[p] == "%" {
+            let text = (word(p - 1) ? " " : "") + "percent" + (word(end) ? " " : "")
+            emit(text, Array(repeating: o[p], count: text.unicodeScalars.count))
+        } else if word(p - 1) { keep() }
+        else if let tv = tens {
+            let end1 = p + foldTensWords[tv - 2].unicodeScalars.count
+            if let u = unit, !word(end) { emit("\(tv)\(u)", [o[p], o[unitAt]]) }
+            else if word(end1) { keep() }
+            else { emit("\(tv)0", [o[p], o[p + 1]]); r.append(contentsOf: s[end1..<end]); ro.append(contentsOf: o[end1..<end]) }
+        } else if word(end) { keep() }
+        else if let n = small { let d = String(n); emit(d, (0..<d.count).map { o[p + $0] }) }
+        else { emit("percent", (0..<3).map { o[p + $0] } + (0..<4).map { o[centAt + $0] }) }
+        p = end
+    }
+    return (r, ro)
+}
+/// The fold key (only L* / Nd characters of steps 1-5) and, per key character, the index of its original character.
+func fold(_ text: String) -> (key: String, offsets: [Int]) {
+    let (s, o) = foldedScalars(text)
+    var key = String.UnicodeScalarView(), offs: [Int] = []
+    for (u, off) in zip(s, o) where isKeyScalar(u) { key.append(u); offs.append(off) }
+    return (String(key), offs)
+}
+/// Word tokens: maximal L* / Nd runs of steps 1-5.
+func foldTokens(_ text: String) -> [String] {
+    var out: [String] = [], cur = String.UnicodeScalarView()
+    for u in foldedScalars(text).0 {
+        if isKeyScalar(u) { cur.append(u) } else if !cur.isEmpty { out.append(String(cur)); cur = String.UnicodeScalarView() }
+    }
+    if !cur.isEmpty { out.append(String(cur)) }
+    return out
+}
+/// Match tokens: fold tokens without single-character non-digit runs. No stopword list: anchors and refind weigh common
+/// words by how many recognised lines carry them.
+func matchTokens(_ s: String) -> [String] {
+    foldTokens(s).filter { $0.unicodeScalars.count >= 2 || $0.unicodeScalars.first!.properties.generalCategory == .decimalNumber }
+}
+func tokens(_ s: String) -> [String] { matchTokens(s) }
 func rss_mb() -> Double {
     var info = task_vm_info_data_t()
     var count = mach_msg_type_number_t(MemoryLayout<task_vm_info_data_t>.size / MemoryLayout<natural_t>.size)
@@ -176,6 +284,9 @@ final class Live: NSObject {
     let refShape = CAShapeLayer()
     var refShown = 0, transitions = 0, heldBig = 0
     var cue = "text", suppressed = false
+    var band: [CGRect] = []                 // text band line rects relative to `rect`'s origin (empty: a single-rect show)
+    var bandPage: [[Double]] = []           // the show's doc.lines (page space), mapped with one page fit
+    var sentenceId: Any = NSNull()
     var colRect: CGRect? = nil, lineH: CGFloat = 0
     var stuckVotes = 0, lastMomentum = 0.0
     var pendingJump: CGRect? = nil
@@ -304,25 +415,39 @@ final class Live: NSObject {
         if hiddenByKey { return "tab-switch" }
         return "scrolled-off"
     }
+    func setBand(_ abs: [CGRect]) {
+        guard let u = unionOf(abs) else { band = []; return }
+        rect = u; band = abs.map { $0.offsetBy(dx: -u.minX, dy: -u.minY) }
+    }
+    func bandAbsolute() -> [CGRect] {
+        guard let r = rect else { return [] }
+        return band.map { $0.offsetBy(dx: r.minX, dy: r.minY) }
+    }
     func flush() {
         dirty = false; lastWork = "flush"; lastFlush = now()
         guard let p = panel else { return }
         var inWin = true
+        var lines = bandAbsolute()
         if let r = rect, let w = winFrame {
-            let vis = r.intersection(w)
-            inWin = !vis.isNull && vis.width * vis.height >= 0.3 * r.width * r.height
+            if !lines.isEmpty {                                           // a band: each line clamped, 30 % of the summed area
+                if let c = clampBand(lines, to: w) { lines = c } else { inWin = false }
+            } else {
+                let vis = r.intersection(w)
+                inWin = !vis.isNull && vis.width * vis.height >= 0.3 * r.width * r.height
+            }
             if !inWin && shown { hideTrigger = ("out-of-window", now()); rec(["event": "box-out-of-window", "rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)]]); wantScan = true }
         }
         let show = rect != nil && front && winFront && !hiddenByKey && scanVisible && !suppressed && inWin
         if show, var r = rect {
-            if let w = winFrame { r = r.intersection(w) }                 // clamp to the window
+            if let u = unionOf(lines) { r = u } else if let w = winFrame { r = r.intersection(w) }   // clamp to the window
             let f = frameFor(r)
             CATransaction.begin(); CATransaction.setDisableActions(true)
             p.setFrame(f, display: false)
             let b = CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2)
             shape.frame = p.contentView!.bounds
             let rad: CGFloat = cueKind == "figure_box" ? min(12, min(b.width, b.height) / 4) : 6
-            shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: rad, cornerHeight: rad, transform: nil)
+            if !lines.isEmpty { shape.path = bandPath(lines, in: r.insetBy(dx: -4, dy: -2)) }
+            else { shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: rad, cornerHeight: rad, transform: nil) }
             CATransaction.commit()
             if !p.isVisible { p.orderFrontRegardless() }
             drawHeader(r)
@@ -333,9 +458,11 @@ final class Live: NSObject {
                     let ox = pf.ox + Double(off.x), oy = pf.oy + Double(off.y)
                     return [(Double(r.minX) - ox) / pf.s, (Double(r.minY) - oy) / pf.s, (Double(r.maxX) - ox) / pf.s, (Double(r.maxY) - oy) / pf.s].map { ($0 * 10).rounded() / 10 }
                 } ?? NSNull()
-                rec(drawMeta.merging(["event": "draw", "seq": seq, "cue": cue, "cue_kind": cueKind, "header": headerDelta != nil, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
+                var draw: [String: Any] = ["event": "draw", "seq": seq, "cue": cue, "cue_kind": cueKind, "header": headerDelta != nil, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
                      "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
-                     "on_screen": p.isVisible, "page_rect": pageRect, "page_fit": pageFit?.src ?? NSNull()]) { $1 })
+                     "on_screen": p.isVisible, "page_rect": pageRect, "page_fit": pageFit?.src ?? NSNull()]
+                draw["sentence_id"] = sentenceId; draw["line_count"] = lines.isEmpty ? 1 : lines.count
+                rec(drawMeta.merging(draw) { $1 })
                 shown = true; lastDrawn = f
             }
             drawnSeq = seq
@@ -367,7 +494,7 @@ final class Live: NSObject {
         let t = now()
         if t - lastRejLog > 0.5 { lastRejLog = t; rec(["event": "scroll-rejected", "reason": why, "counts": rejN]); rejN = [:] }
     }
-    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?, fit: (Double, Double, Double)? = nil) {
+    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?, fit: (Double, Double, Double)? = nil, band newBand: [CGRect]? = nil) {
         lastWork = "scan"
         if capTs > 0 && capTs < lastMove { return }               // screenshot taken before the last scroll: stale
         wantScan = false
@@ -415,6 +542,7 @@ final class Live: NSObject {
                 if r.height < 30 { lineH = lineH > 0 ? 0.7 * lineH + 0.3 * r.height : r.height }
             }
             pred = 0; rect = r; scanVisible = true; hiddenByKey = false; src = method
+            if let b = newBand { setBand(b) }
             if method == "doc", let f = fit { pageFit = (f.0, f.1 - Double(off.x), f.2 - Double(off.y), "anchors") }
         } else {
             if scanVisible { hideTrigger = (reason ?? "scrolled-off", now()) }
@@ -477,11 +605,20 @@ final class Live: NSObject {
     }
     func event(seq s: Int, rect r0: CGRect?, range rg: [Int]?, srcLines: [String], color: String?, opacity: Double, ellipse: Bool,
                isText: Bool = true, nlines: Int? = nil, ref: CGRect? = nil, figure: Bool = false, drawOn: Bool = true,
-               cueKind ck: String? = nil, header: CGRect? = nil, meta: [String: Any] = [:]) {
+               cueKind ck: String? = nil, header: CGRect? = nil, meta: [String: Any] = [:],
+               rects: [CGRect] = [], docLines: [[Double]] = [], sentenceId sid: Any = NSNull()) {
         var r = r0
         drawMeta = meta.merging(["run_id": runId]) { a, _ in a }
         if (meta["doc_target"] as? [Double]) == nil { pageFit = nil }   // no page-space box: nothing to map back
         else if pageFit?.src != "anchors", let t = meta["doc_transform"] as? [Double], t.count == 3 { pageFit = (t[0], t[1], t[2], "event-transform") }
+        sentenceId = sid
+        let isBand = isText && !figure && (!rects.isEmpty || !docLines.isEmpty)
+        bandPage = isBand ? docLines : []
+        var firstBand: [CGRect]? = nil                          // first draw: the show's screen rects plus the scroll since the hotkey
+        if isBand {
+            if !rects.isEmpty { firstBand = rects.map { $0.offsetBy(dx: off.x, dy: off.y) } }
+            else if let pf = pageFit { firstBand = mapBand(docLines, fit: (pf.s, pf.ox + Double(off.x), pf.oy + Double(off.y))) }
+        }
         cue = figure ? "figure" : "text"; suppressed = !drawOn
         cueKind = ck ?? (ellipse ? "part_oval" : figure ? "figure_box" : "text_band")
         if cueKind == "table_row", let h = header, let n = r0 { headerDelta = CGRect(x: h.minX - n.minX, y: h.minY - n.minY, width: h.width, height: h.height) }
@@ -490,7 +627,7 @@ final class Live: NSObject {
         if figure { refPanel?.orderOut(nil) }                    // one cue at a time: no text outline while a figure part is boxed
         if !drawOn { rec(["event": "cue-off", "seq": s, "cue": cue]) }
         // never flash a big provisional box between sentences: a text sentence's box must fit its own lines
-        if let n = r0, isText {
+        if let n = r0, isText, firstBand == nil {
             var nr = n.offsetBy(dx: off.x, dy: off.y)
             // the backend only knows the selection box (no per-line geometry in web views): take x/width from the text
             // column OCR has confirmed, and cap the height, so the band can move at once instead of waiting for OCR
@@ -528,7 +665,8 @@ final class Live: NSObject {
             }
         }
         axGood = false
-        if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" }
+        if let b = firstBand { setBand(b); scanVisible = true; src = "event" }
+        else { band = []; if let r = r { rect = r.offsetBy(dx: off.x, dy: off.y); scanVisible = true; src = "event" } }
         apply()                                                   // draw the event box now; AX refines it later
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {   // no fallback box any more: fail loudly instead
             guard self.seq == s, self.drawnSeq != s, self.rect != nil, !self.suppressed, self.front, self.winFront, self.scanVisible, !self.hiddenByKey else { return }
@@ -539,6 +677,7 @@ final class Live: NSObject {
             FileHandle.standardError.write(line.data(using: .utf8)!)
         }
         if axDead { rec(["event": "ax-range", "seq": s, "hit": false, "why": "ax-disabled"]); return }
+        if !bandPage.isEmpty { rec(["event": "ax-range", "seq": s, "hit": false, "why": "page-band"]); return }   // the page fit places it
         guard let el = axEl, let rg = range, rg.count == 2 else {
             axFail = axEl == nil ? "no-element" : "no-range"
             rec(["event": "ax-range", "seq": s, "range": range ?? NSNull(), "hit": false, "why": axFail]); return
@@ -787,6 +926,54 @@ func refind(_ lines: [OLine], target: [String], near: CGRect?) -> CGRect? {
     return box
 }
 
+// ---------------- text bands: one rect per spoken line (docs/contracts/phase3-sentence-ids.md D) ----------------
+/// Page-space line rects [x0, y0, x1, y1] mapped to the screen with one fit (screen = s * page + offset); never a per-line fit.
+func mapBand(_ lines: [[Double]], fit: (Double, Double, Double)) -> [CGRect] {
+    lines.map { CGRect(x: fit.0 * $0[0] + fit.1, y: fit.0 * $0[1] + fit.2, width: fit.0 * ($0[2] - $0[0]), height: fit.0 * ($0[3] - $0[1])) }
+}
+func unionOf(_ rects: [CGRect]) -> CGRect? { rects.dropFirst().reduce(rects.first) { $0?.union($1) } }
+/// Each rect clamped to the window, the ones fully outside dropped; nil (hide) when under 30 % of the band's area is visible.
+func clampBand(_ rects: [CGRect], to win: CGRect) -> [CGRect]? {
+    let total = rects.reduce(0.0) { $0 + Double($1.width * $1.height) }
+    let vis = rects.map { $0.intersection(win) }.filter { !$0.isNull && $0.width > 0 && $0.height > 0 }
+    let shown = vis.reduce(0.0) { $0 + Double($1.width * $1.height) }
+    return total > 0 && shown >= 0.3 * total ? vis : nil
+}
+/// One rounded rect per band line inside a panel covering `area` (screen, top-left origin); the panel's layer has a
+/// bottom-left origin. Overlapping line rects fill once (one path, non-zero winding): nothing spans a gutter or a gap.
+func bandPath(_ rects: [CGRect], in area: CGRect) -> CGPath {
+    let p = CGMutablePath()
+    for b in rects {
+        let q = b.insetBy(dx: -4, dy: -2)
+        let local = CGRect(x: q.minX - area.minX, y: area.maxY - q.maxY, width: q.width, height: q.height).insetBy(dx: 1, dy: 1)
+        let rad = min(6, local.height / 2)
+        p.addRoundedRect(in: local, cornerWidth: rad, cornerHeight: rad)
+    }
+    return p
+}
+/// Refind as a check, not a source: passes when OCR recognises at least one band line (text from the page anchors) whose box
+/// intersects that line's mapped rect. Without line texts, the source lines' refind box must touch the band.
+func bandCheck(_ lines: [OLine], band: [CGRect], texts: [String?], src: [String]) -> Bool {
+    var known = false
+    for (r, t) in zip(band, texts) {
+        guard let t = t else { continue }
+        let at = Set(tokens(t)); if at.count < 2 { continue }
+        known = true
+        if lines.contains(where: { Double($0.toks.intersection(at).count) / Double(at.count) >= 0.75 && $0.box.intersects(r) }) { return true }
+    }
+    if known { return false }
+    guard let rf = refind(lines, target: src, near: unionOf(band)) else { return false }
+    return band.contains { $0.intersects(rf) }
+}
+/// The text of each doc.lines rect, from the show's anchors (page lines with their page rects), or nil when not an anchor.
+func bandTexts(_ docLines: [[Double]], anchors: [[Any]]) -> [String?] {
+    docLines.map { dl in
+        anchors.first { a in
+            a.count == 5 && zip(a[0..<4], dl).allSatisfy { abs((($0 as? Double) ?? ($0 as? Int).map(Double.init) ?? .nan) - $1) < 0.05 }
+        }?[4] as? String
+    }
+}
+
 /// Keys that switch the document under the box (tab / page): Cmd-1..9, Ctrl-Tab, Cmd-Shift-[ / ]. Cmd-Shift-3/4/5/6
 /// are macOS screenshot shortcuts, not tab switches: they used to hide the box for the rest of the read.
 func isTabSwitchKey(cmd: Bool, ctrl: Bool, shift: Bool, alt: Bool, keyCode kc: Int64) -> Bool {
@@ -957,6 +1144,7 @@ struct Tracker {
         var lastBox: CGRect? = nil, lastOut: [String: Any] = [:]
         var baseline: Set<String>? = nil
         var missRun = 0
+        var bandFails = 0                                              // band checks failed in a row (D.4)
         var figCapRef: CGRect? = nil, figCapSeq = -1
         var frameLogN = 0
         var lastAccurate = 0.0
@@ -1015,7 +1203,10 @@ struct Tracker {
                 if let dm = ev["doc"] as? [String: Any] { meta["label"] = dm["label"] ?? NSNull(); meta["doc_target"] = dm["target"] ?? NSNull() }
                 if let t = ev["doc_transform"] { meta["doc_transform"] = t }
                 if let c = ev["clamped"] { meta["clamped"] = c }
-                await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta) }
+                let bandRects = (ev["rects"] as? [[Double]] ?? []).compactMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                let docLines = ((ev["doc"] as? [String: Any])?["lines"] as? [[Double]] ?? []).filter { $0.count == 4 }
+                let sid: Any = ev["sentence_id"] ?? NSNull()
+                await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta, rects: bandRects, docLines: docLines, sentenceId: sid) }
             }
             if !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
@@ -1050,7 +1241,13 @@ struct Tracker {
                     var found: CGRect? = nil, method = ""
                     var hitFit: (Double, Double, Double)? = nil
                     var continueFig = false
-                    if !gAxDead, let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
+                    let evDoc = ev["doc"] as? [String: Any]
+                    let evDocLines = (evDoc?["lines"] as? [[Double]] ?? []).filter { $0.count == 4 }
+                    let evKind = evDoc?["kind"] as? String
+                    let isBandShow = (ev["cue"] as? String) != "figure" && (evKind == nil || evKind == "line")
+                        && (!(ev["rects"] as? [[Double]] ?? []).isEmpty || !evDocLines.isEmpty)
+                    var bandMapped: [CGRect]? = nil
+                    if !(isBandShow && !evDocLines.isEmpty), !gAxDead, let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
                         let content = CGRect(x: frame.minX, y: frame.minY + 24, width: frame.width, height: frame.height - 24)
                         // web views often report the whole column/container: only trust tight AX boxes, else use word boxes
                         if content.intersects(r) { if r.width < frame.width * 0.6 || r.width < 320 { found = r.intersection(frame); method = "ax" } }
@@ -1069,7 +1266,26 @@ struct Tracker {
                             let o0 = now()
                             var lines = recognise(img, frame: frame, accurate: accurate)
                             var hit: CGRect? = nil
-                            if let dm = ev["doc"] as? [String: Any], let (r, k, e, fit) = docMapFit(lines, dm, frame: frame) {
+                            if isBandShow {
+                                // refind is a check, never the band: pass -> keep; two failures in a row -> refit from anchors
+                                let cur = await MainActor.run { Live.shared.bandAbsolute() }
+                                let texts = bandTexts(evDocLines, anchors: evDoc?["anchors"] as? [[Any]] ?? [])
+                                if !cur.isEmpty && bandCheck(lines, band: cur, texts: cur.count == texts.count ? texts : cur.map { _ in nil }, src: target) {
+                                    bandFails = 0; hit = unionOf(cur); method = "check"
+                                } else {
+                                    bandFails += 1
+                                    if bandFails >= 2 || cur.isEmpty, let dm = evDoc, !evDocLines.isEmpty, let (_, k, e, fit) = docMapFit(lines, dm, frame: frame) {
+                                        let mapped = mapBand(evDocLines, fit: fit)
+                                        bandFails = 0; bandMapped = mapped; hit = unionOf(mapped); method = "doc"; hitFit = fit
+                                        out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10
+                                    } else if !cur.isEmpty {
+                                        let all = Set(lines.flatMap { $0.toks })
+                                        let samePage = baseline.map { Double(all.intersection($0).count) / Double(max(1, all.union($0).count)) >= 0.35 } ?? true
+                                        if samePage { hit = unionOf(cur); method = "kept" }               // the last good mapping, moved by scroll deltas
+                                        if bandFails >= 2 { let n = bandFails; await MainActor.run { Live.shared.rec(["event": "check_failed", "seq": seq, "fails": n]) } }
+                                    }
+                                }
+                            } else if let dm = ev["doc"] as? [String: Any], let (r, k, e, fit) = docMapFit(lines, dm, frame: frame) {
                                 let vis = r.intersection(frame)
                                 // sanity: the mapped box must lie mostly in the window, and a text line must agree with where its words are
                                 var ok = !vis.isNull && vis.width * vis.height >= 0.5 * r.width * r.height
@@ -1095,9 +1311,9 @@ struct Tracker {
                                 lastOut = out; continueFig = true
                             }
                             if continueFig {} else {
-                            if hit == nil { hit = refind(lines, target: target, near: lastBox) }
-                            if let h = hit, h.width < 24 || h.height < 7 { hit = nil; out["tiny_hit"] = true }   // a stray word, not the sentence
-                            if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
+                            if hit == nil && !isBandShow { hit = refind(lines, target: target, near: lastBox) }
+                            if !isBandShow, let h = hit, h.width < 24 || h.height < 7 { hit = nil; out["tiny_hit"] = true }   // a stray word, not the sentence
+                            if hit == nil && !isBandShow && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
                                 lastAccurate = tick
                                 lines = recognise(img, frame: frame, accurate: true)
                                 if let dm = ev["doc"] as? [String: Any], let (r, k, e, fit) = docMapFit(lines, dm, frame: frame) {
@@ -1126,10 +1342,10 @@ struct Tracker {
                             }
                         } else { errNote = "capture failed (Screen Recording permission?)" }
                     }
-                    let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method, fitFound = hitFit
+                    let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method, fitFound = hitFit, newBand = bandMapped
                     let hide = fnd == nil && (out["reason"] as? String) == "content-changed" || (fnd == nil && missRun >= 1 && out["reason"] != nil)
                     let rsn = out["reason"] as? String
-                    if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn, fit: fitFound) } }
+                    if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn, fit: fitFound, band: newBand) } }
                     if let r = found {
                         missRun = 0; lastBox = r
                         if method == "ax" { axHits += 1 } else if method == "doc" { docHits += 1 } else { ocrHits += 1 }

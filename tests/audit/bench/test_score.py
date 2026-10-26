@@ -81,6 +81,49 @@ def test_band_spanning_both_columns_misses():
     assert S.score_line_sentence(s, left + right, [show([0, 10, 220, 28])])[1] == "over_extend"
 
 
+def lshow(rects, target=None, **kw):
+    s = show(target if target is not None else [min(r[0] for r in rects), min(r[1] for r in rects), max(r[2] for r in rects), max(r[3] for r in rects)], **kw)
+    s["doc"]["lines"] = [list(r) for r in rects]; return s
+
+
+def test_cross_column_per_line_rects_hit_union_misses():
+    left = [[0, 10 * i, 100, 10 * i + 8] for i in range(5)]; right = [[120, 10 * i, 220, 10 * i + 8] for i in range(5)]
+    s = {"page": 1, "line_rects": [left[4], right[0]]}  # sentence crosses the column break
+    union = [0, 0, 220, 48]
+    assert S.score_line_sentence(s, left + right, [show(union)])[1] == "over_extend"
+    assert S.score_line_sentence(s, left + right, [lshow([left[4], right[0]], target=union)]) == (True, None)
+
+
+def test_doc_lines_rects_override_target():
+    # a target that covers nothing is ignored when doc.lines is non-empty
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[2], L[3]], target=[500, 500, 510, 510])]) == (True, None)
+    # doc.lines that misses a line is under_cover even when the target union would cover it
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[2]], target=band(2, 3))])[1] == "under_cover"
+
+
+def test_doc_lines_empty_or_malformed_falls_back_to_target():
+    s = show(band(2, 3)); s["doc"]["lines"] = []
+    assert S.score_line_sentence(sent([2, 3]), L, [s]) == (True, None)
+    s = show(band(2, 2)); s["doc"]["lines"] = [[0, 1], "x", None]
+    assert S.score_line_sentence(sent([2, 3]), L, [s])[1] == "under_cover"
+    s = {"cue_kind": "text_band", "doc": {"kind": "line", "page": 1, "lines": []}}
+    assert S.score_line_sentence(sent([2]), L, [s]) == (False, "no_doc_target")
+
+
+def test_doc_lines_over_extension_counts_lines_not_rects():
+    # one extra line covered by two rects of the same chunk is still one extra line (allowed)
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[2], L[3], L[4], band(4, 4)])]) == (True, None)
+    # two extra non-adjacent lines in one chunk -> over_extend
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[2], L[3], L[5], L[7]])])[1] == "over_extend"
+    # extras are counted per chunk: one extra each in two chunks passes
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[1], L[2]]), lshow([L[3], L[4]])]) == (True, None)
+
+
+def test_doc_lines_mixed_with_legacy_chunks():
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[2]]), show(band(3, 3))]) == (True, None)
+    assert S.score_line_sentence(sent([2, 3]), L, [lshow([L[2]]), show(band(3, 3), cue="figure_box", kind="figure")])[1] == "wrong_cue"
+
+
 def test_split_chunks_cover_together():
     assert S.score_line_sentence(sent([2, 3]), L, [show(band(2, 2)), show(band(3, 3))]) == (True, None)
 

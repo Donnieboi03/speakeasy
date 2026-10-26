@@ -55,9 +55,8 @@ def _split_overlaps(figs):
     return figs
 
 def _toks(s):
-    import unicodedata
-    s = unicodedata.normalize("NFKC", s or "")            # PDF ligatures: 'classi\ufb01cation' -> 'classification'
-    return [t for t in re.findall(r"[a-z0-9]+", s.lower()) if len(t) > 1]
+    from textfold import match_tokens                     # the shared fold's match tokens: digits kept, no stopwords
+    return match_tokens(s)
 
 # ---------------- PDF (PyMuPDF; runs in the venv) ----------------
 def _union(rs):

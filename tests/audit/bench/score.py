@@ -152,20 +152,35 @@ def _target(show):
     return t if isinstance(t, list) and len(t) == 4 else None
 
 
+def _is_rect(r):
+    return isinstance(r, (list, tuple)) and len(r) == 4 and all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in r)
+
+
+def _band_rects(show):
+    """B_c for one chunk: the show's doc.lines rects when non-empty (phase 3 contract G.2), else [doc.target]."""
+    d = show.get("doc") if isinstance(show, dict) else None
+    ls = d.get("lines") if isinstance(d, dict) else None
+    if isinstance(ls, list):
+        rs = [list(r) for r in ls if _is_rect(r)]
+        if rs: return rs
+    t = _target(show)
+    return [t] if t is not None else None
+
+
 def score_line_sentence(sent, page_lines, shows, cover_frac=0.75, axis=0.5, extra_max=1):
     """sent: GT sentence (page, line_rects); page_lines: GT lines of its page; shows: [show or None] one per chunk of the sentence.
-    Returns (hit, reason|None)."""
+    A chunk's band is its doc.lines rects when present, else its doc.target. Returns (hit, reason|None)."""
     if not shows: return False, "not_spoken"
     if any(s is None for s in shows): return False, "no_show"
-    if any(_target(s) is None for s in shows): return False, "no_doc_target"
+    if any(_band_rects(s) is None for s in shows): return False, "no_doc_target"
     if any(s.get("cue_kind") != "text_band" or s["doc"].get("kind") != "line" for s in shows): return False, "wrong_cue"
     if any(s["doc"].get("page") != sent["page"] for s in shows): return False, "wrong_page"
-    G = [list(r) for r in sent["line_rects"]]; B = [_target(s) for s in shows]
-    covered = sum(1 for g in G if any(covers(b, g, axis) for b in B))
+    G = [list(r) for r in sent["line_rects"]]; B = [_band_rects(s) for s in shows]
+    covered = sum(1 for g in G if any(covers(r, g, axis) for rs in B for r in rs))
     if covered < math.ceil(cover_frac * len(G)): return False, "under_cover"
     others = [l for l in page_lines if list(l) not in G]
-    for b in B:
-        if sum(1 for l in others if covers(b, l, axis)) > extra_max: return False, "over_extend"
+    for rs in B:
+        if sum(1 for l in others if any(covers(r, l, axis) for r in rs)) > extra_max: return False, "over_extend"
     return True, None
 
 
