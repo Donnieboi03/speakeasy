@@ -5,7 +5,8 @@ Defaults: ~/.speakeasy/last_capture.png and last log line. Reports captured rect
 Also audits labels and the Phase 2 log fields for document text (`label_audit`; `PRIVACY_LEAK` when anything is found):
 without SPEAKEASY_LOG_TEXT=1 every focus-log / live-file / tracker-draw label must be null or match LABEL_RE, and the
 Phase 2 fields (sent, score, runner_up, doc.target_src, doc.split_from, first_focus_ms, doc_ready_ms, doc_parse,
-ground_miss_reasons) hold numbers, enums and labels only. Offending values are reported by position, never printed."""
+ground_miss_reasons) and the Phase 4 layout fields (doc_parse.layout, layout_events) hold numbers, enums, labels and the
+detector version hash only. Offending values are reported by position, never printed."""
 import json, os, re, sys, argparse
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from PIL import Image
@@ -27,9 +28,36 @@ def _jl(p):
             try: rows.append((i + 1, json.loads(l)))
             except Exception: pass
     return rows
+LAYOUT_REASONS = {"disabled", "no-onnxruntime", "model-missing", "model-mismatch", "load-failed", "inference-failed", "pdfkit-engine"}
+DETECTOR_VERSION_RE = re.compile(r"^pp-doclayout-s/[0-9a-f]{12}$")
+ERROR_CLASS_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,80}$")
+def _int(v): return isinstance(v, int) and not isinstance(v, bool)
 def _counts_only(v):
     if isinstance(v, dict): return all(k in COUNT_KEYS and _counts_only(x) for k, x in v.items())
     return v is None or isinstance(v, (bool, int, float))
+def _kind_counts(v):
+    return isinstance(v, dict) and set(v) <= {"paragraph", "caption", "figure", "table"} and all(_int(x) for x in v.values())
+def _page_layout_ok(v):
+    """doc_parse.layout (Phase 4): {src, ms, blocks_by_kind} on a detector page, {src, reason} on a fallback page."""
+    if not isinstance(v, dict) or v.get("src") not in ("detector", "heuristic"): return False
+    if not set(v) <= {"src", "ms", "blocks_by_kind", "reason"}: return False
+    return ("ms" not in v or _int(v["ms"])) and ("blocks_by_kind" not in v or _kind_counts(v["blocks_by_kind"])) and \
+        ("reason" not in v or v["reason"] in LAYOUT_REASONS)
+def _layout_event_ok(e):
+    """layout_events entries (Phase 4): layout_page / layout_detector_unavailable, numbers, enums and hashes only."""
+    if not isinstance(e, dict): return False
+    dv = e.get("detector_version")
+    if dv is not None and not (isinstance(dv, str) and DETECTOR_VERSION_RE.match(dv)): return False
+    if e.get("event") == "layout_page":
+        return set(e) == {"event", "page", "ms", "detector_version", "blocks_by_kind"} and _int(e["page"]) and _int(e["ms"]) and _kind_counts(e["blocks_by_kind"])
+    if e.get("event") == "layout_detector_unavailable":
+        return set(e) == {"event", "reason", "error", "detector_version", "page"} and e["reason"] in LAYOUT_REASONS and \
+            (e["error"] is None or (isinstance(e["error"], str) and ERROR_CLASS_RE.match(e["error"]))) and (e["page"] is None or _int(e["page"]))
+    return False
+def _doc_parse_ok(v):
+    if not isinstance(v, dict): return False
+    rest = {k: x for k, x in v.items() if k != "layout"}
+    return _counts_only(rest) and ("layout" not in v or _page_layout_ok(v["layout"]))
 def label_audit(runs_log):
     logs = os.path.dirname(runs_log); fl = a.focus_log or os.path.join(logs, "focus.jsonl"); tl = a.tracker_log or os.path.join(logs, "tracker.jsonl")
     live = a.live or os.path.join(os.path.dirname(logs), "focus.json")
@@ -63,8 +91,11 @@ def label_audit(runs_log):
     for n, r in R:
         for k in ("first_focus_ms", "doc_ready_ms"):
             if k in r and not (r[k] is None or (isinstance(r[k], int) and not isinstance(r[k], bool))): bad.append({"where": "runs.jsonl", "line": n, "field": k})
-        for k in ("doc_parse", "ground_miss_reasons"):
-            if k in r and not (isinstance(r[k], dict) and _counts_only(r[k])): bad.append({"where": "runs.jsonl", "line": n, "field": k})
+        if "doc_parse" in r and not _doc_parse_ok(r["doc_parse"]): bad.append({"where": "runs.jsonl", "line": n, "field": "doc_parse"})
+        if "ground_miss_reasons" in r and not (isinstance(r["ground_miss_reasons"], dict) and _counts_only(r["ground_miss_reasons"])):
+            bad.append({"where": "runs.jsonl", "line": n, "field": "ground_miss_reasons"})
+        if "layout_events" in r and not (isinstance(r["layout_events"], list) and all(_layout_event_ok(e) for e in r["layout_events"])):
+            bad.append({"where": "runs.jsonl", "line": n, "field": "layout_events"})
     return {"text_mode": text_mode, "labels_checked": checked, "violations": len(bad), "first": bad[:5], "verdict": "ok" if not bad else "document text in labels or phase-2 fields"}
 out["label_audit"] = label_audit(a.log)
 if out["label_audit"]["violations"]: out["PRIVACY_LEAK"] = out["label_audit"]["verdict"]

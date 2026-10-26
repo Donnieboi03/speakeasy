@@ -45,6 +45,7 @@ class DocJob(threading.Thread):
         doc, cache = docmap.load(path, sel_text=self.sel)
         self._fill(doc_source=src, doc_path_hash=docmap.path_hash(hint.get("url") if src == "browser" else path), doc_cache=cache)
         if not doc: return
+        if cache in ("miss", "partial-miss", "miss-pdfkit") and doc["kind"] == "pdf": self._fill(layout_events=doc["layout_events"])
         out = {"kind": doc["kind"], "figures": [], "page": None, "anchors": []}
         if doc["kind"] == "pdf":
             pg, meth = docmap.match_page(doc, self.sel, hint.get("title") or "")

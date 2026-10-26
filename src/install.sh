@@ -94,7 +94,12 @@ fi
 if [ -x "$TTS_VENV/bin/python" ]; then
   "$TTS_VENV/bin/python" -c 'import pypdfium2, PIL' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pypdfium2 pillow >/dev/null 2>&1 \
     && echo "pypdfium2 ready for document-aware focus" || echo "NOTE: pypdfium2 not installed; PDF figure mapping off (Markdown still works)"
+  "$TTS_VENV/bin/python" -c 'import onnxruntime, numpy' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q onnxruntime numpy >/dev/null 2>&1 \
+    && echo "onnxruntime ready for PDF layout detection" || echo "WARNING: onnxruntime not installed; PDF layout detection off"
 fi
+# PDF layout model (PP-DocLayout-S, Apache-2.0): pinned file, size and sha256 checked; a bad file never stays
+LAYOUT_MODEL_RC=0
+python3 "$SRC/layoutdet.py" fetch "$HOME_DIR/models" || LAYOUT_MODEL_RC=$?
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 set_cfg SPEAKEASY_VISION auto
 set_cfg SPEAKEASY_FOCUS on
@@ -131,3 +136,6 @@ Open ~/Applications/Speakeasy.app once (it stays in the menu bar; add it to Logi
  Pluggable TTS: SPEAKEASY_TTS=cmd SPEAKEASY_TTS_CMD='your-tts --rate {rate} {text}' (text piped to stdin if no {text}).
  Logs: $HOME_DIR/logs/runs.jsonl   Stats: speakeasy stats --json   Test: echo '| a | b |' | speakeasy rewrite
 MSG
+# a checksum mismatch fails the install (after everything else is in place); a download failure only warns
+case "$LAYOUT_MODEL_RC" in 0|2) ;; *) echo "ERROR: layout model not installed (status $LAYOUT_MODEL_RC); re-run install.sh"; exit 1;; esac
+exit 0
