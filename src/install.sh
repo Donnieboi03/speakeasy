@@ -6,7 +6,8 @@ HOME_DIR="${SPEAKEASY_HOME:-$HOME/.speakeasy}"
 MODEL="${SPEAKEASY_MODEL:-qwen3-vl:4b-instruct}"
 VMODEL="${SPEAKEASY_VISION_MODEL:-qwen3-vl:4b-instruct}"
 mkdir -p "$HOME_DIR/bin" "$HOME_DIR/logs"
-cp "$SRC/speakeasy.py" "$SRC/highlight.py" "$SRC/docmap.py" "$SRC/ground.py" "$SRC/stats.py" "$SRC/pdfpage.py" "$SRC/selog.py" "$SRC/observe.py" "$SRC/provider.py" "$SRC/speakeasy" "$HOME_DIR/bin/"
+cp "$SRC"/*.py "$SRC/speakeasy" "$HOME_DIR/bin/"
+rm -f "$HOME_DIR/bin/ground.py"   # Florence grounding worker from older installs
 # Live focus tracker (Swift: ScreenCaptureKit + Vision OCR + AX). Optional: without it the box is static.
 if [ "$(uname)" = "Darwin" ] && [ -f "$SRC/tracker.swift" ]; then
   if command -v swiftc >/dev/null; then
@@ -101,7 +102,6 @@ set_cfg SPEAKEASY_FOCUS_TAGS off
 set_cfg SPEAKEASY_TRACK on
 set_cfg SPEAKEASY_DOC_READ local
 set_cfg SPEAKEASY_GROUND auto
-set_cfg SPEAKEASY_FLORENCE off
 set_cfg SPEAKEASY_KEEP_ALIVE 10m
 # RAM: the 4-bit (Q4_K_M) build of the model is what fits next to Kokoro on 16-18 GB Macs
 if command -v ollama >/dev/null; then
@@ -115,7 +115,7 @@ set_cfg SPEAKEASY_FOCUS_COLOR "#3B82F6"
 set_cfg SPEAKEASY_FOCUS_OPACITY 0.22
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
 
-# The menu-bar app owns the hotkey, capture and the tracker (Hammerspoon is no longer used).
+# The menu-bar app owns the hotkey, capture and the tracker.
 APP_SRC="$(cd "$SRC/.." && pwd)/app"
 if [ -d "$APP_SRC" ] && command -v swift >/dev/null; then
   if (cd "$APP_SRC" && bash build.sh "$HOME/Applications" >"$HOME_DIR/logs/app_build.log" 2>&1); then
@@ -127,8 +127,6 @@ cat <<MSG
 Open ~/Applications/Speakeasy.app once (it stays in the menu bar; add it to Login Items to start with your Mac).
  Hotkey: Control-Option-S reads the selection (press again to stop); change it from the menu bar icon.
  The app asks for Accessibility and Screen Recording only when you click "Grant" in its Permissions window.
- On first launch it takes the hotkey over from an older Hammerspoon speakeasy block (SPEAKEASY_HOTKEY=app); that block
- can then be deleted from ~/.hammerspoon/init.lua.
  Nothing selected? the focused window is explained (SPEAKEASY_NO_SELECTION_CAPTURE=window|none in ~/.speakeasy/config).
  Pluggable TTS: SPEAKEASY_TTS=cmd SPEAKEASY_TTS_CMD='your-tts --rate {rate} {text}' (text piped to stdin if no {text}).
  Logs: $HOME_DIR/logs/runs.jsonl   Stats: speakeasy stats --json   Test: echo '| a | b |' | speakeasy rewrite

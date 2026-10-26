@@ -1,8 +1,6 @@
 """Observability helpers: memory, Ollama status, captures, `speakeasy last` / `stats` (split out of speakeasy.py)."""
-import base64, json, os, re, signal, subprocess, sys, tempfile, time, urllib.request, urllib.error
-from selog import *
-from selog import DEFAULT_URL, LOG_KEEP
-from selog import _home_rel, _on
+import json, os, re, subprocess, sys, urllib.request
+from selog import DEFAULT_URL, LOG_KEEP, home
 
 def image_size(data):
     """(w, h) from PNG/JPEG/GIF header bytes, stdlib only; None if unknown."""
@@ -103,12 +101,6 @@ def is_owned_capture(p):
     if not os.path.basename(rp).startswith(CAP_PREFIX): return False
     roots = {os.path.realpath(r) for r in ("/tmp", "/private/tmp", tempfile.gettempdir())}
     return os.path.dirname(rp) in roots
-
-def is_temp_path(p):
-    import tempfile
-    rp = os.path.realpath(p)
-    roots = {os.path.realpath(r) for r in ("/tmp", "/private/tmp", tempfile.gettempdir())}
-    return any(rp.startswith(r.rstrip("/") + "/") for r in roots)
 
 def handle_capture_file(img, owned=False):
     """Keep a copy of the screenshot for review (default) or delete it (SPEAKEASY_KEEP_CAPTURE=0)."""

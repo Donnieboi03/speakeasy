@@ -16,7 +16,7 @@ PY="$RES/python/bin/python3"
 uv pip install --python "$PY" --break-system-packages -q pypdfium2 pillow
 [ "$WITH_TTS" = "--with-tts" ] && uv pip install --python "$PY" --break-system-packages -q "mlx-audio[server]" "misaki[en]" webrtcvad-wheels uvicorn fastapi python-multipart num2words
 rm -rf "$RES/backend"; mkdir -p "$RES/backend"
-cp ../src/speakeasy.py ../src/highlight.py ../src/docmap.py ../src/ground.py ../src/stats.py ../src/pdfpage.py ../src/selog.py ../src/observe.py ../src/provider.py "$RES/backend/"
+cp ../src/*.py "$RES/backend/"
 cat > "$RES/backend/speakeasy" <<'SH'
 #!/bin/sh
 # launcher for the bundled backend: bundled CPython, bundled tracker

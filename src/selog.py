@@ -1,5 +1,5 @@
 """Paths, config, run log and the pill state file (split out of speakeasy.py)."""
-import base64, json, os, re, signal, subprocess, sys, tempfile, time, urllib.request, urllib.error
+import json, os, subprocess, sys, time
 DEFAULT_URL = "http://localhost:11434/v1"
 DEFAULT_MODEL = "qwen3-vl:4b-instruct"     # one model for text, vision and grounding
 
@@ -9,6 +9,10 @@ def home():
 
 def _on(key, default="on"):
     return os.environ.get(key, default).strip().lower() not in ("off", "0", "false", "no")
+
+def text_logging_on():
+    """SPEAKEASY_LOG_TEXT=1: runs and focus logs may carry text; otherwise only lengths and hashes."""
+    return os.environ.get("SPEAKEASY_LOG_TEXT") == "1"
 
 def load_config():
     """Defaults from $SPEAKEASY_HOME/config (KEY=VALUE lines). Real env vars win."""
@@ -93,7 +97,7 @@ def log_run(rec, inp, out):
             sm = (rec.get("timings") or {}).get("speak_ms")
             rec["audio_s"] = round(sm / 1000, 1) if spoke and isinstance(sm, (int, float)) else 0
             rec["kind"] = _st.kind_of(rec)
-        if os.environ.get("SPEAKEASY_LOG_TEXT") == "1":
+        if text_logging_on():
             rec["input"] = inp; rec["output"] = out
         with open(os.path.join(d, "runs.jsonl"), "a", encoding="utf-8") as f:
             f.write(json.dumps(rec, ensure_ascii=False) + "\n")

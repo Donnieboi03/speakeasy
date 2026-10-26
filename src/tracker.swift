@@ -5,9 +5,8 @@
 //      current sentence's source lines among the recognised lines (token overlap) and box them tightly.
 // Hides the box when the window is not frontmost, the content changed (tab switch), or the text scrolled off.
 // Reads  ~/.speakeasy/focus.json (written by speakeasy as each sentence starts playing)
-// Draws the box itself (native click-through panel, --overlay native, default): scroll / key / app-switch / AX events move or
-// hide it in-process; OCR scans correct drift. Still writes ~/.speakeasy/track.json (Hammerspoon fallback overlay) and
-// appends stats and per-event lag to ~/.speakeasy/logs/tracker.jsonl
+// Draws the box itself (native click-through panel): scroll / key / app-switch / AX events move or hide it in-process;
+// OCR scans correct drift. Appends stats and per-event lag to ~/.speakeasy/logs/tracker.jsonl
 // Everything is local (Vision + ScreenCaptureKit are part of macOS). Build: swiftc -O -parse-as-library tracker.swift
 import Foundation
 import AppKit
@@ -23,12 +22,6 @@ let BUILD = "dev"                     // replaced with the git sha / source hash
 func readJSON(_ path: String) -> [String: Any]? {
     guard let d = FileManager.default.contents(atPath: path) else { return nil }
     return (try? JSONSerialization.jsonObject(with: d)) as? [String: Any]
-}
-func writeJSONAtomic(_ obj: [String: Any], _ path: String) {
-    guard let d = try? JSONSerialization.data(withJSONObject: obj) else { return }
-    let tmp = path + ".tmp"
-    FileManager.default.createFile(atPath: tmp, contents: d)
-    _ = rename(tmp, path)
 }
 let logQ = DispatchQueue(label: "speakeasy.log")          // log writes never run on the main thread
 func appendLine(_ obj: [String: Any], _ path: String) {
@@ -339,8 +332,7 @@ final class Live: NSObject {
                      "on_screen": p.isVisible]) { $1 })
                 shown = true; lastDrawn = f
             }
-            if drawnSeq != seq { drawnSeq = seq; let o: [String: Any] = ["seq": seq, "tracker_pid": Int(getpid()), "drawn": true, "ts": now()], h = home
-                logQ.async { writeJSONAtomic(o, h + "/overlay.json") } }
+            drawnSeq = seq
             hideTrigger = nil
         } else {
             if p.isVisible { p.orderOut(nil) }
@@ -535,7 +527,6 @@ final class Live: NSObject {
             self.drawFails += 1
             self.rec(["event": "draw-failed", "seq": s, "why": why, "after_ms": 300])
             let line = "\(stamp()) NATIVE PANEL FAILED TO DRAW: seq \(s) (\(why)), run \(self.runId)\n"
-            if let h = FileHandle(forWritingAtPath: self.home + "/logs/hs.log") { h.seekToEndOfFile(); h.write(line.data(using: .utf8)!); h.closeFile() }
             FileHandle.standardError.write(line.data(using: .utf8)!)
         }
         if axDead { rec(["event": "ax-range", "seq": s, "hit": false, "why": "ax-disabled"]); return }
@@ -921,7 +912,7 @@ struct Tracker {
         appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "start", "window_id": Int(a["window-id"] ?? "") ?? NSNull(),
                     "pid": Int(a["pid"] ?? "") ?? NSNull(), "fps": a["fps"] ?? "3", "screen_recording": srAllowed, "accessibility": axAllowed,
                     "tracker_pid": Int(getpid()), "run_id": a["run-id"] ?? NSNull(), "build": BUILD,
-                    "overlay": (a["overlay"] ?? "native") == "native" ? "swift-panel" : "hammerspoon"], h0 + "/logs/tracker.jsonl")
+                    "overlay": "swift-panel"], h0 + "/logs/tracker.jsonl")
         // Never prompt: without Screen Recording permission, log and exit before any ScreenCaptureKit/CGWindowList call.
         if !srAllowed {
             appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0], h0 + "/logs/tracker.jsonl")
@@ -934,12 +925,11 @@ struct Tracker {
         let tickS = 0.08                                               // loop tick; window front checks also run on their own 25 ms timer
         var lastScan = 0.0, lastTick = now()
         let accurate = (a["ocr"] ?? "fast") == "accurate"     // fast first; accurate is the retry when fast misses
-        let focusPath = home + "/focus.json", trackPath = home + "/track.json"
+        let focusPath = home + "/focus.json"
         try? FileManager.default.createDirectory(atPath: home + "/logs", withIntermediateDirectories: true)
-        // element focused at hotkey time; only when already trusted (launched by Hammerspoon), never prompt
+        // element focused at hotkey time; only when already trusted, never prompt
         let axEl = pid > 0 && AXIsProcessTrusted() ? focusedElement(pid) : nil
-        let native = true            // the native panel is the only focus box (the Hammerspoon canvas was removed)
-        if native { await MainActor.run { Live.shared.runId = a["run-id"] ?? ""; Live.shared.setup(home: home, pid: pid, el: axEl); Live.shared.startWinWatch(wid) } }
+        await MainActor.run { Live.shared.runId = a["run-id"] ?? ""; Live.shared.setup(home: home, pid: pid, el: axEl); Live.shared.startWinWatch(wid) }
 
         // ScreenCaptureKit: find our window once
         var filter: SCContentFilter? = nil
@@ -997,26 +987,24 @@ struct Tracker {
             let showing = state == "show" && (fresh || lastSeq >= 0)
             if showing && (seq != lastSeq || epid != lastPid) {
                 lastSeq = seq; lastPid = epid; missRun = 0
-                if native {
-                    let rr = (ev["rect"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
-                    let rg = ev["range"] as? [Int], col = ev["color"] as? String, op = ev["opacity"] as? Double ?? 0.22
-                    let ell = (ev["shape"] as? String) == "ellipse"
-                    let sl = ev["src"] as? [String] ?? [], sq = seq
-                    let dkind = (ev["doc"] as? [String: Any])?["kind"] as? String
-                    let isText = !ell && (dkind == nil || dkind == "line")
-                    let nl = ev["nlines"] as? Int
-                    let cueFig = (ev["cue"] as? String) == "figure", drawOn = ev["draw"] as? Bool ?? true
-                    let ref = (ev["ref"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
-                    let hdr = (ev["header"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
-                    let ck = ev["cue_kind"] as? String
-                    var meta: [String: Any] = [:]
-                    if let dm = ev["doc"] as? [String: Any] { meta["label"] = dm["label"] ?? NSNull(); meta["doc_target"] = dm["target"] ?? NSNull() }
-                    if let t = ev["doc_transform"] { meta["doc_transform"] = t }
-                    if let c = ev["clamped"] { meta["clamped"] = c }
-                    await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta) }
-                }
+                let rr = (ev["rect"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                let rg = ev["range"] as? [Int], col = ev["color"] as? String, op = ev["opacity"] as? Double ?? 0.22
+                let ell = (ev["shape"] as? String) == "ellipse"
+                let sl = ev["src"] as? [String] ?? [], sq = seq
+                let dkind = (ev["doc"] as? [String: Any])?["kind"] as? String
+                let isText = !ell && (dkind == nil || dkind == "line")
+                let nl = ev["nlines"] as? Int
+                let cueFig = (ev["cue"] as? String) == "figure", drawOn = ev["draw"] as? Bool ?? true
+                let ref = (ev["ref"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                let hdr = (ev["header"] as? [Double]).flatMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
+                let ck = ev["cue_kind"] as? String
+                var meta: [String: Any] = [:]
+                if let dm = ev["doc"] as? [String: Any] { meta["label"] = dm["label"] ?? NSNull(); meta["doc_target"] = dm["target"] ?? NSNull() }
+                if let t = ev["doc_transform"] { meta["doc_transform"] = t }
+                if let c = ev["clamped"] { meta["clamped"] = c }
+                await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta) }
             }
-            if native && !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
+            if !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
             var scanned = false
             var winFrame: CGRect? = nil
@@ -1024,7 +1012,7 @@ struct Tracker {
                 activeS += tick - prevTick
                 let ws = windowState(wid)
                 var liveAx = false, deltaOK = false, wantNow = false
-                if native, let w = ws {
+                if let w = ws {
                     let fr = w.front && w.onScreen
                     let appFront = NSWorkspace.shared.frontmostApplication?.processIdentifier == pid
                     (liveAx, deltaOK, wantNow) = await MainActor.run { () -> (Bool, Bool, Bool) in
@@ -1108,7 +1096,7 @@ struct Tracker {
                             ocrMs += (now() - o0) * 1000; ocrN += 1
                             let all = Set(lines.flatMap { $0.toks })
                             if baseline == nil { baseline = all }
-                            if native, let bl = baseline, sameContent(all, bl) {
+                            if let bl = baseline, sameContent(all, bl) {
                                 await MainActor.run {
                                     let L = Live.shared
                                     if L.hiddenByKey && now() - L.keyHideAt > 0.4 {
@@ -1124,13 +1112,10 @@ struct Tracker {
                             }
                         } else { errNote = "capture failed (Screen Recording permission?)" }
                     }
-                    if native {
-                        let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method, wf = frame
-                        let hide = fnd == nil && (out["reason"] as? String) == "content-changed" || (fnd == nil && missRun >= 1 && out["reason"] != nil)
-                        let rsn = out["reason"] as? String
-                        _ = wf
-                        if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn) } }
-                    }
+                    let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method
+                    let hide = fnd == nil && (out["reason"] as? String) == "content-changed" || (fnd == nil && missRun >= 1 && out["reason"] != nil)
+                    let rsn = out["reason"] as? String
+                    if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn) } }
                     if let r = found {
                         missRun = 0; lastBox = r
                         if method == "ax" { axHits += 1 } else if method == "doc" { docHits += 1 } else { ocrHits += 1 }
@@ -1145,17 +1130,14 @@ struct Tracker {
             } else {
                 out["visible"] = false; out["reason"] = "idle"
             }
-            // write only on change (>2pt move or visibility flip)
+            // changed = >2pt move or visibility flip
             func same(_ x: [String: Any], _ y: [String: Any]) -> Bool {
                 if (x["visible"] as? Bool) != (y["visible"] as? Bool) || (x["seq"] as? Int) != (y["seq"] as? Int) { return false }
                 guard let a = x["rect"] as? [Double], let b = y["rect"] as? [Double] else { return (x["rect"] == nil) == (y["rect"] == nil) }
                 return zip(a, b).allSatisfy { abs($0 - $1) <= 2 }
             }
             let changed = !out.isEmpty && !same(out, lastOut)
-            if changed {
-                var w = out; w["ts"] = (now() * 1000).rounded() / 1000
-                writeJSONAtomic(w, trackPath); lastOut = out
-            }
+            if changed { lastOut = out }
             // per-frame log (every scan and every visibility/position change), capped per run
             if (scanned || changed) && frameLogN < 3000 && state == "show" {
                 frameLogN += 1
@@ -1175,9 +1157,8 @@ struct Tracker {
             let wait = max(0.01, tickS - dt)
             try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
         }
-        if native { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.flush() } }
-        let lagSt: [String: Any] = native ? await MainActor.run { Live.shared.stats() } : [:]
-        writeJSONAtomic(["visible": false, "reason": "tracker-exit", "seq": lastSeq, "focus_pid": lastPid, "ts": now()], trackPath)
+        await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.flush() }
+        let lagSt: [String: Any] = await MainActor.run { Live.shared.stats() }
         let wall = max(0.001, now() - t0), active = frames
         let hits = axHits + ocrHits + docHits
         var st: [String: Any] = ["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": exitReason, "focus_pid": lastPid, "window_id": Int(wid), "wall_s": (wall * 10).rounded() / 10,
@@ -1191,7 +1172,7 @@ struct Tracker {
                                  "rss_mb_peak": maxRss.rounded(), "ocr_level": accurate ? "accurate" : "fast"]
         if let e = errNote { st["error"] = e }
         for (k, v) in lagSt { st[k] = v }
-        st["overlay"] = native ? "swift-panel" : "hammerspoon"
+        st["overlay"] = "swift-panel"
         appendLine(st, home + "/logs/tracker.jsonl")
     }
 }

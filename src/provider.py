@@ -1,7 +1,7 @@
 """Which OpenAI-compatible endpoint a request goes to: local Ollama (default) or OpenRouter (opt-in, bring your own key).
 
 SPEAKEASY_LLM=local|openrouter     spoken rewrite (text and image explanations)
-SPEAKEASY_GROUND=local|openrouter  figure-part grounding (also auto|vlm|florence|off, all local)
+SPEAKEASY_GROUND=local|openrouter  figure-part grounding (also auto = local, or off)
 SPEAKEASY_OR_MODEL                 OpenRouter model id (default google/gemini-3.5-flash-lite)
 The key lives in the macOS Keychain (service "speakeasy-openrouter", account "openrouter"), never in ~/.speakeasy/config;
 SPEAKEASY_OR_KEY in the environment overrides it (CI / testing). Text and images only leave the Mac when a switch is on."""

@@ -52,7 +52,7 @@ PREVIEW = lambda p, pg=2: {"app": "Preview", "bundle": "com.apple.Preview", "tit
 GT = {"fig3": [150, 105, 450, 330], "fig4": [72, 445, 540, 610], "fig4a": [72, 445, 292, 610], "fig4b": [320, 445, 540, 610], "cap4_y": 640, "cite4b_y": 680}
 try:
     # --- PDF figure / caption / panel detection
-    sp, l, sh, h, rc = run(PREVIEW(PDF), "The drowsiness score in Figure 4b climbs steadily after minute 30.")
+    sp, l, sh, h, rc = run(PREVIEW(PDF), "The drowsiness score in Figure 4b climbs steadily after minute 30.", SPEAKEASY_LOG_TEXT=1)  # anchor text only with text logging on
     D = docs(sh); d = D[0] if D else {}
     add("pdf_exit0", rc == 0, rc); add("pdf_doc_source_preview", l.get("doc_source") == "preview", l.get("doc_source"))
     add("pdf_page_2", l.get("page") == 2, l.get("page")); add("pdf_figures_found_2", l.get("figures_found") == 2, l.get("figures_found"))

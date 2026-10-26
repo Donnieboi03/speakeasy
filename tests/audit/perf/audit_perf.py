@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """Black-box performance/behaviour budgets for the AX-first tracker, native overlay, single VLM and menu-bar app.
-Reads only logs: <logs>/tracker.jsonl, runs.jsonl, focus.jsonl, hs.log (legacy Hammerspoon), overlay.jsonl (if present).
+Reads only logs: <logs>/tracker.jsonl, runs.jsonl, focus.jsonl.
 Each check returns PASS / FAIL / NEEDS-BUILD (the field the spec relies on is not logged yet) / NO-DATA.
 Usage: audit_perf.py LOGDIR [--json out.json] [--md out.md]
 
@@ -26,15 +26,14 @@ def jl(p):
     return out
 def q(v, p): v = sorted(v); return v[min(len(v) - 1, int(round(p * (len(v) - 1))))] if v else None
 def audit(d):
-    T, Rn, H = jl(os.path.join(d, "tracker.jsonl")), jl(os.path.join(d, "runs.jsonl")), (open(os.path.join(d, "hs.log"), errors="ignore").read() if os.path.exists(os.path.join(d, "hs.log")) else "")
+    T, Rn = jl(os.path.join(d, "tracker.jsonl")), jl(os.path.join(d, "runs.jsonl"))
     F = [l for l in T if l.get("event") == "frame"]; X = [l for l in T if l.get("event") == "exit"]; C = []
     def add(name, status, detail, needs=None): C.append({"check": name, "status": status, "detail": detail, **({"needs": needs} if needs else {})})
     # 1 scroll -> box lag
     lag = [l["scroll_lag_ms"] for l in F if isinstance(l.get("scroll_lag_ms"), (int, float))]; src = "tracker.jsonl"
     if not lag:
-        hs = [(float(a), float(b)) for a, b in re.findall(r"lag scroll->box avg ([\d.]+) ms max ([\d.]+) ms", H)]
         ex = [(x["scroll_lag_avg_ms"], x["scroll_lag_max_ms"]) for x in X if isinstance(x.get("scroll_lag_avg_ms"), (int, float))]
-        sess = ex or hs; src = "tracker exit" if ex else "hs.log (legacy)"
+        sess = ex; src = "tracker exit"
         if sess:
             avg, mx = statistics.mean(a for a, _ in sess), max(b for _, b in sess)
             add("scroll_lag_budget", "PASS" if avg < B["scroll_avg"] and mx < B["scroll_max"] else "FAIL", {"source": src, "sessions": len(sess), "avg_ms": round(avg, 1), "max_ms": round(mx, 1), "budget": f"avg<{B['scroll_avg']} max<{B['scroll_max']}"})
@@ -43,8 +42,6 @@ def audit(d):
     else:
         avg, mx = statistics.mean(lag), max(lag)
         add("scroll_lag_budget", "PASS" if avg < B["scroll_avg"] and mx < B["scroll_max"] else "FAIL", {"source": src, "n": len(lag), "avg_ms": round(avg, 1), "p95_ms": q(lag, .95), "max_ms": mx})
-    fit = [abs(float(x)) for x in re.findall(r"fit residual (-?[\d.]+) pt", H)]
-    if fit: add("scroll_fit_residual_under_20pt", "PASS" if max(fit) < 20 else "FAIL", {"n": len(fit), "max_pt": max(fit), "values": fit[:8]})
     # 2 hide latency on switch
     hides = [l for l in F if l.get("visible") is False and (l.get("trigger") or l.get("reason"))]
     hm = [l["hide_ms"] for l in hides if isinstance(l.get("hide_ms"), (int, float))]
@@ -95,7 +92,7 @@ def audit(d):
     models.discard(None); recent = {x.get("name") for r in Rn[-5:] for x in (r.get("ollama_models") or []) if isinstance(x, dict)}
     add("single_local_vlm_qwen3_vl", "PASS" if recent and all("qwen3-vl" in m.lower() or "qwen3vl" in m.lower() for m in recent) else "NEEDS-BUILD", {"recent_loaded": sorted(recent), "seen": sorted(models)}, needs="Qwen3-VL-4B build")
     ov = {r.get("overlay") for r in Rn if r.get("overlay")}
-    add("native_swift_overlay", "PASS" if ov == {"swift-panel"} else "NEEDS-BUILD", {"overlay": sorted(ov), "hs_log_present": bool(H)}, needs="Swift overlay panel (log overlay=swift-panel)")
+    add("native_swift_overlay", "PASS" if ov == {"swift-panel"} else "NEEDS-BUILD", {"overlay": sorted(ov)}, needs="Swift overlay panel (log overlay=swift-panel)")
     ap = {r.get("app") for r in Rn if r.get("app")}
     add("menubar_app", "PASS" if "menubar" in ap else "NEEDS-BUILD", sorted(ap), needs="Swift menu-bar app (log app=menubar)")
     # 8 privacy: no raw user paths

@@ -95,7 +95,7 @@ try:
     TT = {"on": tt["on"], "off": tt["off"], "median_on": mon, "median_off": moff}
     # focus mapping of verbatim sentences
     txt = POS["email_headers"]["text"]; lines = txt.split("\n")
-    shutil.copy(os.path.join(IMGS, "table.png"), f"/tmp/speakeasy_cap_verb{os.getpid()}.png"); h, e = env(SPEAKEASY_FOCUS="on", STUB_CLIP=txt)
+    shutil.copy(os.path.join(IMGS, "table.png"), f"/tmp/speakeasy_cap_verb{os.getpid()}.png"); h, e = env(SPEAKEASY_FOCUS="on", STUB_CLIP=txt, SPEAKEASY_LOG_TEXT="1")  # map text only with text logging on
     subprocess.run([BIN, "selection", "--image", f"/tmp/speakeasy_cap_verb{os.getpid()}.png", "--capture-method", "bounds", "--capture-rect", "100,100,800,600"], capture_output=True, text=True, env=e, timeout=200)
     fev = jl(os.path.join(h, "logs", "focus.jsonl")); shows = [x for x in fev if x.get("state") == "show"]; maps = [x for x in fev if x.get("state") == "map"]
     add("focus_verbatim_has_events", len(shows) >= 3, len(shows))

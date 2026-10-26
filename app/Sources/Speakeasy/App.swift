@@ -56,7 +56,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         m.addItem(withTitle: "Check for Updates…", action: #selector(checkUpdates), keyEquivalent: "").target = self
         m.addItem(withTitle: "Quit Speakeasy", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         item.menu = m
-        handOverFromHammerspoon()
         reader.onState = { [weak self] s in DispatchQueue.main.async { self?.pill.set(s) } }
         pill.model.onStop = { [weak self] in self?.reader.stop() }
         pill.model.onCloud = { [weak self] in self?.showCloud() }
@@ -76,15 +75,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         w.contentView = NSHostingView(rootView: StatsView(s: StatsData.load(reader.backendPath)))
         if statsWin == nil { w.center() }; statsWin = w
         NSApp.activate(ignoringOtherApps: true); w.makeKeyAndOrderFront(nil)
-    }
-    /// The app owns the hotkey: tell an old Hammerspoon speakeasy block to let go (it deletes its hotkey when
-    /// SPEAKEASY_HOTKEY=app) and reload it headlessly if the hs CLI is installed.
-    func handOverFromHammerspoon() {
-        guard Config.value("SPEAKEASY_HOTKEY") != "app" else { return }
-        Config.set("SPEAKEASY_HOTKEY", "app")
-        for hs in ["/opt/homebrew/bin/hs", "/usr/local/bin/hs"] where FileManager.default.isExecutableFile(atPath: hs) {
-            _ = reader.run(hs, ["-t", "5", "-c", "hs.reload()"], stdin: nil); break
-        }
     }
     func menuWillOpen(_ menu: NSMenu) {
         let b = reader.backendPath

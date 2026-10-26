@@ -101,10 +101,11 @@ else:
     # negative: image with no highlight
     nd = os.path.join(h4, "none.png"); rc, out, err, _ = run(["highlight", IMG, nd], "", e4)
     add("highlight_none_found_exit_clean", rc in (0, 1), f"rc={rc} out={out[:60]} err={err[:80]}")
-    # selection with highlight capture method logs it
+    # the highlight capture method was removed: rejected by argument parsing, nothing logged
     h5, e5 = mkenv(BAD); rc, out, err, _ = run(["selection", "--image", HL, "--capture-method", "highlight", "--capture-rect", "832,688,1888,1104", "--capture-ms", "120", "--dry-run"], "Fig. 5 Drowsiness Detector Training and Validation Diagram.", e5)
-    l5 = (logs(h5) or [{}])[-1]; add("selection_highlight_logged", l5.get("capture_method") == "highlight", l5.get("capture_method"))
-    a5 = audit_logs.audit(os.path.join(h5, "logs", "runs.jsonl"), screen="3024x1964"); add("auditor_flags_on_highlight_run", True, [x["flags"] for x in a5["anomalies"]])
+    add("selection_highlight_rejected", rc == 2 and not logs(h5), f"rc={rc} logged={len(logs(h5))} {err[-80:]}")
+    rc, out, err, _ = run(["selection", "--image", HL, "--capture-method", "bounds", "--capture-rect", "832,688,1888,1104", "--capture-ms", "120", "--dry-run"], "Fig. 5 Drowsiness Detector Training and Validation Diagram.", e5)
+    a5 = audit_logs.audit(os.path.join(h5, "logs", "runs.jsonl"), screen="3024x1964"); add("auditor_flags_on_highlight_fixture_run", True, [x["flags"] for x in a5["anomalies"]])
 # 7 capture-rect crop behaviour
 def crop_case(name, src, rect, expect_px, expect_mode):
     d = tempfile.mkdtemp(prefix="se_crop_"); c = os.path.join(d, "cap.png"); shutil.copy(src, c)
@@ -150,7 +151,7 @@ own_case("user_dir_with_cap_prefix_kept", os.path.join(ud, "speakeasy_cap_fake.p
 own_case("tmp_subdir_cap_prefix_kept", tempfile.mkdtemp() + "/speakeasy_cap_nested.png", False)
 add("fixture_images_untouched", os.path.exists(IMG) and os.path.exists(HL), "")
 # 8 privacy audit on a cropped capture
-h, e = mkenv(BAD); run(["selection", "--image", HL, "--capture-method", "highlight", "--capture-rect", "832,688,1888,1104", "--dry-run"], "Fig 5.", e)
+h, e = mkenv(BAD); run(["selection", "--image", HL, "--capture-method", "bounds", "--capture-rect", "832,688,1888,1104", "--dry-run"], "Fig 5.", e)
 pa = subprocess.run([sys.executable, os.path.join(os.path.dirname(os.path.abspath(__file__)), "privacy_audit.py"), "--screen", "3024x1964", "--thumb", os.path.join(h, "thumb.png")],
                     capture_output=True, text=True, env=e)
 try: pj = json.loads(pa.stdout); add("privacy_audit_verdict_not_full_screen", pj.get("verdict") in ("ok", "large capture") and pj.get("capture_px") == "1888x1104", f"{pj.get('verdict')} {pj.get('capture_px')} frac={pj.get('capture_frac_of_screen')}")

@@ -1,5 +1,5 @@
 """Find the bounding box of all selection-highlight pixels in a screenshot (stdlib + optional Pillow/sips)."""
-import os, re, struct, subprocess, sys, tempfile, zlib
+import os, struct, subprocess, sys, tempfile, zlib
 
 STEP = 4          # sample every Nth pixel
 CELL = 4          # sampled pixels per grid cell (=> 16px cells)

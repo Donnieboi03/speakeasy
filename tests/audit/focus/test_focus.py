@@ -18,7 +18,7 @@ def mock(**kw):
 def env(llm=MOCK, **kw):
     h = tempfile.mkdtemp(prefix="se_focus_")
     e = dict(os.environ, SPEAKEASY_HOME=h, HOME=h, SPEAKEASY_LLM_URL=llm, SPEAKEASY_MODEL="mock-text" if llm == MOCK else "qwen2.5:3b-instruct",
-             SPEAKEASY_VISION_MODEL="mock-vision" if llm == MOCK else "qwen2.5vl:3b", SPEAKEASY_FOCUS="on",
+             SPEAKEASY_VISION_MODEL="mock-vision" if llm == MOCK else "qwen2.5vl:3b", SPEAKEASY_FOCUS="on", SPEAKEASY_LOG_TEXT="1",  # show text/src are only logged with text logging on
              PATH=os.path.join(AUD, "nosel", "stubs") + ":" + os.path.join(AUD, "tts", "stubs") + ":" + os.environ["PATH"],
              STUB_LOG=os.path.join(h, "stub.jsonl"), STUB_SPOKEN=os.path.join(h, "spoken.txt"), STUB_PLAY_SEC="0.2")
     for k in ("SPEAKEASY_FOCUS_TAGS", "SPEAKEASY_STREAM", "SPEAKEASY_VISION"): e.pop(k, None)

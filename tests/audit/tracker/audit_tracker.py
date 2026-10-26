@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Audit speakeasy-track output: tracker.jsonl (+ track.json). Schema-agnostic: reports keys seen, rate, gaps, exit reason, cpu/rss if logged.
+"""Audit speakeasy-track output: tracker.jsonl (track.json / overlay.json / logs/hs.log must not exist). Schema-agnostic: reports keys seen, rate, gaps, exit reason, cpu/rss if logged.
 Usage: audit_tracker.py HOME_DIR [--fps 3]"""
 import json, os, sys, argparse, statistics
 from collections import Counter
 REQ_ANY = {"ts"}; WANT = ["ts", "state", "rect", "visible", "reason", "fps", "cpu", "rss_mb", "found", "confidence", "scale", "event", "exit"]
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("home"); ap.add_argument("--fps", type=float, default=3); a = ap.parse_args()
-    lp = os.path.join(a.home, "logs", "tracker.jsonl"); tp = os.path.join(a.home, "track.json"); out = {"log": lp, "problems": []}
+    lp = os.path.join(a.home, "logs", "tracker.jsonl"); out = {"log": lp, "problems": []}
     lines, bad = [], 0
     if os.path.exists(lp):
         for l in open(lp):
@@ -29,8 +29,9 @@ def main():
         if any(isinstance(v, str) and ("/Users/" in v or v.endswith((".pdf", ".md"))) for v in l.values()): out["problems"].append(f"#{i} raw path in tracker log")
     out["missing_wanted_keys"] = [k for k in WANT if k not in out["keys"]]
     out["last"] = lines[-1] if lines else None
-    if os.path.exists(tp):
-        try: out["track_json"] = json.load(open(tp))
-        except Exception as e: out["problems"].append(f"track.json invalid: {e}")
+    for f in ("track.json", "overlay.json", os.path.join("logs", "hs.log")):
+        if os.path.exists(os.path.join(a.home, f)): out["problems"].append(f"{f} written (removed file)")
+    for i, l in enumerate(lines):
+        if l.get("event") in ("start", "exit") and l.get("overlay", "swift-panel") != "swift-panel": out["problems"].append(f"#{i} overlay {l.get('overlay')} (always swift-panel)")
     print(json.dumps(out, indent=2, default=str))
 if __name__ == "__main__": main()

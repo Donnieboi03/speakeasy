@@ -15,7 +15,7 @@ REQUIRED = {
     "llm_ms": (NUM + (type(None),), None, "LLM stage"),
     "copy_ms": (NUM + (type(None),), _sel, "clipboard copy stage"),
     "capture_ms": (NUM, _sel, "screenshot stage"),
-    "capture_method": ((str,), _sel, "bounds|highlight|select|mouse|none"),
+    "capture_method": ((str,), _sel, "bounds|area|no-selection-window|no-selection-screen|none"),
     "capture_rect": ((list, str, dict, type(None)), _sel, "x,y,w,h captured"),
     "image": ((bool,), None, "image supplied & valid"),
     "image_px": ((str, type(None)), None, "original WxH"), "image_sent_px": ((str, type(None)), _img, "sent WxH"),
@@ -58,7 +58,7 @@ REQUIRED = {
     "peak_rss_mb": (NUM, None, "peak RSS of speakeasy process"),
     "ollama_models": ((list, type(None)), lambda l: l.get("backend") == "llm" or bool(l.get("vision_ms")), "from /api/ps: loaded models + memory"),
 }
-CAPTURE_METHODS = {"bounds", "highlight", "select", "mouse", "none", "no-selection-window", "no-selection-screen"}
+CAPTURE_METHODS = {"bounds", "area", "none", "no-selection-window", "no-selection-screen"}
 
 def flatten(l):
     t = l.get("timings")

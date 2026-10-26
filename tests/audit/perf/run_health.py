@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Per-run health check + run report from logs only (runs.jsonl, tracker.jsonl, focus.jsonl, hs.log).
+"""Per-run health check + run report from logs only (runs.jsonl, tracker.jsonl, focus.jsonl).
 A tracker session = all tracker.jsonl lines with one tracker_pid (exit records without tracker_pid are matched by time).
 Usage: run_health.py LOGDIR [--last N] [--all] [--json out.json]     exit code 1 if the newest session is unhealthy.
 
 Required tracker.jsonl schema (new builds):
   start : event=start, ts, tracker_pid, pid, window_id, accessibility, screen_recording, fps, run_id, build (git sha of the tracker binary)
-  draw  : event=draw (or panel-shown), ts, tracker_pid, seq, rect[x,y,w,h], text_rect[x,y,w,h], src in {ax,ocr,doc,scroll-delta}, overlay=swift-panel|hammerspoon
+  draw  : event=draw (or panel-shown), ts, tracker_pid, seq, rect[x,y,w,h], text_rect[x,y,w,h], src in {ax,ocr,doc,scroll-delta}, overlay=swift-panel
   hide  : event=hide, ts, tracker_pid, trigger in {app-switch,tab-switch,window-switch,not-frontmost,scrolled-off,content-changed,speech-finished}, hide_ms
   scroll: event=scroll (or field on draw), ts, tracker_pid, scroll_lag_ms, src
   ax    : event=ax (AX notification handled), ts, tracker_pid, notif, ax_ms
@@ -90,7 +90,7 @@ def health(d, pid, L, runs, hs, nxt_start):
     return rep
 def main():
     ap = argparse.ArgumentParser(); ap.add_argument("logdir"); ap.add_argument("--last", type=int, default=1); ap.add_argument("--all", action="store_true"); ap.add_argument("--json"); a = ap.parse_args()
-    S = sessions(a.logdir); runs = jl(os.path.join(a.logdir, "runs.jsonl")); hs = hslines(os.path.join(a.logdir, "hs.log"))
+    S = sessions(a.logdir); runs = jl(os.path.join(a.logdir, "runs.jsonl")); hs = []
     keys = list(S); starts = [S[k][0].get("ts") for k in keys]
     reps = [health(a.logdir, k, S[k], runs, hs, starts[i + 1] if i + 1 < len(keys) else None) for i, k in enumerate(keys)]
     if not reps and runs:

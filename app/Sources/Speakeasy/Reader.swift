@@ -215,7 +215,7 @@ final class Reader {
         killTracker()
         guard Config.on("SPEAKEASY_FOCUS"), Config.on("SPEAKEASY_TRACK"), let wid = wid else { return }
         tracker = run(trackerPath, ["--window-id", String(wid), "--pid", String(pid), "--home", home,
-                                    "--fps", Config.value("SPEAKEASY_TRACK_FPS") ?? "5", "--overlay", "native", "--run-id", runId,
+                                    "--fps", Config.value("SPEAKEASY_TRACK_FPS") ?? "5", "--run-id", runId,
                                     "--parent-pid", String(getpid())], stdin: nil)
         if let t = tracker { try? String(t.processIdentifier).write(toFile: home + "/tracker.pid", atomically: true, encoding: .utf8) }
     }
