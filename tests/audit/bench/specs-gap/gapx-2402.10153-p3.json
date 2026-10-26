@@ -1,0 +1,72 @@
+{
+ "license": "CC-BY-4.0",
+ "license_url": "https://creativecommons.org/licenses/by/4.0/",
+ "source": "arxiv",
+ "family": "gap",
+ "doc_id": "gapx-2402.10153-p3",
+ "arxiv": "2402.10153v2",
+ "title": "Knowledge-Infused LLM-Powered Conversational Health Agent: A Case Study for Diabetes Patients",
+ "authors": "Mahyar Abbasian, Zhongqi Yang, Elahe Khatibi, Pengfei Zhang, Nitish Nagesh, Iman Azimi, Ramesh Jain, Amir M. Rahmani",
+ "url": "https://arxiv.org/pdf/2402.10153v2",
+ "pdf_sha256": "280066866eadfae482d775b844635e2580037bc91f7a354f017e78dc76e14721",
+ "features": {
+  "columns": 2,
+  "multi_panel": false
+ },
+ "pages": [
+  {
+   "n": 3,
+   "blocks_scored": false,
+   "kind_scored": true,
+   "blocks": [
+    {
+     "kind": "figure",
+     "region": [
+      48,
+      50,
+      564,
+      262
+     ],
+     "label": "Fig. 3",
+     "gap": "lexicon",
+     "caption_style": "fig",
+     "polluted": true,
+     "raster": false,
+     "body": "vector-diagram"
+    },
+    {
+     "kind": "caption",
+     "lines": [
+      10,
+      10
+     ],
+     "label": "Fig. 3"
+    },
+    {
+     "kind": "table",
+     "region": [
+      50,
+      336,
+      300,
+      372
+     ],
+     "label": "TABLE I",
+     "gap": "lexicon",
+     "caption_style": "table-roman",
+     "raster": false,
+     "table_style": "grid"
+    },
+    {
+     "kind": "caption",
+     "lines": [
+      53,
+      54
+     ],
+     "label": "TABLE I"
+    }
+   ]
+  }
+ ],
+ "parts": [],
+ "cases": []
+}

@@ -1,0 +1,42 @@
+{
+ "doc_id": "gap-lexicon-01", "page": [595.3, 841.9], "size": 10,
+ "pages": [
+  {"items": [
+   {"text": "2 Ergebnisse", "at": [56, 58], "size": 13},
+   {"para": "p1", "rect": [56, 82, 539], "decoy": true,
+    "s": ["Abbildung 3 zeigt den Verlauf der Messung über den ganzen Tag.", "Die Werte steigen am Morgen und fallen nach dem Mittag wieder ab.", "Am Abend bleiben sie fast gleich."]},
+   {"figure": "F1", "body": "bars", "rect": [56, 136, 290, 290], "data": [8, 13, 10, 15], "labels": ["Nord", "Ost", "Süd", "West"], "gap": "lexicon",
+    "caption": {"text": ["Abb. 2: Messwerte pro Standort."], "style": "abb", "label": "Abb. 2"}},
+   {"table": "T1", "style": "ruled", "rect": [320, 136, 539], "size": 8, "gap": "lexicon",
+    "rows": [["Region", "Kosten", "Anteil"], ["Nord", "4200", "31%"], ["Ost", "3900", "29%"], ["Süd", "3100", "23%"], ["West", "2300", "17%"]],
+    "caption": {"text": ["Tabelle 1: Kosten nach Region."], "style": "tabelle", "label": "Tabelle 1"}},
+   {"para": "p2", "rect": [56, 330, 539],
+    "s": ["Die Kosten im Norden liegen deutlich über dem Durchschnitt.", "Der Westen ist die günstigste Region.", "Im Süden sind die Kosten seit dem Vorjahr leicht gesunken."]},
+   {"figure": "F2", "body": "line", "rect": [110, 390, 485, 560], "data": [5, 7, 6, 9, 12, 10, 13], "gap": "standard",
+    "caption": {"text": ["Figure 5: Load per hour on the main line."], "style": "standard", "label": "Figure 5"}},
+   {"text": "TABLE OF CONTENTS", "at": [56, 616], "size": 11, "kind": "heading", "decoy": true},
+   {"para": "p3", "rect": [56, 640, 539],
+    "s": ["The appendix lists every station and its daily counts.", "Counts were taken by hand on two separate days."]}
+  ]},
+  {"items": [
+   {"text": "3 Resultados y données", "at": [56, 58], "size": 13},
+   {"para": "p4", "rect": [56, 82, 539],
+    "s": ["Los grupos grandes muestran menos variación que los pequeños.", "El grupo C fue el único que no completó el estudio."]},
+   {"table": "T2", "style": "grid", "rect": [56, 126, 290], "size": 8, "gap": "lexicon",
+    "rows": [["Grupo", "Casos", "Media"], ["A", "48", "3.1"], ["B", "52", "2.8"], ["C", "17", "4.0"]],
+    "caption": {"text": ["Tabla 3: Resultados por grupo."], "style": "tabla", "label": "Tabla 3"}},
+   {"figure": "F3", "body": "pie", "rect": [320, 126, 539, 270], "data": [48, 52, 17], "labels": ["A", "B", "C"], "gap": "lexicon",
+    "caption": {"text": ["Figura 2 - Distribución de casos."], "style": "figura", "label": "Figura 2"}},
+   {"para": "p5", "rect": [56, 312, 539], "decoy": true,
+    "s": ["Tableau 2 présente les données de toute l'année.", "Les chiffres du printemps sont encore provisoires."]},
+   {"table": "T3", "style": "ruled", "rect": [56, 360, 290], "size": 8, "gap": "lexicon",
+    "rows": [["Mois", "Entrées", "Sorties"], ["Janvier", "120", "98"], ["Février", "134", "101"], ["Mars", "141", "119"]],
+    "caption": {"text": ["Tableau 2 : Données annuelles."], "style": "tableau", "label": "Tableau 2"}},
+   {"figure": "F4", "body": "line", "rect": [320, 360, 539, 500], "data": [30, 34, 29, 41, 45, 43], "gap": "lexicon",
+    "caption": {"text": ["Chart 1: Visits per month."], "style": "chart", "label": "Chart 1"}},
+   {"figure": "F5", "body": "bars", "rect": [160, 560, 435, 720], "data": [21, 26, 24, 31], "labels": ["T1", "T2", "T3", "T4"], "gap": "lexicon",
+    "caption": {"text": ["Gráfico 4: Ventas por trimestre."], "style": "grafico", "label": "Gráfico 4"}}
+  ]}
+ ],
+ "cases": [{"id": "c01", "select": "p2"}, {"id": "c02", "select": "p4"}]
+}

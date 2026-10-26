@@ -1,0 +1,46 @@
+[
+ {
+  "case_id": "gap-slides-02/c01",
+  "doc_id": "gap-slides-02",
+  "page": 2,
+  "selection": [
+   {
+    "text": "The east region shipped the most crates.",
+    "rect": [
+     370.0,
+     292.0,
+     596.65,
+     303.0
+    ]
+   },
+   {
+    "text": "The south region lost two weeks to",
+    "rect": [
+     370.0,
+     306.3,
+     562.73,
+     317.3
+    ]
+   },
+   {
+    "text": "flooding.",
+    "rect": [
+     370.0,
+     320.6,
+     417.88,
+     331.6
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "The east region shipped the most crates."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "The south region lost two weeks to flooding."
+   }
+  ]
+ }
+]

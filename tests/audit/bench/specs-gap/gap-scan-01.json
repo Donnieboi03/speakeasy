@@ -1,0 +1,42 @@
+{
+ "doc_id": "gap-scan-01", "page": [595.3, 841.9], "size": 10,
+ "pages": [
+  {"scan": {"dpi": 150, "rotate": 0.4, "noise": 6, "seed": 1}, "items": [
+   {"text": "Annual site report", "at": [56, 58], "size": 14},
+   {"para": "p1", "rect": [56, 86, 539],
+    "s": ["This page was printed and scanned for the archive.", "The totals below cover the full year at the river site."]},
+   {"figure": "F1", "body": "bars", "rect": [100, 130, 495, 360], "data": [9, 14, 11, 17, 13, 19], "gap": "no-text",
+    "caption": {"text": ["Figure 1: Monthly totals at the river site."], "style": "standard", "label": "Figure 1"}},
+   {"para": "p2", "rect": [56, 400, 539],
+    "s": ["The busiest month was June.", "Stock levels were counted at the end of each quarter."]},
+   {"table": "T1", "style": "ruled", "rect": [90, 450, 505], "size": 9, "gap": "no-text",
+    "rows": [["Quarter", "Crates", "Pallets", "Bins"], ["Q1", "310", "42", "18"], ["Q2", "355", "47", "21"], ["Q3", "298", "40", "17"], ["Q4", "377", "51", "23"]],
+    "caption": {"text": ["Table 1: Stock levels per quarter."], "style": "standard", "label": "Table 1"}}
+  ]},
+  {"scan": {"dpi": 150, "rotate": -0.5, "noise": 7, "seed": 2}, "items": [
+   {"figure": "F2", "body": "photo", "rect": [70, 80, 300, 260], "seed": 31, "gap": "no-text"},
+   {"figure": "F3", "body": "line", "rect": [320, 80, 525, 260], "data": [3, 5, 4, 7, 6, 8], "gap": "no-text"},
+   {"para": "p3", "rect": [56, 290, 539],
+    "s": ["The photo shows the new loading ramp.", "The chart tracks weekly arrivals after it opened."]},
+   {"table": "T2", "style": "grid", "rect": [120, 340, 475], "size": 9, "gap": "no-text",
+    "rows": [["Week", "Arrivals", "Delays"], ["1", "40", "6"], ["2", "46", "4"], ["3", "51", "3"], ["4", "55", "2"]]}
+  ]}
+ ],
+ "cases": [],
+ "areas": [
+  {"id": "a1", "size": [500, 350], "origin": [160, 180], "items": [
+   {"text": "Regional freight dashboard", "at": [20, 14], "size": 14},
+   {"para": "q1", "rect": [20, 40, 480], "size": 9, "s": ["Weekly loads for the four regions are shown below."]},
+   {"figure": "F1", "body": "bars", "rect": [20, 70, 240, 300], "data": [12, 9, 15, 7], "labels": ["N", "E", "S", "W"]},
+   {"table": "T1", "style": "grid", "rect": [270, 80, 480], "size": 8,
+    "rows": [["Region", "Loads", "Late"], ["North", "12", "1"], ["East", "9", "0"], ["South", "15", "2"], ["West", "7", "1"]]},
+   {"decoy": "logo", "rect": [400, 8, 486, 34], "word": "FRIGO"}
+  ], "script": ["Weekly loads for the four regions are shown below."]},
+  {"id": "a2", "size": [460, 320], "origin": [200, 220], "items": [
+   {"text": "Site visit notes", "at": [18, 12], "size": 13},
+   {"figure": "F1", "body": "photo", "rect": [18, 40, 220, 230], "seed": 41},
+   {"figure": "F2", "body": "line", "rect": [240, 40, 444, 230], "data": [2, 3, 5, 4, 6, 7]},
+   {"para": "q1", "rect": [18, 250, 444], "size": 9, "s": ["The ramp opened in week two.", "Arrivals have grown every week since then."]}
+  ], "script": ["The ramp opened in week two.", "Arrivals have grown every week since then."]}
+ ]
+}

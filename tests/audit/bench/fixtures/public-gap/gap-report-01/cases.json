@@ -1,0 +1,154 @@
+[
+ {
+  "case_id": "gap-report-01/c01",
+  "doc_id": "gap-report-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Table 2 shows the totals for each depot in the spring. The numbers are drawn from the weekly",
+    "rect": [
+     56.0,
+     82.0,
+     531.25,
+     92.0
+    ]
+   },
+   {
+    "text": "logs kept by each shift lead. They have not yet been audited by the finance team.",
+    "rect": [
+     56.0,
+     95.0,
+     468.06,
+     105.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "Table 2 shows the totals for each depot in the spring."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "The numbers are drawn from the weekly logs kept by each shift lead."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "They have not yet been audited by the finance team."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-report-01/c02",
+  "doc_id": "gap-report-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Volumes climbed steadily through the first half of the year. A short dip in March matched the",
+    "rect": [
+     56.0,
+     316.0,
+     523.05,
+     326.0
+    ]
+   },
+   {
+    "text": "planned maintenance window. By June the network was moving more freight than ever before.",
+    "rect": [
+     56.0,
+     329.0,
+     532.65,
+     339.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s4",
+    "text": "Volumes climbed steadily through the first half of the year."
+   },
+   {
+    "sentence_id": "s5",
+    "text": "A short dip in March matched the planned maintenance window."
+   },
+   {
+    "sentence_id": "s6",
+    "text": "By June the network was moving more freight than ever before."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-report-01/c03",
+  "doc_id": "gap-report-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Cost per crate is now the main measure the board watches. Fuel and wages make up most of",
+    "rect": [
+     56.0,
+     64.0,
+     525.59,
+     74.0
+    ]
+   },
+   {
+    "text": "that cost. Rent is fixed until the leases end.",
+    "rect": [
+     56.0,
+     77.0,
+     273.94,
+     87.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s13",
+    "text": "Cost per crate is now the main measure the board watches."
+   },
+   {
+    "sentence_id": "s14",
+    "text": "Fuel and wages make up most of that cost."
+   },
+   {
+    "sentence_id": "s15",
+    "text": "Rent is fixed until the leases end."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-report-01/c04",
+  "doc_id": "gap-report-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "The split between fuel and wages has barely moved in two years. Small gains came from better",
+    "rect": [
+     56.0,
+     286.0,
+     536.97,
+     296.0
+    ]
+   },
+   {
+    "text": "routing rather than cheaper fuel.",
+    "rect": [
+     56.0,
+     299.0,
+     220.85,
+     309.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s16",
+    "text": "The split between fuel and wages has barely moved in two years."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "Small gains came from better routing rather than cheaper fuel."
+   }
+  ]
+ }
+]

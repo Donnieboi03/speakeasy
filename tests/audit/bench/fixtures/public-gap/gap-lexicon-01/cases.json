@@ -1,0 +1,76 @@
+[
+ {
+  "case_id": "gap-lexicon-01/c01",
+  "doc_id": "gap-lexicon-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Die Kosten im Norden liegen deutlich \u00fcber dem Durchschnitt. Der Westen ist die g\u00fcnstigste",
+    "rect": [
+     56.0,
+     330.0,
+     515.75,
+     340.0
+    ]
+   },
+   {
+    "text": "Region. Im S\u00fcden sind die Kosten seit dem Vorjahr leicht gesunken.",
+    "rect": [
+     56.0,
+     343.0,
+     396.15,
+     353.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s6",
+    "text": "Die Kosten im Norden liegen deutlich \u00fcber dem Durchschnitt."
+   },
+   {
+    "sentence_id": "s7",
+    "text": "Der Westen ist die g\u00fcnstigste Region."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "Im S\u00fcden sind die Kosten seit dem Vorjahr leicht gesunken."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-lexicon-01/c02",
+  "doc_id": "gap-lexicon-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Los grupos grandes muestran menos variaci\u00f3n que los peque\u00f1os. El grupo C fue el \u00fanico que",
+    "rect": [
+     56.0,
+     82.0,
+     524.3,
+     92.0
+    ]
+   },
+   {
+    "text": "no complet\u00f3 el estudio.",
+    "rect": [
+     56.0,
+     95.0,
+     173.64,
+     105.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s12",
+    "text": "Los grupos grandes muestran menos variaci\u00f3n que los peque\u00f1os."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "El grupo C fue el \u00fanico que no complet\u00f3 el estudio."
+   }
+  ]
+ }
+]

@@ -1,0 +1,807 @@
+{
+ "schema": "speakeasy-bench-gt/1",
+ "family": "gap",
+ "doc_id": "gap-report-01",
+ "subset": "synthetic",
+ "gt_source": "generator",
+ "gt_method": "reportlab / Pillow drawing coordinates (gen/gap_synth.py); scanned pages: rotation applied to the drawn rects",
+ "reviewed_by_human": false,
+ "license": "synthetic",
+ "pages": [
+  {
+   "n": 1,
+   "w": 595.3,
+   "h": 841.9,
+   "blocks_scored": true,
+   "kind_scored": true,
+   "scan": false,
+   "lines": [
+    [
+     56.0,
+     58.0,
+     205.35,
+     71.0
+    ],
+    [
+     56.0,
+     82.0,
+     531.25,
+     92.0
+    ],
+    [
+     56.0,
+     95.0,
+     468.06,
+     105.0
+    ],
+    [
+     56.0,
+     316.0,
+     523.05,
+     326.0
+    ],
+    [
+     56.0,
+     329.0,
+     532.65,
+     339.0
+    ],
+    [
+     58.0,
+     540.5,
+     219.0,
+     549.0
+    ],
+    [
+     320.0,
+     382.0,
+     357.97,
+     390.5
+    ],
+    [
+     320.0,
+     393.05,
+     427.34,
+     401.55
+    ],
+    [
+     56.0,
+     600.0,
+     500.68,
+     610.0
+    ],
+    [
+     56.0,
+     613.0,
+     414.06,
+     623.0
+    ]
+   ],
+   "blocks": [
+    {
+     "id": "p1b1",
+     "kind": "heading",
+     "bbox": [
+      56.0,
+      58.0,
+      205.35,
+      71.0
+     ]
+    },
+    {
+     "id": "p1b2",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      82.0,
+      531.25,
+      105.0
+     ]
+    },
+    {
+     "id": "p1b3",
+     "kind": "figure",
+     "bbox": [
+      122.0,
+      140.0,
+      471.0,
+      286.0
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": false,
+     "body": "vector-chart"
+    },
+    {
+     "id": "p1b4",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      316.0,
+      532.65,
+      339.0
+     ]
+    },
+    {
+     "id": "p1b5",
+     "kind": "figure",
+     "bbox": [
+      58.0,
+      386.0,
+      286.0,
+      534.5
+     ],
+     "gap": "lexicon",
+     "caption_style": "exhibit",
+     "raster": false,
+     "body": "vector-chart",
+     "label": "Exhibit 3"
+    },
+    {
+     "id": "p1b6",
+     "kind": "caption",
+     "bbox": [
+      58.0,
+      540.5,
+      219.0,
+      549.0
+     ],
+     "label": "Exhibit 3"
+    },
+    {
+     "id": "p1b7",
+     "kind": "table",
+     "bbox": [
+      320.0,
+      410.1,
+      539.0,
+      472.1
+     ],
+     "gap": "lexicon",
+     "caption_style": "table-roman",
+     "raster": false,
+     "table_style": "ruled",
+     "label": "TABLE IV"
+    },
+    {
+     "id": "p1b8",
+     "kind": "caption",
+     "bbox": [
+      320.0,
+      382.0,
+      427.34,
+      401.55
+     ],
+     "label": "TABLE IV"
+    },
+    {
+     "id": "p1b9",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      600.0,
+      500.68,
+      623.0
+     ]
+    },
+    {
+     "id": "p1b10",
+     "kind": "decoration",
+     "bbox": [
+      431.0,
+      15.0,
+      524.95,
+      45.0
+     ],
+     "decoy": "logo"
+    }
+   ],
+   "prose_decoys": [
+    [
+     56.0,
+     82.0,
+     531.25,
+     92.0
+    ],
+    [
+     56.0,
+     600.0,
+     500.68,
+     610.0
+    ]
+   ]
+  },
+  {
+   "n": 2,
+   "w": 595.3,
+   "h": 841.9,
+   "blocks_scored": true,
+   "kind_scored": true,
+   "scan": false,
+   "lines": [
+    [
+     56.0,
+     64.0,
+     525.59,
+     74.0
+    ],
+    [
+     56.0,
+     77.0,
+     273.94,
+     87.0
+    ],
+    [
+     56.0,
+     286.0,
+     536.97,
+     296.0
+    ],
+    [
+     56.0,
+     299.0,
+     220.85,
+     309.0
+    ],
+    [
+     78.0,
+     492.0,
+     222.14,
+     500.5
+    ],
+    [
+     322.0,
+     500.5,
+     490.39,
+     509.0
+    ],
+    [
+     56.0,
+     560.0,
+     169.02,
+     568.5
+    ],
+    [
+     320.0,
+     560.0,
+     437.55,
+     568.5
+    ],
+    [
+     56.0,
+     680.0,
+     494.28,
+     690.0
+    ],
+    [
+     56.0,
+     693.0,
+     104.29,
+     703.0
+    ]
+   ],
+   "blocks": [
+    {
+     "id": "p2b1",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      64.0,
+      525.59,
+      87.0
+     ]
+    },
+    {
+     "id": "p2b2",
+     "kind": "figure",
+     "bbox": [
+      153.0,
+      119.0,
+      344.61,
+      267.0
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": false,
+     "body": "vector-chart"
+    },
+    {
+     "id": "p2b3",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      286.0,
+      536.97,
+      309.0
+     ]
+    },
+    {
+     "id": "p2b4",
+     "kind": "figure",
+     "bbox": [
+      78.0,
+      354.0,
+      286.0,
+      486.0
+     ],
+     "gap": "lexicon",
+     "caption_style": "fig-s",
+     "raster": false,
+     "body": "vector-chart",
+     "label": "Fig. S2"
+    },
+    {
+     "id": "p2b5",
+     "kind": "caption",
+     "bbox": [
+      78.0,
+      492.0,
+      222.14,
+      500.5
+     ],
+     "label": "Fig. S2"
+    },
+    {
+     "id": "p2b6",
+     "kind": "figure",
+     "bbox": [
+      322.0,
+      354.0,
+      535.0,
+      494.5
+     ],
+     "gap": "lexicon",
+     "caption_style": "fig",
+     "raster": false,
+     "body": "vector-chart",
+     "polluted": true,
+     "label": "Fig. 3"
+    },
+    {
+     "id": "p2b7",
+     "kind": "caption",
+     "bbox": [
+      322.0,
+      500.5,
+      490.39,
+      509.0
+     ],
+     "label": "Fig. 3"
+    },
+    {
+     "id": "p2b8",
+     "kind": "table",
+     "bbox": [
+      56.0,
+      577.05,
+      290.0,
+      639.05
+     ],
+     "gap": "lexicon",
+     "caption_style": "exhibit",
+     "raster": false,
+     "table_style": "grid",
+     "label": "Exhibit 4"
+    },
+    {
+     "id": "p2b9",
+     "kind": "caption",
+     "bbox": [
+      56.0,
+      560.0,
+      169.02,
+      568.5
+     ],
+     "label": "Exhibit 4"
+    },
+    {
+     "id": "p2b10",
+     "kind": "table",
+     "bbox": [
+      320.0,
+      577.05,
+      539.0,
+      639.05
+     ],
+     "gap": "standard",
+     "caption_style": "standard",
+     "raster": false,
+     "table_style": "ruled",
+     "label": "Table 1"
+    },
+    {
+     "id": "p2b11",
+     "kind": "caption",
+     "bbox": [
+      320.0,
+      560.0,
+      437.55,
+      568.5
+     ],
+     "label": "Table 1"
+    },
+    {
+     "id": "p2b12",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      680.0,
+      494.28,
+      703.0
+     ]
+    }
+   ],
+   "prose_decoys": [
+    [
+     56.0,
+     680.0,
+     494.28,
+     690.0
+    ]
+   ]
+  }
+ ],
+ "areas": [],
+ "sentences": [
+  {
+   "id": "s1",
+   "page": 1,
+   "text_hash": "65a41e1b4724",
+   "score": "none",
+   "line_rects": [
+    [
+     56.0,
+     82.0,
+     531.25,
+     92.0
+    ]
+   ]
+  },
+  {
+   "id": "s2",
+   "page": 1,
+   "text_hash": "4835b4b4c65f",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     82.0,
+     531.25,
+     92.0
+    ],
+    [
+     56.0,
+     95.0,
+     468.06,
+     105.0
+    ]
+   ]
+  },
+  {
+   "id": "s3",
+   "page": 1,
+   "text_hash": "546555d737ea",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     95.0,
+     468.06,
+     105.0
+    ]
+   ]
+  },
+  {
+   "id": "s4",
+   "page": 1,
+   "text_hash": "58fc1736ee5d",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     316.0,
+     523.05,
+     326.0
+    ]
+   ]
+  },
+  {
+   "id": "s5",
+   "page": 1,
+   "text_hash": "49c76c8a880c",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     316.0,
+     523.05,
+     326.0
+    ],
+    [
+     56.0,
+     329.0,
+     532.65,
+     339.0
+    ]
+   ]
+  },
+  {
+   "id": "s6",
+   "page": 1,
+   "text_hash": "9073dca141da",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     329.0,
+     532.65,
+     339.0
+    ]
+   ]
+  },
+  {
+   "id": "s7",
+   "page": 1,
+   "text_hash": "733291cb9a81",
+   "score": "lines",
+   "line_rects": [
+    [
+     58.0,
+     540.5,
+     219.0,
+     549.0
+    ]
+   ]
+  },
+  {
+   "id": "s8",
+   "page": 1,
+   "text_hash": "31ccd490d20e",
+   "score": "lines",
+   "line_rects": [
+    [
+     320.0,
+     382.0,
+     357.97,
+     390.5
+    ]
+   ]
+  },
+  {
+   "id": "s9",
+   "page": 1,
+   "text_hash": "08dec542bb81",
+   "score": "lines",
+   "line_rects": [
+    [
+     320.0,
+     393.05,
+     427.34,
+     401.55
+    ]
+   ]
+  },
+  {
+   "id": "s10",
+   "page": 1,
+   "text_hash": "91d50252487c",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     600.0,
+     500.68,
+     610.0
+    ]
+   ]
+  },
+  {
+   "id": "s11",
+   "page": 1,
+   "text_hash": "fff1a44e0716",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     600.0,
+     500.68,
+     610.0
+    ],
+    [
+     56.0,
+     613.0,
+     414.06,
+     623.0
+    ]
+   ]
+  },
+  {
+   "id": "s12",
+   "page": 1,
+   "text_hash": "8e326eb1142f",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     613.0,
+     414.06,
+     623.0
+    ]
+   ]
+  },
+  {
+   "id": "s13",
+   "page": 2,
+   "text_hash": "01cf8c105355",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     64.0,
+     525.59,
+     74.0
+    ]
+   ]
+  },
+  {
+   "id": "s14",
+   "page": 2,
+   "text_hash": "5fd881165fda",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     64.0,
+     525.59,
+     74.0
+    ],
+    [
+     56.0,
+     77.0,
+     273.94,
+     87.0
+    ]
+   ]
+  },
+  {
+   "id": "s15",
+   "page": 2,
+   "text_hash": "10a3bc8edaf5",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     77.0,
+     273.94,
+     87.0
+    ]
+   ]
+  },
+  {
+   "id": "s16",
+   "page": 2,
+   "text_hash": "2e6f58fcde0c",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     286.0,
+     536.97,
+     296.0
+    ]
+   ]
+  },
+  {
+   "id": "s17",
+   "page": 2,
+   "text_hash": "887bd8ce2154",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     286.0,
+     536.97,
+     296.0
+    ],
+    [
+     56.0,
+     299.0,
+     220.85,
+     309.0
+    ]
+   ]
+  },
+  {
+   "id": "s18",
+   "page": 2,
+   "text_hash": "8d9680a5cae2",
+   "score": "lines",
+   "line_rects": [
+    [
+     78.0,
+     492.0,
+     222.14,
+     500.5
+    ]
+   ]
+  },
+  {
+   "id": "s19",
+   "page": 2,
+   "text_hash": "4fce5e137f7b",
+   "score": "none",
+   "line_rects": [
+    [
+     322.0,
+     500.5,
+     490.39,
+     509.0
+    ]
+   ]
+  },
+  {
+   "id": "s20",
+   "page": 2,
+   "text_hash": "2d5434796184",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     560.0,
+     169.02,
+     568.5
+    ]
+   ]
+  },
+  {
+   "id": "s21",
+   "page": 2,
+   "text_hash": "c0c564625ce6",
+   "score": "none",
+   "line_rects": [
+    [
+     320.0,
+     560.0,
+     437.55,
+     568.5
+    ]
+   ]
+  },
+  {
+   "id": "s22",
+   "page": 2,
+   "text_hash": "aaced6d41190",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     680.0,
+     494.28,
+     690.0
+    ]
+   ]
+  },
+  {
+   "id": "s23",
+   "page": 2,
+   "text_hash": "4d3135e9e1ee",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     680.0,
+     494.28,
+     690.0
+    ],
+    [
+     56.0,
+     693.0,
+     104.29,
+     703.0
+    ]
+   ]
+  }
+ ],
+ "parts": [],
+ "features": {}
+}

@@ -1,0 +1,185 @@
+{
+ "doc_id": "gap-slides-02",
+ "page": [
+  720,
+  405
+ ],
+ "size": 11,
+ "pages": [
+  {
+   "items": [
+    {
+     "text": "Sensor trial results",
+     "at": [
+      36,
+      22
+     ],
+     "size": 20
+    },
+    {
+     "figure": "F1",
+     "body": "scatter",
+     "rect": [
+      40,
+      76,
+      360,
+      370
+     ],
+     "seed": 5,
+     "n": 30
+    },
+    {
+     "table": "T1",
+     "style": "grid",
+     "rect": [
+      400,
+      84,
+      690
+     ],
+     "size": 9,
+     "rows": [
+      [
+       "Sensor",
+       "Mean",
+       "Drift"
+      ],
+      [
+       "A1",
+       "20.4",
+       "0.3"
+      ],
+      [
+       "A2",
+       "19.8",
+       "0.5"
+      ],
+      [
+       "B1",
+       "21.1",
+       "0.2"
+      ],
+      [
+       "B2",
+       "20.9",
+       "0.4"
+      ]
+     ]
+    },
+    {
+     "decoy": "text-image",
+     "rect": [
+      400,
+      236,
+      690,
+      372
+     ],
+     "size": 8.5,
+     "s": [
+      "The trial ran for six weeks at three sites.",
+      "Each sensor was checked twice a day against a reference probe.",
+      "Readings outside the expected band were flagged for review.",
+      "Most flags came from the two sensors near the loading bay."
+     ]
+    },
+    {
+     "decoy": "logo",
+     "rect": [
+      596,
+      14,
+      700,
+      50
+     ],
+     "word": "SENSA",
+     "color": [
+      90,
+      90,
+      160
+     ]
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "decoy": "background",
+     "seed": 8
+    },
+    {
+     "text": "Shipments by region",
+     "at": [
+      36,
+      22
+     ],
+     "size": 20
+    },
+    {
+     "figure": "F2",
+     "body": "bars",
+     "rect": [
+      40,
+      76,
+      330,
+      340
+     ],
+     "data": [
+      7,
+      11,
+      5,
+      9
+     ],
+     "labels": [
+      "North",
+      "East",
+      "South",
+      "West"
+     ],
+     "multi": true
+    },
+    {
+     "figure": "F3",
+     "body": "photo",
+     "rect": [
+      370,
+      76,
+      690,
+      270
+     ],
+     "seed": 23
+    },
+    {
+     "para": "p1",
+     "rect": [
+      370,
+      292,
+      600
+     ],
+     "size": 11,
+     "s": [
+      "The east region shipped the most crates.",
+      "The south region lost two weeks to flooding."
+     ]
+    },
+    {
+     "decoy": "icon",
+     "rect": [
+      624,
+      316,
+      684,
+      376
+     ],
+     "color": [
+      200,
+      120,
+      60
+     ]
+    }
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "id": "c01",
+   "select": "p1"
+  }
+ ]
+}

@@ -1,0 +1,748 @@
+{
+ "schema": "speakeasy-bench-gt/1",
+ "family": "gap",
+ "doc_id": "gap-imgtable-01",
+ "subset": "synthetic",
+ "gt_source": "generator",
+ "gt_method": "reportlab / Pillow drawing coordinates (gen/gap_synth.py); scanned pages: rotation applied to the drawn rects",
+ "reviewed_by_human": false,
+ "license": "synthetic",
+ "pages": [
+  {
+   "n": 1,
+   "w": 595.3,
+   "h": 841.9,
+   "blocks_scored": true,
+   "kind_scored": true,
+   "scan": false,
+   "lines": [
+    [
+     56.0,
+     58.0,
+     146.35,
+     71.0
+    ],
+    [
+     56.0,
+     82.0,
+     518.21,
+     92.0
+    ],
+    [
+     56.0,
+     95.0,
+     286.08,
+     105.0
+    ],
+    [
+     110.0,
+     130.0,
+     282.29,
+     138.5
+    ],
+    [
+     56.0,
+     290.0,
+     515.81,
+     300.0
+    ],
+    [
+     56.0,
+     303.0,
+     91.63,
+     313.0
+    ],
+    [
+     56.0,
+     420.0,
+     506.75,
+     430.0
+    ],
+    [
+     56.0,
+     433.0,
+     207.8,
+     443.0
+    ],
+    [
+     110.0,
+     480.0,
+     250.35,
+     488.5
+    ]
+   ],
+   "blocks": [
+    {
+     "id": "p1b1",
+     "kind": "heading",
+     "bbox": [
+      56.0,
+      58.0,
+      146.35,
+      71.0
+     ]
+    },
+    {
+     "id": "p1b2",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      82.0,
+      518.21,
+      105.0
+     ]
+    },
+    {
+     "id": "p1b3",
+     "kind": "table",
+     "bbox": [
+      110.0,
+      147.05,
+      485.0,
+      231.8
+     ],
+     "gap": "image-table",
+     "caption_style": "standard",
+     "raster": true,
+     "table_style": "ruled",
+     "rows": [
+      [
+       110.0,
+       153.43,
+       485.0,
+       162.43
+      ],
+      [
+       110.0,
+       169.17,
+       485.0,
+       178.17
+      ],
+      [
+       110.0,
+       184.93,
+       485.0,
+       193.93
+      ],
+      [
+       110.0,
+       200.67,
+       485.0,
+       209.67
+      ],
+      [
+       110.0,
+       216.43,
+       485.0,
+       225.43
+      ]
+     ],
+     "label": "Table 2"
+    },
+    {
+     "id": "p1b4",
+     "kind": "caption",
+     "bbox": [
+      110.0,
+      130.0,
+      282.29,
+      138.5
+     ],
+     "label": "Table 2"
+    },
+    {
+     "id": "p1b5",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      290.0,
+      515.81,
+      313.0
+     ]
+    },
+    {
+     "id": "p1b6",
+     "kind": "figure",
+     "bbox": [
+      76.0,
+      356.0,
+      520.0,
+      390.0
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": false,
+     "body": "flow-diagram"
+    },
+    {
+     "id": "p1b7",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      420.0,
+      506.75,
+      443.0
+     ]
+    },
+    {
+     "id": "p1b8",
+     "kind": "table",
+     "bbox": [
+      110.0,
+      497.05,
+      485.0,
+      581.8
+     ],
+     "gap": "image-table",
+     "caption_style": "tabelle",
+     "raster": true,
+     "table_style": "grid",
+     "rows": [
+      [
+       110.0,
+       503.43,
+       485.0,
+       512.43
+      ],
+      [
+       110.0,
+       519.17,
+       485.0,
+       528.17
+      ],
+      [
+       110.0,
+       534.92,
+       485.0,
+       543.92
+      ],
+      [
+       110.0,
+       550.67,
+       485.0,
+       559.67
+      ],
+      [
+       110.0,
+       566.42,
+       485.0,
+       575.42
+      ]
+     ],
+     "label": "Tabelle 4"
+    },
+    {
+     "id": "p1b9",
+     "kind": "caption",
+     "bbox": [
+      110.0,
+      480.0,
+      250.35,
+      488.5
+     ],
+     "label": "Tabelle 4"
+    }
+   ],
+   "prose_decoys": []
+  },
+  {
+   "n": 2,
+   "w": 595.3,
+   "h": 841.9,
+   "blocks_scored": true,
+   "kind_scored": true,
+   "scan": false,
+   "lines": [
+    [
+     56.0,
+     64.0,
+     510.6,
+     74.0
+    ],
+    [
+     130.0,
+     110.0,
+     164.66,
+     118.5
+    ],
+    [
+     130.0,
+     121.05,
+     219.04,
+     129.55
+    ],
+    [
+     56.0,
+     290.0,
+     477.44,
+     300.0
+    ]
+   ],
+   "blocks": [
+    {
+     "id": "p2b1",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      64.0,
+      510.6,
+      74.0
+     ]
+    },
+    {
+     "id": "p2b2",
+     "kind": "table",
+     "bbox": [
+      130.0,
+      138.1,
+      465.0,
+      222.85
+     ],
+     "gap": "image-table",
+     "caption_style": "table-roman",
+     "raster": true,
+     "table_style": "borderless",
+     "rows": [
+      [
+       130.0,
+       144.48,
+       465.0,
+       153.48
+      ],
+      [
+       130.0,
+       160.22,
+       465.0,
+       169.22
+      ],
+      [
+       130.0,
+       175.98,
+       465.0,
+       184.98
+      ],
+      [
+       130.0,
+       191.72,
+       465.0,
+       200.72
+      ],
+      [
+       130.0,
+       207.48,
+       465.0,
+       216.48
+      ]
+     ],
+     "label": "TABLE II"
+    },
+    {
+     "id": "p2b3",
+     "kind": "caption",
+     "bbox": [
+      130.0,
+      110.0,
+      219.04,
+      129.55
+     ],
+     "label": "TABLE II"
+    },
+    {
+     "id": "p2b4",
+     "kind": "paragraph",
+     "bbox": [
+      56.0,
+      290.0,
+      477.44,
+      300.0
+     ]
+    },
+    {
+     "id": "p2b5",
+     "kind": "decoration",
+     "bbox": [
+      56.0,
+      780.0,
+      539.0,
+      792.0
+     ],
+     "decoy": "band"
+    }
+   ],
+   "prose_decoys": []
+  }
+ ],
+ "areas": [],
+ "sentences": [
+  {
+   "id": "s1",
+   "page": 1,
+   "text_hash": "8320a2ba3bc4",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     82.0,
+     518.21,
+     92.0
+    ]
+   ]
+  },
+  {
+   "id": "s2",
+   "page": 1,
+   "text_hash": "81637835442b",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     82.0,
+     518.21,
+     92.0
+    ],
+    [
+     56.0,
+     95.0,
+     286.08,
+     105.0
+    ]
+   ]
+  },
+  {
+   "id": "s3",
+   "page": 1,
+   "text_hash": "dfd683f5833d",
+   "score": "none",
+   "line_rects": [
+    [
+     110.0,
+     130.0,
+     282.29,
+     138.5
+    ]
+   ]
+  },
+  {
+   "id": "s4",
+   "page": 1,
+   "text_hash": "4800f31a163c",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     290.0,
+     515.81,
+     300.0
+    ]
+   ]
+  },
+  {
+   "id": "s5",
+   "page": 1,
+   "text_hash": "a0ac558b892d",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     290.0,
+     515.81,
+     300.0
+    ],
+    [
+     56.0,
+     303.0,
+     91.63,
+     313.0
+    ]
+   ]
+  },
+  {
+   "id": "s6",
+   "page": 1,
+   "text_hash": "baa564c3c1db",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     420.0,
+     506.75,
+     430.0
+    ]
+   ]
+  },
+  {
+   "id": "s7",
+   "page": 1,
+   "text_hash": "0ce40efa9e61",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     420.0,
+     506.75,
+     430.0
+    ],
+    [
+     56.0,
+     433.0,
+     207.8,
+     443.0
+    ]
+   ]
+  },
+  {
+   "id": "s8",
+   "page": 1,
+   "text_hash": "b0510bf8476b",
+   "score": "lines",
+   "line_rects": [
+    [
+     110.0,
+     480.0,
+     250.35,
+     488.5
+    ]
+   ]
+  },
+  {
+   "id": "s9",
+   "page": 2,
+   "text_hash": "cf5070724aaa",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     64.0,
+     510.6,
+     74.0
+    ]
+   ]
+  },
+  {
+   "id": "s10",
+   "page": 2,
+   "text_hash": "abe17e92ea86",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     64.0,
+     510.6,
+     74.0
+    ]
+   ]
+  },
+  {
+   "id": "s11",
+   "page": 2,
+   "text_hash": "f3019bb0565d",
+   "score": "lines",
+   "line_rects": [
+    [
+     130.0,
+     110.0,
+     164.66,
+     118.5
+    ]
+   ]
+  },
+  {
+   "id": "s12",
+   "page": 2,
+   "text_hash": "dea44e5de190",
+   "score": "lines",
+   "line_rects": [
+    [
+     130.0,
+     121.05,
+     219.04,
+     129.55
+    ]
+   ]
+  },
+  {
+   "id": "s13",
+   "page": 2,
+   "text_hash": "24714c40ee3e",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     290.0,
+     477.44,
+     300.0
+    ]
+   ]
+  },
+  {
+   "id": "s14",
+   "page": 2,
+   "text_hash": "eb5046e7e2e5",
+   "score": "lines",
+   "line_rects": [
+    [
+     56.0,
+     290.0,
+     477.44,
+     300.0
+    ]
+   ]
+  },
+  {
+   "id": "s15",
+   "page": 1,
+   "text_hash": "99574be7c0fa",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    169.17,
+    485.0,
+    178.17
+   ],
+   "table": "p1b3"
+  },
+  {
+   "id": "s16",
+   "page": 1,
+   "text_hash": "e806611cd102",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    184.93,
+    485.0,
+    193.93
+   ],
+   "table": "p1b3"
+  },
+  {
+   "id": "s17",
+   "page": 1,
+   "text_hash": "4eb56c5e6afc",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    200.67,
+    485.0,
+    209.67
+   ],
+   "table": "p1b3"
+  },
+  {
+   "id": "s18",
+   "page": 1,
+   "text_hash": "1aef2f1effb6",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    216.43,
+    485.0,
+    225.43
+   ],
+   "table": "p1b3"
+  },
+  {
+   "id": "s19",
+   "page": 1,
+   "text_hash": "95c0b2eebf3c",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    519.17,
+    485.0,
+    528.17
+   ],
+   "table": "p1b8"
+  },
+  {
+   "id": "s20",
+   "page": 1,
+   "text_hash": "d07bba92f35d",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    534.92,
+    485.0,
+    543.92
+   ],
+   "table": "p1b8"
+  },
+  {
+   "id": "s21",
+   "page": 1,
+   "text_hash": "a9e566e92289",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    110.0,
+    550.67,
+    485.0,
+    559.67
+   ],
+   "table": "p1b8"
+  },
+  {
+   "id": "s22",
+   "page": 2,
+   "text_hash": "c0f755fa22b6",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    130.0,
+    160.22,
+    465.0,
+    169.22
+   ],
+   "table": "p2b2"
+  },
+  {
+   "id": "s23",
+   "page": 2,
+   "text_hash": "ac8d1ebdce06",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    130.0,
+    175.98,
+    465.0,
+    184.98
+   ],
+   "table": "p2b2"
+  },
+  {
+   "id": "s24",
+   "page": 2,
+   "text_hash": "37e82bb349c0",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    130.0,
+    191.72,
+    465.0,
+    200.72
+   ],
+   "table": "p2b2"
+  },
+  {
+   "id": "s25",
+   "page": 2,
+   "text_hash": "09c88c81384b",
+   "score": "table_row",
+   "line_rects": [],
+   "row_rect": [
+    130.0,
+    207.48,
+    465.0,
+    216.48
+   ],
+   "table": "p2b2"
+  }
+ ],
+ "parts": [],
+ "features": {}
+}
