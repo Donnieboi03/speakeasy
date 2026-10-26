@@ -278,6 +278,7 @@ final class Live: NSObject {
     var drawMeta: [String: Any] = [:]       // run_id, label, doc_transform of the current event, for draw records
     // page->screen fit behind draw records' page_rect, kept without the scroll offset `off` (screen = s * page + o + off)
     var pageFit: (s: Double, ox: Double, oy: Double, src: String)? = nil
+    var firstDrawSrc = "capture+offset"     // how the current show's first draw was placed: page-fit | capture+offset | held
     var headerPanel: NSPanel? = nil
     let headerShape = CAShapeLayer()
     var headerDelta: CGRect? = nil          // header rect relative to the row band's origin (moves with it on scroll)
@@ -462,6 +463,7 @@ final class Live: NSObject {
                      "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
                      "on_screen": p.isVisible, "page_rect": pageRect, "page_fit": pageFit?.src ?? NSNull()]
                 draw["sentence_id"] = sentenceId; draw["line_count"] = lines.isEmpty ? 1 : lines.count
+                if drawnSeq != seq { draw["first_draw_src"] = firstDrawSrc }
                 rec(drawMeta.merging(draw) { $1 })
                 shown = true; lastDrawn = f
             }
@@ -614,11 +616,15 @@ final class Live: NSObject {
         sentenceId = sid
         let isBand = isText && !figure && (!rects.isEmpty || !docLines.isEmpty)
         bandPage = isBand ? docLines : []
-        var firstBand: [CGRect]? = nil                          // first draw: the show's screen rects plus the scroll since the hotkey
-        if isBand {
-            if !rects.isEmpty { firstBand = rects.map { $0.offsetBy(dx: off.x, dy: off.y) } }
-            else if let pf = pageFit { firstBand = mapBand(docLines, fit: (pf.s, pf.ox + Double(off.x), pf.oy + Double(off.y))) }
-        }
+        // first draw: the page geometry through the current page fit when there is one (A2.7), else the show's screen
+        // geometry plus the scroll since the hotkey
+        let fd = firstDraw(docTarget: meta["doc_target"] as? [Double], docLines: isBand ? docLines : [], rects: isBand ? rects : [],
+                           rect: r0, fit: pageFit.map { ($0.s, $0.ox, $0.oy) }, off: off)
+        firstDrawSrc = fd.src
+        if fd.src == "capture+offset" && (off.x != 0 || off.y != 0) { wantScan = true }
+        var firstBand: [CGRect]? = isBand && !fd.band.isEmpty ? fd.band : nil
+        if !isBand && fd.src == "page-fit", let m = fd.rect { r = m.offsetBy(dx: -off.x, dy: -off.y) }
+        if isBand && firstBand == nil, let pf = pageFit { firstBand = mapBand(docLines, fit: (pf.s, pf.ox + Double(off.x), pf.oy + Double(off.y))) }
         cue = figure ? "figure" : "text"; suppressed = !drawOn
         cueKind = ck ?? (ellipse ? "part_oval" : figure ? "figure_box" : "text_band")
         if cueKind == "table_row", let h = header, let n = r0 { headerDelta = CGRect(x: h.minX - n.minX, y: h.minY - n.minY, width: h.width, height: h.height) }
@@ -627,7 +633,7 @@ final class Live: NSObject {
         if figure { refPanel?.orderOut(nil) }                    // one cue at a time: no text outline while a figure part is boxed
         if !drawOn { rec(["event": "cue-off", "seq": s, "cue": cue]) }
         // never flash a big provisional box between sentences: a text sentence's box must fit its own lines
-        if let n = r0, isText, firstBand == nil {
+        if let n = r0, isText, firstBand == nil, fd.src != "page-fit" {
             var nr = n.offsetBy(dx: off.x, dy: off.y)
             // the backend only knows the selection box (no per-line geometry in web views): take x/width from the text
             // column OCR has confirmed, and cap the height, so the band can move at once instead of waiting for OCR
@@ -645,7 +651,7 @@ final class Live: NSObject {
             if held { heldBig += 1 }
             rec(["event": "transition", "seq": s, "old": rect.map { [Int($0.width), Int($0.height)] } ?? NSNull(),
                  "new": [Int(nr.width), Int(nr.height)], "nlines": nlines ?? NSNull(), "held": held])
-            if held { r = nil }                                     // keep the previous box until OCR / AX finds the tight one
+            if held { r = nil; firstDrawSrc = "held" }              // keep the previous box until OCR / AX finds the tight one
         }
         if let rf = ref { showRef(rf) }
         seq = s
@@ -930,6 +936,19 @@ func refind(_ lines: [OLine], target: [String], near: CGRect?) -> CGRect? {
 /// Page-space line rects [x0, y0, x1, y1] mapped to the screen with one fit (screen = s * page + offset); never a per-line fit.
 func mapBand(_ lines: [[Double]], fit: (Double, Double, Double)) -> [CGRect] {
     lines.map { CGRect(x: fit.0 * $0[0] + fit.1, y: fit.0 * $0[1] + fit.2, width: fit.0 * ($0[2] - $0[0]), height: fit.0 * ($0[3] - $0[1])) }
+}
+/// A2.7: where a show is first drawn. With a page->screen fit (OCR anchors, or the show's own transform; screen = s * page +
+/// o, kept without the scroll offset) the show's page geometry (doc.lines, else doc.target) is mapped with that fit plus
+/// the scroll since the hotkey; without one, its screen geometry plus that scroll. Returns (band rects, rect, source).
+func firstDraw(docTarget: [Double]?, docLines: [[Double]], rects: [CGRect], rect: CGRect?,
+               fit: (Double, Double, Double)?, off: CGPoint) -> (band: [CGRect], rect: CGRect?, src: String) {
+    if let f = fit {
+        let g = (f.0, f.1 + Double(off.x), f.2 + Double(off.y))
+        if !docLines.isEmpty { let b = mapBand(docLines, fit: g); return (b, unionOf(b), "page-fit") }
+        if let t = docTarget, t.count == 4 { return ([], mapBand([t], fit: g).first, "page-fit") }
+    }
+    let b = rects.map { $0.offsetBy(dx: off.x, dy: off.y) }
+    return (b, b.isEmpty ? rect?.offsetBy(dx: off.x, dy: off.y) : unionOf(b), "capture+offset")
 }
 func unionOf(_ rects: [CGRect]) -> CGRect? { rects.dropFirst().reduce(rects.first) { $0?.union($1) } }
 /// Each rect clamped to the window, the ones fully outside dropped; nil (hide) when under 30 % of the band's area is visible.

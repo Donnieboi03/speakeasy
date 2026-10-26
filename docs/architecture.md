@@ -17,8 +17,9 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 | `sentence_map.py` | The selection's source sentences (ids, char spans, screen and page line rects) built before speech; forward-only alignment of each spoken chunk to its source span |
 | `textfold.py` | The shared text fold (match key with offsets, fold and match tokens) every text comparison uses; `tracker.swift` carries the same steps |
 | `document.py` | Reads the source PDF / Markdown in the background, figure labels for the prompt, PDF text for Read area |
-| `grounding.py` | Vision-model grounding of a named figure part on the figure crop (`ground_prompt`, `parse_ground_box`) |
-| `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv) |
+| `grounding.py` | Figure-part grounding: the Set-of-Mark picker queue (one letter pick at a time, deadline, breakers). The local `/api/chat` always answers first; with `SPEAKEASY_GROUND=openrouter` the same marked crop goes to OpenRouter only after the local picker is unavailable or gives no logprobs |
+| `partpick.py` | Set-of-Mark picker pieces: candidate rects of a panel / figure scope, the marked crop (`partpick.py render`, run in the doc venv), the request body and the letter decision from `top_logprobs` (`PICK_MIN_P`) |
+| `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv); the figure > panel > part hierarchy (labels-below and gutter panels, text parts, callouts), hairline figures and callout references in speech |
 | `pdfpage.py` | pypdfium2 page text and rendering, imported by sibling path from doc-venv subprocesses |
 | `layoutdet.py` | PDF layout detector (PP-DocLayout-S on onnxruntime, inside the doc-venv parse only): model lookup and sha256 check, caption pairing, snapping, detector paragraphs, `layout_*` events; `layoutdet.py fetch` is the installers' model download |
 | `provider.py` | Which endpoint a purpose (`llm`, `ground`) uses: local or OpenRouter; Keychain key lookup |

@@ -50,6 +50,8 @@ P2_SHOW = {"sent"}                                # always present on show recor
 P2_DOC = {"target_src", "split_from"}             # inside show doc
 # Phase 3 (docs/contracts/phase3-sentence-ids.md F): exactly these new keys are allowed (present only on runs with a sentence map).
 P3_RUN = {"sentence_map"}
+# docs/contracts/phase5-parts.md 6.2 / Amendment 2 (present when they apply); ground_box_convention is retired with bbox_2d (A2.9)
+P5_RUN = {"part_picks", "figure_mode_src", "stand_in_blocked", "no_target_chunks", "figures_degenerate", "area_page_rect", "area_region_src", "area_dropped", "area_pdf_error"}
 P3_MAP = {"sentence_id", "sentence_ids"}
 P3_SHOW = {"sentence_id", "match_score", "runner_up", "rects"}
 ALIGN_METHODS = {"align", "align-fuzzy", "span", "hold", "block"}   # Phase 3 amendment 3: sentence-map assignment methods
@@ -156,7 +158,7 @@ def global_checks():
             (b, c) = out; tag = f"G_same_{cname}_{iname}"
             add(f"{tag}_stdout_stderr_rc", b[:3] == c[:3], "" if b[:3] == c[:3] else f"base={b[:3]!r:.200} cur={c[:3]!r:.200}")
             extra = set(c[3]) - set(b[3]); missing = set(b[3]) - set(c[3])
-            add(f"{tag}_runs_keyset", not missing and not (extra - {"ground_mode_note", "ground_provider", "ground_box_convention"} - P2_RUN - P3_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
+            add(f"{tag}_runs_keyset", not (missing - {"ground_box_convention"}) and not (extra - {"ground_mode_note", "ground_provider"} - P2_RUN - P3_RUN - P5_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
                 {"missing": sorted(missing), "extra": sorted(extra)})
             diff = {k: (b[4][k], c[4][k]) for k in STABLE if b[4][k] != c[4][k]}
             add(f"{tag}_runs_stable_values", not diff, diff)
@@ -316,16 +318,19 @@ def florence():
             else:
                 # this fixture is not guaranteed to need grounding (baseline only started the Florence worker), so these hold for 0..n requests
                 add(f"B_{nm}_grounding_requests_are_local_vision_nonstream", all(not r["stream"] and r["model"] == "mock-vision" for r in gp), {"n": len(gp), "reqs": [(r["model"], r["stream"]) for r in gp][:3]})
+                pq = [r for r in o["reqs"] if r.get("image") and str(r.get("path", "")).split("?")[0].rstrip("/").endswith("/api/chat")]
+                add(f"B_{nm}_picker_default_off_no_pick_requests", not pq, len(pq))
+                add(f"B_{nm}_retired_bbox_requests_none", not [r for r in gp if not r.get("stream")], len(gp))
                 add(f"B_{nm}_one_c_render_per_grounding_request", len(c_spawns(o)) == len(gp), {"posts": len(gp), "c_spawns": len(c_spawns(o)), "argv": [a[1:3] for a in o["argv"]][:6]})
                 lr = o["runs"][-1] if o["runs"] else {}
                 add(f"B_D_{nm}_ground_provider_local", (lr.get("ground_provider") == "local") if gp else ("ground_provider" not in lr), {k: lr.get(k) for k in ("ground_provider", "ground_box_convention", "ground_provider_configured")})
-                add(f"B_D_{nm}_ground_box_convention_xy", (lr.get("ground_box_convention") == "xy") if gp else ("ground_box_convention" not in lr), lr.get("ground_box_convention"))
+                add(f"B_D_{nm}_ground_box_convention_retired", not any("ground_box_convention" in r for r in o["runs"]), lr.get("ground_box_convention"))
         # warm runs only: cold-run grounding counts vary 0..chunks with when the document lands (phase 3 amendment 6)
         n_auto = len(O["auto"]["ground_posts_warm"])
         for nm in ("unset", "AUTO_upper", "empty", "local", "florence", "vlm", "Florence_mixed", "long_unknown"):
             add(f"B_{nm}_grounding_same_as_auto", len(O[nm]["ground_posts_warm"]) == n_auto, {"auto": n_auto, nm: len(O[nm]["ground_posts_warm"])})
-        bad = {k: sorted(v) for k, v in methods.items() if k.startswith("ground") and k not in ("ground-vlm", "ground-miss")}
-        add("B_focus_methods_only_ground_vlm_or_miss", not bad, bad)
+        bad = {k: sorted(v) for k, v in methods.items() if k.startswith("ground") and k not in ("ground-pick", "ground-miss")}
+        add("B_focus_methods_only_ground_pick_or_miss", not bad, bad)
         # legacy env vars have no effect
         for nm, kw in (("SPEAKEASY_FLORENCE_on", {"SPEAKEASY_FLORENCE": "on"}), ("SPEAKEASY_FLORENCE_1", {"SPEAKEASY_FLORENCE": "1"}), ("SPEAKEASY_GROUND_MODEL_set", {"SPEAKEASY_GROUND_MODEL": "microsoft/Florence-2-large"})):
             o = fig_run(CUR, m, SPEAKEASY_GROUND="auto", **kw); g, ps = ground_spawns(o)
@@ -598,7 +603,7 @@ def privacy():
         dk = lambda o: set().union(*[set(x["doc"]) for x in o["focus"] if x.get("state") == "show" and isinstance(x.get("doc"), dict)] or [set()])
         add("E_pdf_show_doc_keyset_vs_baseline", not (dk(P["base"]) - dk(P["off"])) and not (dk(P["off"]) - dk(P["base"]) - P2_DOC), {"missing": sorted(dk(P["base"]) - dk(P["off"])), "extra": sorted(dk(P["off"]) - dk(P["base"]) - P2_DOC)})
         rk = lambda o: set(o["runs"][-1]) if o["runs"] else set()
-        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN)})
+        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN - P5_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN - P5_RUN)})
     finally: m.stop()
     # dry-run: never writes the live focus file
     m = Mock(MOCK_TEXT=SENT_ANSWER)

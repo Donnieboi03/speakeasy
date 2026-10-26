@@ -1,5 +1,6 @@
 """Small PDF page layer on pypdfium2 (Apache-2.0/BSD; replaces PyMuPDF, which is AGPL).
 Coordinates are PyMuPDF-style: points, origin top-left, rects [x0, y0, x1, y1]."""
+import ctypes
 import pypdfium2 as pdfium
 import pypdfium2.raw as raw
 
@@ -48,32 +49,43 @@ class Page:
             cur.append(k)
         if cur: blocks.append(cur)
         return lines, blocks
-    def _objs(self, kind):
-        """Bounds of every object of this type, including ones nested in form XObjects (their bounds are in form space,
-        so the enclosing forms' matrices are applied)."""
-        out, stack = [], {}
+    def _walk(self, kind):
+        """(object, enclosing forms' matrix) for every object of this type, including ones nested in form XObjects."""
+        stack = {}
         for o in self.p.get_objects(max_depth=6):
             parent = stack.get(o.level - 1, (1, 0, 0, 1, 0, 0))
             if o.type == raw.FPDF_PAGEOBJ_FORM:
-                a1, b1, c1, d1, e1, f1 = o.get_matrix().get(); a0, b0, c0, d0, e0, f0 = parent
-                stack[o.level] = (a1 * a0 + b1 * c0, a1 * b0 + b1 * d0, c1 * a0 + d1 * c0, c1 * b0 + d1 * d0,
-                                  e1 * a0 + f1 * c0 + e0, e1 * b0 + f1 * d0 + f0)
-                continue
-            if o.type != kind: continue
-            try: l, bt, r, t = o.get_bounds()
+                stack[o.level] = _compose(o.get_matrix().get(), parent); continue
+            if o.type == kind: yield o, parent
+    def _page_rect(self, m, l, bt, r, t):
+        """Form-space bounds -> page rect (top-left origin) under matrix m."""
+        pts = [_apply(m, x, y) for x, y in ((l, bt), (r, bt), (l, t), (r, t))]
+        return self._flip(min(p[0] for p in pts), min(p[1] for p in pts), max(p[0] for p in pts), max(p[1] for p in pts))
+    def _objs(self, kind):
+        """Bounds of every object of this type (form XObject bounds are in form space, so the forms' matrices are applied)."""
+        out = []
+        for o, parent in self._walk(kind):
+            try: out.append(self._page_rect(parent, *o.get_bounds()))
             except pdfium.PdfiumError: continue            # object without bounds (empty path): skip it
-            a0, b0, c0, d0, e0, f0 = parent
-            xs, ys = [], []
-            for x, y in ((l, bt), (r, bt), (l, t), (r, t)):
-                xs.append(a0 * x + c0 * y + e0); ys.append(b0 * x + d0 * y + f0)
-            out.append(self._flip(min(xs), min(ys), max(xs), max(ys)))
         return out
     def images(self): return self._objs(raw.FPDF_PAGEOBJ_IMAGE)
     def drawings(self): return self._objs(raw.FPDF_PAGEOBJ_PATH)
-    def cluster_drawings(self, tol=3):
-        """Union of vector paths that touch or nearly touch (like PyMuPDF's cluster_drawings)."""
+    def paths(self):
+        """Every vector path with its paint mode and segment count; Path.points() reads its segments on demand."""
+        out = []
+        for o, parent in self._walk(raw.FPDF_PAGEOBJ_PATH):
+            try: r = self._page_rect(parent, *o.get_bounds())
+            except pdfium.PdfiumError: continue
+            fill, stroke = ctypes.c_int(0), ctypes.c_int(0)
+            raw.FPDFPath_GetDrawMode(o.raw, ctypes.byref(fill), ctypes.byref(stroke))
+            out.append(Path(self, o, parent, r, fill.value != raw.FPDF_FILLMODE_NONE, bool(stroke.value), raw.FPDFPath_CountSegments(o.raw)))
+        return out
+    def cluster_drawings(self, tol=3, on_page=False):
+        """Union of vector paths that touch or nearly touch (like PyMuPDF's cluster_drawings). on_page: paths that stick out
+        of the page by more than 2 pt (a figure canvas larger than its clip) are left out."""
         W, H = self.rect.width, self.rect.height
-        rs = [list(r) for r in self.drawings() if not (r.width > 0.95 * W and r.height > 0.95 * H)]
+        rs = [list(r) for r in self.drawings() if not (r.width > 0.95 * W and r.height > 0.95 * H)
+              and not (on_page and (r[0] < -2 or r[1] < -2 or r[2] > W + 2 or r[3] > H + 2))]
         merged = True
         while merged:
             merged = False; out = []
@@ -91,3 +103,27 @@ class Page:
         return self.p.render(scale=zoom, crop=crop).to_pil().convert("RGB")
     def render(self, clip, zoom, png):
         self.image(clip, zoom).save(png)
+
+def _compose(m, parent):
+    """Matrix m applied inside parent (PDF row-vector convention)."""
+    a1, b1, c1, d1, e1, f1 = m; a0, b0, c0, d0, e0, f0 = parent
+    return (a1 * a0 + b1 * c0, a1 * b0 + b1 * d0, c1 * a0 + d1 * c0, c1 * b0 + d1 * d0, e1 * a0 + f1 * c0 + e0, e1 * b0 + f1 * d0 + f0)
+
+def _apply(m, x, y):
+    return m[0] * x + m[2] * y + m[4], m[1] * x + m[3] * y + m[5]
+
+class Path:
+    """One vector path: page rect r, filled / stroked, n segments (the first is the move-to)."""
+    def __init__(self, page, obj, parent, r, filled, stroked, n):
+        self.page, self.obj, self.parent, self.r, self.filled, self.stroked, self.n = page, obj, parent, r, filled, stroked, n
+    def points(self):
+        """[(x, y, kind, closes)] in page space (top-left origin); kind is "move", "line" or "bezier"."""
+        m = _compose(self.obj.get_matrix().get(), self.parent); out = []
+        kinds = {raw.FPDF_SEGMENT_MOVETO: "move", raw.FPDF_SEGMENT_LINETO: "line", raw.FPDF_SEGMENT_BEZIERTO: "bezier"}
+        for i in range(self.n):
+            seg = raw.FPDFPath_GetPathSegment(self.obj.raw, i)
+            x, y = ctypes.c_float(0), ctypes.c_float(0)
+            raw.FPDFPathSegment_GetPoint(seg, ctypes.byref(x), ctypes.byref(y))
+            px, py = _apply(m, x.value, y.value)
+            out.append((px, self.page.H - py, kinds.get(raw.FPDFPathSegment_GetType(seg), "unknown"), bool(raw.FPDFPathSegment_GetClose(seg))))
+        return out

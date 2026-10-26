@@ -133,6 +133,10 @@ Rules:
 8. SEAMLESS: never mention that you were given a screenshot, image, picture, photo, capture, crop, or screen. Never say "the image shows", "in this screenshot", "the screen displays", "this picture", "I can see". Talk about the content itself: "This chart shows...", "The table compares...", "The diagram goes from...", "This page is about...".
 9. NAMES: when the figure or table has a label and title (in the copied text, the caption, or the document labels), open with them: "Figure 5, the drowsiness detector training and validation diagram, ...", "Table 2, cohort summary, ...". Without a label say "This figure" or "This table". Panels: "In panel a, ..."."""
 
+PICK_PROMPT = ("This image is part of a figure. {n} regions are outlined in {colour}, each tagged with a {colour} letter, "
+               "letters A to {last}. Which region shows \"{phrase}\"? Answer with the letter only. "
+               "If no single region shows it, answer 0.")
+
 SCREEN_INSTRUCTION = ("Explain what the user is currently looking at in their {what}. Answer in EXACTLY three short spoken sentences: "
     "first, what kind of content or app this is; second, the main thing it shows or its main point; third, one notable detail (a figure, number, or section).  Focus on the main content area; "
     "skip menus, toolbars, sidebars, tabs, and window chrome. Do not read long text verbatim and never invent details. "

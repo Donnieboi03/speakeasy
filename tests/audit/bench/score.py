@@ -85,6 +85,21 @@ def box_counts_page(gt_blocks, pred_blocks, t_hit=0.75, t_pr=0.5):
     return out
 
 
+def wrong_type_page(gt_blocks, pred_blocks, t=0.75):
+    """Predicted blocks of a scored kind that are not a hit for their own kind but overlap a GT block of a different kind at
+    IoU >= t (right box, wrong type). Returns {pred_kind: {gt_kind: n}} (the best-IoU other-kind GT block names the type)."""
+    out = {}
+    for k in SCORED_KINDS:
+        own = [(b["id"], b["bbox"]) for b in gt_blocks if b["kind"] == k]
+        p = [b["bbox"] for b in pred_blocks if b.get("kind") == k]
+        hit = set(match(own, p, t).values())
+        for pi, pb in enumerate(p):
+            if pi in hit: continue
+            best = max(((iou(pb, g["bbox"]), g["kind"]) for g in gt_blocks if g["kind"] != k), default=(0.0, None))
+            if best[0] >= t: out.setdefault(k, {}); out[k][best[1]] = out[k].get(best[1], 0) + 1
+    return out
+
+
 def _add(a, b):
     for k in ("hits", "gt", "matched_50", "pred"): a[k] += b[k]
 
@@ -96,17 +111,20 @@ def _box_summary(c):
 
 def score_boxes(docs, preds, per_doc=True, t_hit=0.75, t_pr=0.5):
     """docs: [(doc_id, subset, gt)] sorted by doc_id; preds: {doc_id: {page_n: [blocks]}}."""
-    tot = _zero_box(); kinds = {k: _zero_box() for k in SCORED_KINDS}; subs = {}; by_doc = {}
+    tot = _zero_box(); kinds = {k: _zero_box() for k in SCORED_KINDS}; subs = {}; by_doc = {}; wrong = {k: {} for k in SCORED_KINDS}
     for doc_id, subset, gt in docs:
         dc = _zero_box(); sc = subs.setdefault(subset, _zero_box())
         for pg in gt["pages"]:
             if not pg.get("blocks_scored"): continue
             per = box_counts_page(pg["blocks"], preds.get(doc_id, {}).get(pg["n"], []), t_hit, t_pr)
             for k, c in per.items(): _add(kinds[k], c); _add(tot, c); _add(dc, c); _add(sc, c)
+            for k, a in wrong_type_page(pg["blocks"], preds.get(doc_id, {}).get(pg["n"], []), t_hit).items():
+                for gk, n in a.items(): wrong[k][gk] = wrong[k].get(gk, 0) + n
         by_doc[doc_id] = dict(dc)
     out = _box_summary(tot)
     out["by_kind"] = {k: {x: v for x, v in _box_summary(c).items() if x in ("score", "hits", "gt", "precision_50", "recall_50")} for k, c in kinds.items()}
     out["by_subset"] = {s: _box_summary(c) for s, c in sorted(subs.items())}
+    out["wrong_type"] = {k: {"n": sum(a.values()), "as": dict(sorted(a.items()))} for k, a in wrong.items()}
     if per_doc: out["by_doc"] = by_doc
     return out
 
@@ -205,6 +223,119 @@ def oval_good(show, part):
     return bool(part and t and (show.get("doc") or {}).get("page") == part["page"] and inside(centre(t), part["bbox"]))
 
 
+def parts_counts(script_ids, sents, parts, chunks_of, cshow, owner):
+    """Parts hits over the script's parts sentences and good/all part ovals over every chunk (the gated rules)."""
+    out = {"hits": 0, "n": 0, "good": 0, "ovals": 0}
+    for sid in script_ids:
+        s = sents[sid]
+        if s["score"] != "parts": continue
+        hit, _ = score_part_sentence(parts[s["part"]], [cshow.get(k) for k in sorted(chunks_of.get(sid, []))])
+        out["n"] += 1; out["hits"] += hit
+    for k in sorted(cshow):
+        sh = cshow[k]
+        if sh.get("cue_kind") != "part_oval": continue
+        out["ovals"] += 1; s = sents.get(owner.get(k)) if k in owner else None
+        if s and s["score"] == "parts" and oval_good(sh, parts[s["part"]]): out["good"] += 1
+    return out
+
+
+# ---------------------------------------------------------------- picks (phase5-parts.md 7.2)
+PICK_OUTCOMES = ("accepted", "low-confidence", "off-menu", "no-logprobs", "unavailable", "error", "timeout", "out-of-scope")
+
+
+def _isint(v):
+    return isinstance(v, int) and not isinstance(v, bool)
+
+
+def pick_eval(picks, owner, sents, parts, cshow):
+    """One entry per focus-log part_pick record, scored from the logged decision. A pick is attributed to the script sentence
+    of its chunk (`sent`); it is correct when it is accepted, its sentence is parts-scored, cand_rects[chosen_index] has its
+    centre inside the GT part bbox, and the chunk's show (when it has a page) is on the part's page."""
+    out = []
+    for r in picks:
+        k = r.get("sent"); s = sents.get(owner.get(k)) if k in owner else None
+        part = parts.get(s["part"]) if s and s["score"] == "parts" else None
+        page = ((cshow.get(k) or {}).get("doc") or {}).get("page")
+        rects = [list(x) for x in (r.get("cand_rects") or []) if _is_rect(x)] if isinstance(r.get("cand_rects"), list) else []
+        acc = r.get("outcome") == "accepted"; ci = r.get("chosen_index")
+        chosen = rects[ci] if acc and _isint(ci) and 0 <= ci < len(rects) and len(rects) == len(r.get("cand_rects") or []) else None
+        page_ok = part is not None and (page is None or page == part["page"])
+        out.append({"sent": k, "outcome": r.get("outcome"), "called": r.get("called") is True, "accepted": acc, "on_parts": part is not None,
+                    "correct": bool(acc and chosen and page_ok and inside(centre(chosen), part["bbox"])),
+                    "cand_hit": bool(page_ok and any(inside(centre(x), part["bbox"]) for x in rects)),
+                    "chosen": chosen, "page": page, "bad": bool(acc and chosen is None),
+                    "ms": r.get("ms") if isinstance(r.get("ms"), (int, float)) and not isinstance(r.get("ms"), bool) else None})
+    return out
+
+
+def shows_with_picks(cshow, evals):
+    """Last show per chunk with each accepted pick drawn as that chunk's oval (replacing its fallback cue)."""
+    out = dict(cshow)
+    for e in evals:
+        if e["accepted"] and e["chosen"] is not None:
+            out[e["sent"]] = {"cue_kind": "part_oval", "doc": {"kind": "object", "page": e["page"], "target": e["chosen"]}}
+    return out
+
+
+def pick_summary(evals, pw, replay_miss=0):
+    """sets.<set>.pick. evals: pick_eval entries of the set; pw: parts_counts summed over the set with shows_with_picks."""
+    by = {o: 0 for o in PICK_OUTCOMES}
+    for e in evals:
+        o = e["outcome"] if e["outcome"] in PICK_OUTCOMES else "other"; by[o] = by.get(o, 0) + 1
+    acc = [e for e in evals if e["accepted"]]; on = [e for e in evals if e["on_parts"]]; correct = sum(e["correct"] for e in evals)
+    ms = [e["ms"] for e in evals if e["called"] and e["ms"] is not None]
+    return {"requests": len(evals), "called": sum(e["called"] for e in evals), "by_outcome": by, "replay_miss": replay_miss, "stale": replay_miss > 0,
+            "accepted": len(acc), "correct": correct, "on_parts": len(on), "bad_records": sum(e["bad"] for e in evals),
+            "precision": pct(correct, len(acc)), "recall": pct(correct, len(on)), "candidate_recall": pct(sum(e["cand_hit"] for e in on), len(on)),
+            "parts_with_pick": {"score": pct(pw["hits"], pw["n"]), "hits": pw["hits"], "n": pw["n"], "precision": pct(pw["good"], pw["ovals"]),
+                                "good_ovals": pw["good"], "ovals": pw["ovals"]},
+            "ms": {"p50": nearest_rank(ms, 0.5), "p95": nearest_rank(ms, 0.95), "n": len(ms)}}
+
+
+# ---------------------------------------------------------------- hard invariants (phase5-parts.md A2.11 item 1, A4.1)
+INVARIANTS = ("stand_in", "hairline_draw", "callout_oversize")
+
+
+def _sentences(text):
+    return [x for x in re.split(r"(?<=[.!?])\s+", norm_ws(text)) if x]
+
+
+ALIGNED_METHODS = {"align", "align-fuzzy", "span", "overlap", "progress", "doc-line"}
+
+
+def case_invariants(case, rec, shows, figs, maps=()):
+    """Counts for one measured run; each must be 0. figs: {page: [{bbox, panels: [bbox]}]} from the parse.
+    stand_in (figure-mode runs only, A2.3): a show on the case page whose doc.target has IoU >= 0.9 with the selection union,
+    except a figure_box equal to a figure or panel bbox, a selection of one sentence, and a band for a chunk aligned to its own
+    source sentence (map method align / span / ...: a one-line caption read verbatim covers the whole selection). hairline_draw (A2.4): a figure_box
+    under 10 pt in height or width. callout_oversize (A4.1): a callout / callout-marker show whose target covers >= 40 % of
+    the panel (else figure) holding its centre."""
+    out = {k: 0 for k in INVARIANTS}; out["figure_mode_runs"] = int(bool(rec.get("doc_figure_mode")))
+    rs = [it["rect"] for it in case.get("selection") or [] if _is_rect(it.get("rect"))]
+    U = [min(r[0] for r in rs), min(r[1] for r in rs), max(r[2] for r in rs), max(r[3] for r in rs)] if rs else None
+    one = len(_sentences(" ".join(it.get("text", "") for it in case.get("selection") or []))) <= 1
+    method = {m.get("sent"): m.get("method") for m in maps}
+    for sh in shows:
+        d = sh.get("doc") if isinstance(sh.get("doc"), dict) else {}; t = d.get("target")
+        if not _is_rect(t): continue
+        pf = figs.get(d.get("page")) or []
+        boxes = [f["bbox"] for f in pf] + [p for f in pf for p in f["panels"]]
+        if sh.get("cue_kind") == "figure_box" and (t[2] - t[0] < 10 or t[3] - t[1] < 10): out["hairline_draw"] += 1
+        if d.get("target_src") in ("callout", "callout-marker"):
+            c = centre(t); f = next((f for f in pf if inside(c, f["bbox"])), None)
+            if f:
+                ref = next((p for p in f["panels"] if inside(c, p)), f["bbox"])
+                if area(t) >= 0.4 * area(ref): out["callout_oversize"] += 1
+        if rec.get("doc_figure_mode") and U and not one and d.get("page") == case.get("page") and iou(t, U) >= 0.9:
+            aligned = sh.get("cue_kind") == "text_band" and method.get(sh.get("sent")) in ALIGNED_METHODS
+            if not aligned and not (sh.get("cue_kind") == "figure_box" and any(iou(t, b) >= 0.98 for b in boxes)): out["stand_in"] += 1
+    return out
+
+
+def invariants_summary(acc):
+    return {k: acc.get(k, 0) for k in INVARIANTS + ("figure_mode_runs",)}
+
+
 # ---------------------------------------------------------------- aggregation helpers
 def lines_summary(hits, n, reasons, by_subset):
     return {"score": pct(hits, n), "hits": hits, "n": n, "miss_reasons": {r: reasons.get(r, 0) for r in LINE_REASONS},
@@ -250,11 +381,14 @@ def layout_coverage_errors(set_name, lay):
 
 # ---------------------------------------------------------------- determinism (9)
 def determinism_view(bench):
-    """The fields that must be identical across two runs."""
-    out = {"fixtures": bench.get("fixtures"), "config": bench.get("config"), "sets": {}}
+    """The fields that must be identical across two runs. A pick bench (mode pick-*) leaves out parts and cases, which depend on
+    when a late pick lands, and covers the pick block except ms."""
+    gated = bench.get("mode", "gated") == "gated"
+    out = {"fixtures": bench.get("fixtures"), "config": bench.get("config"), "mode": bench.get("mode", "gated"), "sets": {}}
     for s, v in (bench.get("sets") or {}).items():
-        d = {k: v.get(k) for k in ("boxes", "lines", "parts")}
-        if "cases" in v: d["cases"] = [{k: x for k, x in c.items() if k != "first_highlight_ms"} for c in v["cases"]]
+        d = {k: v.get(k) for k in (("boxes", "lines", "parts") if gated else ("boxes", "lines"))}
+        if "cases" in v and gated: d["cases"] = [{k: x for k, x in c.items() if k != "first_highlight_ms"} for c in v["cases"]]
+        if isinstance(v.get("pick"), dict): d["pick"] = {k: x for k, x in v["pick"].items() if k != "ms"}
         if isinstance(v.get("layout"), dict): d["layout"] = {k: v["layout"].get(k) for k in ("pages", "src", "missing", "reasons")}
         out["sets"][s] = d
     return out
@@ -297,11 +431,14 @@ def _fmt(v):
     return "null" if v is None else f"{v:.2f}"
 
 
-def gate(bench, baselines, public_only=False, budget=300):
-    """bench: parsed bench.json; baselines: {set: parsed baseline or None}. Returns (exit_code, [output lines])."""
+def gate(bench, baselines, public_only=False, budget=300, parts_min=None):
+    """bench: parsed bench.json; baselines: {set: parsed baseline or None}; parts_min: absolute parts.score floor per set
+    (phase5-parts.md 9.1), None = no floor. Returns (exit_code, [output lines])."""
     out = []
     if not isinstance(bench, dict) or bench.get("schema") != "speakeasy-bench/1" or not isinstance(bench.get("sets"), dict) or not bench["sets"]:
         return 2, ["gate: bench is malformed or has a different schema"]
+    if bench.get("mode", "gated") != "gated":
+        return 2, [f"gate: {bench.get('mode')} bench is never gated (run without --pick)"]
     if bench.get("complete") is not True:
         return 2, ["gate: bench is not complete (--cases used or a harness error); refusing to gate"]
     for s, blk in bench["sets"].items():
@@ -330,6 +467,9 @@ def gate(bench, baselines, public_only=False, budget=300):
             if cur is None: out.append(f"{s} {sec}.{key} {_fmt(base)} -> null FAIL"); fails += 1; continue
             d = round(cur - base, 2); bad = d < -1.0; fails += bad; raised |= d > 1.0
             out.append(f"{s} {sec}.{key} {_fmt(base)} -> {_fmt(cur)} {d:+.2f} {'FAIL' if bad else 'PASS'}")
+        if parts_min is not None:
+            cur = blk["parts"]["score"]; bad = cur is None or cur < parts_min; fails += bad
+            out.append(f"{s} parts.score min {parts_min:.2f} -> {_fmt(cur)} ({blk['parts'].get('hits')}/{blk['parts'].get('n')}) {'FAIL' if bad else 'PASS'}")
         sp = blk["speed"]["first_highlight_ms"]
         for q in ("p50", "p95"):
             v = sp[q]; bad = v is None or v >= budget; fails += bad

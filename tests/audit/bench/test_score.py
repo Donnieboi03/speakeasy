@@ -252,6 +252,175 @@ def test_gate_warns_on_layout_versions():
     assert code == 0 and any(l.startswith("public layout pages 1 detector 0 heuristic 1") for l in out), out
 
 
+# ---------------------------------------------------------------- boxes wrong type (informational)
+def test_wrong_type_counts_right_box_wrong_kind():
+    gt = [{"id": "f", "kind": "figure", "bbox": [0, 0, 100, 100]}, {"id": "p", "kind": "paragraph", "bbox": [0, 200, 100, 300]},
+          {"id": "h", "kind": "heading", "bbox": [0, 400, 100, 420]}]
+    pr = [{"kind": "table", "bbox": [0, 0, 100, 95]},        # figure GT called table -> wrong type
+          {"kind": "paragraph", "bbox": [0, 200, 100, 300]},  # hit
+          {"kind": "paragraph", "bbox": [0, 400, 100, 420]},  # heading GT called paragraph -> wrong type (any GT kind)
+          {"kind": "caption", "bbox": [0, 0, 100, 60]}]       # IoU 0.6 with the figure: not counted
+    assert S.wrong_type_page(gt, pr) == {"table": {"figure": 1}, "paragraph": {"heading": 1}}
+    out = S.score_boxes([("d", "synthetic", {"pages": [{"n": 1, "blocks_scored": True, "blocks": gt}]})], {"d": {1: pr}})
+    assert out["wrong_type"]["table"] == {"n": 1, "as": {"figure": 1}} and out["wrong_type"]["caption"] == {"n": 0, "as": {}}, out["wrong_type"]
+    assert out["score"] == 50.0  # the wrong-type report changes no score
+
+
+def test_wrong_type_skips_own_kind_hits():
+    gt = [{"id": "a", "kind": "figure", "bbox": [0, 0, 100, 100]}, {"id": "b", "kind": "table", "bbox": [0, 0, 100, 98]}]
+    assert S.wrong_type_page(gt, [{"kind": "figure", "bbox": [0, 0, 100, 100]}]) == {}
+
+
+# ---------------------------------------------------------------- pick mode (phase5-parts.md 7.2)
+PART = {"id": "pt1", "page": 2, "bbox": [10, 10, 50, 50], "style": "callout"}
+SENTS = {"s1": {"id": "s1", "score": "parts", "part": "pt1"}, "s2": {"id": "s2", "score": "lines"}}
+IN, OUT = [20, 20, 30, 30], [100, 100, 120, 120]
+
+
+def pk(sent, outcome="accepted", ci=0, rects=(IN, OUT), called=True, ms=400):
+    return {"state": "part_pick", "sent": sent, "outcome": outcome, "chosen_index": ci, "cand_rects": [list(r) for r in rects], "called": called, "ms": ms}
+
+
+def fbox(page=2):
+    return {"cue_kind": "figure_box", "doc": {"kind": "figure", "page": page, "target": [0, 0, 200, 200]}}
+
+
+def test_pick_eval_correct_wrong_and_non_parts():
+    owner = {0: "s1", 1: "s1", 2: "s2"}; cshow = {0: fbox(), 1: fbox(), 2: fbox()}
+    ev = S.pick_eval([pk(0), pk(1, ci=1), pk(2)], owner, SENTS, {"pt1": PART}, cshow)
+    assert [e["correct"] for e in ev] == [True, False, False] and [e["on_parts"] for e in ev] == [True, True, False]
+    assert [e["cand_hit"] for e in ev] == [True, True, False]
+    s = S.pick_summary(ev, {"hits": 0, "n": 0, "good": 0, "ovals": 0})
+    assert (s["accepted"], s["correct"], s["precision"], s["recall"], s["candidate_recall"]) == (3, 1, 33.33, 50.0, 100.0), s
+
+
+def test_pick_eval_wrong_page_bad_index_and_outcomes():
+    owner = {0: "s1", 1: "s1", 2: "s1", 3: "s1"}; cshow = {0: fbox(page=3), 1: fbox(), 2: fbox(), 3: fbox()}
+    ev = S.pick_eval([pk(0), pk(1, ci=5), pk(2, outcome="low-confidence"), pk(3, outcome="no-logprobs", ci=None, rects=(), called=True, ms=3)],
+                     owner, SENTS, {"pt1": PART}, cshow)
+    assert [e["correct"] for e in ev] == [False] * 4 and ev[1]["bad"] and not ev[2]["bad"] and not ev[0]["cand_hit"]
+    s = S.pick_summary(ev, {"hits": 0, "n": 0, "good": 0, "ovals": 0}, replay_miss=2)
+    assert s["by_outcome"]["accepted"] == 2 and s["by_outcome"]["low-confidence"] == 1 and s["by_outcome"]["no-logprobs"] == 1 and s["by_outcome"]["timeout"] == 0
+    assert s["stale"] is True and s["replay_miss"] == 2 and s["bad_records"] == 1 and s["recall"] == 0.0 and s["ms"]["n"] == 4
+
+
+def test_pick_unknown_owner_counts_as_non_parts():
+    ev = S.pick_eval([pk(9)], {}, SENTS, {"pt1": PART}, {})
+    assert ev[0]["on_parts"] is False and ev[0]["correct"] is False
+    s = S.pick_summary(ev, {"hits": 0, "n": 0, "good": 0, "ovals": 0})
+    assert s["precision"] == 0.0 and s["recall"] is None
+
+
+def test_parts_with_pick_replaces_fallback_and_counts_strays():
+    sents = {"s1": SENTS["s1"], "s2": SENTS["s2"]}; owner = {0: "s1", 1: "s2"}; chunks_of = {"s1": [0], "s2": [1]}
+    cshow = {0: fbox(), 1: fbox()}
+    base = S.parts_counts(["s1", "s2"], sents, {"pt1": PART}, chunks_of, cshow, owner)
+    assert base == {"hits": 0, "n": 1, "good": 0, "ovals": 0}
+    ev = S.pick_eval([pk(0), pk(1)], owner, sents, {"pt1": PART}, cshow)
+    pw = S.parts_counts(["s1", "s2"], sents, {"pt1": PART}, chunks_of, S.shows_with_picks(cshow, ev), owner)
+    assert pw == {"hits": 1, "n": 1, "good": 1, "ovals": 2}, pw  # the pick on the lines sentence is a stray oval
+    lc = S.pick_eval([pk(0, outcome="low-confidence")], owner, sents, {"pt1": PART}, cshow)
+    assert S.shows_with_picks(cshow, lc) == cshow  # only accepted picks draw
+
+
+def test_determinism_view_pick_mode():
+    b, _ = bench_and_baseline(); b["mode"] = "pick-replay"
+    b["sets"]["public"]["pick"] = {"requests": 3, "ms": {"p50": 1}}; b["sets"]["public"]["cases"] = [{"case_id": "c", "parts": {"hits": 1}}]
+    b2 = copy.deepcopy(b); b2["sets"]["public"]["pick"]["ms"]["p50"] = 9; b2["sets"]["public"]["parts"]["score"] = 99.0
+    b2["sets"]["public"]["cases"][0]["parts"]["hits"] = 0
+    assert S.diff_paths(S.determinism_view(b), S.determinism_view(b2)) == []
+    b2["sets"]["public"]["pick"]["requests"] = 4
+    assert S.diff_paths(S.determinism_view(b), S.determinism_view(b2)) == ["$.sets.public.pick.requests"]
+    g, _ = bench_and_baseline(); g2 = copy.deepcopy(g); g2["sets"]["public"]["parts"]["score"] = 99.0
+    assert S.diff_paths(S.determinism_view(g), S.determinism_view(g2)) == ["$.sets.public.parts.score"]
+
+
+def test_gate_refuses_pick_bench_and_parts_floor():
+    b, bl = bench_and_baseline()
+    x = copy.deepcopy(b); x["mode"] = "pick-replay"; code, out = S.gate(x, {"public": bl}); assert code == 2 and "never gated" in out[0], out
+    x = copy.deepcopy(b); x["mode"] = "gated"; assert S.gate(x, {"public": bl})[0] == 0
+    x = copy.deepcopy(b); x["sets"]["public"]["parts"].update(score=70.0, hits=46, n=65); bl2 = copy.deepcopy(bl); bl2["metrics"]["parts"]["score"] = 63.08
+    code, out = S.gate(x, {"public": bl2}, parts_min=70.0); assert code == 0 and "public parts.score min 70.00 -> 70.00 (46/65) PASS" in out, out
+    x["sets"]["public"]["parts"]["score"] = 69.23; code, out = S.gate(x, {"public": bl2}, parts_min=70.0)
+    assert code == 1 and any(l.startswith("public parts.score min 70.00 -> 69.23") and l.endswith("FAIL") for l in out), out
+    assert S.gate(x, {"public": bl2})[0] == 0  # no floor without parts_min
+
+
+def _mock(env_extra):
+    import json, socket, subprocess, tempfile, time, urllib.request
+    d = tempfile.mkdtemp(prefix="se_mock_t_"); pf = os.path.join(d, "port"); lg = os.path.join(d, "log.jsonl")
+    e = {k: v for k, v in os.environ.items() if not k.startswith("MOCK_")}
+    e.update(MOCK_PORT="0", MOCK_PORT_FILE=pf, MOCK_LOG=lg, **env_extra)
+    p = subprocess.Popen([sys.executable, os.path.join(os.path.dirname(HERE), "stream", "mock_llm.py")], env=e, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    t0 = time.time()
+    while not os.path.exists(pf) and time.time() - t0 < 5: time.sleep(0.02)
+    port = int(open(pf).read())
+    def post(body):
+        rq = urllib.request.Request(f"http://127.0.0.1:{port}/api/chat", data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(rq, timeout=5) as r: return json.loads(r.read())
+    return p, post, lg, d
+
+
+def test_mock_pick_replay_none_and_fixed():
+    import base64, hashlib, json, math
+    png = b"\x89PNG fake"; body = {"model": "qwen3-vl:4b-instruct", "stream": False, "logprobs": True, "top_logprobs": 20,
+                                    "messages": [{"role": "user", "content": "pick a letter", "images": [base64.b64encode(png).decode()]}]}
+    key = hashlib.sha256(b"qwen3-vl:4b-instruct\x00pick a letter\x00" + hashlib.sha256(png).hexdigest().encode()).hexdigest()
+    p, post, lg, d = _mock({})
+    try:
+        r = post(body); assert "logprobs" not in r and r["done"] is True, r                      # MOCK_PICK=none: no logprobs
+        assert post({"model": "m", "messages": []})["done"] is True                             # load-only prewarm
+    finally: p.terminate(); p.wait()
+    cas = os.path.join(d, "cas.json")
+    json.dump({"header": {}, "entries": {key: {"top_logprobs": [{"token": "B", "logprob": math.log(0.9)}, {"token": "<other>", "logprob": math.log(0.1)}]}}}, open(cas, "w"))
+    p, post, lg, d2 = _mock({"MOCK_PICK": "replay", "MOCK_PICK_CASSETTE": cas})
+    try:
+        r = post(body); tl = r["logprobs"][0]["top_logprobs"]
+        assert [e["token"] for e in tl] == ["B", "<other>"] and r["message"]["content"] == "B", r
+        r2 = post(dict(body, messages=[dict(body["messages"][0], content="other prompt")])); assert "logprobs" not in r2
+        res = [json.loads(x)["result"] for x in open(lg) if '"pick_reply"' in x]; assert res == ["hit", "miss"], res
+    finally: p.terminate(); p.wait()
+    p, post, lg, d3 = _mock({"MOCK_PICK": "fixed", "MOCK_PICK_TOP_LOGPROBS": json.dumps([{"token": " a", "logprob": -0.1}])})
+    try: assert post(body)["logprobs"][0]["top_logprobs"] == [{"token": " a", "logprob": -0.1}]
+    finally: p.terminate(); p.wait()
+
+
+def test_mock_letter_entries_keep_letters_only():
+    import importlib.util, math
+    src = open(os.path.join(os.path.dirname(HERE), "stream", "mock_llm.py")).read().split("\nclass H(")[0]
+    ns = {}; exec(compile(src, "mock_llm_head", "exec"), ns)
+    out = ns["letter_entries"]([{"token": "A", "logprob": math.log(0.5)}, {"token": " A", "logprob": math.log(0.2)}, {"token": "The", "logprob": math.log(0.2)},
+                                {"token": "a", "logprob": math.log(0.05)}, {"token": "Q", "logprob": math.log(0.05)}])
+    assert [e["token"] for e in out] == ["A", " A", "<other>"] and abs(math.exp(out[-1]["logprob"]) - 0.3) < 1e-4, out
+
+
+# ---------------------------------------------------------------- hard invariants (phase5-parts.md A2.11, A4.1)
+def test_case_invariants():
+    case = {"page": 1, "selection": [{"text": "Figure 1: Two stages. Stage one", "rect": [10, 10, 200, 20]}, {"text": "is left.", "rect": [10, 22, 80, 32]}]}
+    figs = {1: [{"bbox": [0, 100, 400, 300], "panels": [[0, 100, 200, 300], [200, 100, 400, 300]]}]}
+    fm = {"doc_figure_mode": True}
+    def sh(t, cue="part_oval", src=None):
+        return {"cue_kind": cue, "doc": {"page": 1, "target": t, "target_src": src}}
+    inv = S.case_invariants(case, fm, [sh([10, 10, 200, 32], cue="text_band")], figs)
+    assert inv["stand_in"] == 1 and inv["figure_mode_runs"] == 1, inv                 # band over the whole selection in figure mode
+    assert S.case_invariants(case, {}, [sh([10, 10, 200, 32], cue="text_band")], figs)["stand_in"] == 0     # read-through: not A2.3
+    al = dict(sh([10, 10, 200, 32], cue="text_band"), sent=3)
+    assert S.case_invariants(case, fm, [al], figs, [{"sent": 3, "method": "align"}])["stand_in"] == 0       # verbatim sentence band
+    assert S.case_invariants(case, fm, [al], figs, [{"sent": 3, "method": "block"}])["stand_in"] == 1       # whole-block stand-in
+    one = dict(case, selection=[{"text": "One sentence only.", "rect": [10, 10, 200, 20]}])
+    assert S.case_invariants(one, fm, [sh([10, 10, 200, 20], cue="text_band")], figs)["stand_in"] == 0
+    assert S.case_invariants(case, fm, [sh([0, 100, 400, 300], cue="figure_box")], figs) == {"stand_in": 0, "hairline_draw": 0, "callout_oversize": 0, "figure_mode_runs": 1}
+    assert S.case_invariants(case, fm, [sh([0, 300, 400, 301], cue="figure_box")], figs)["hairline_draw"] == 1
+    assert S.case_invariants(case, fm, [sh([10, 110, 190, 290], src="callout")], figs)["callout_oversize"] == 1      # 81 % of panel a, 20 % of the figure
+    assert S.case_invariants(case, fm, [sh([20, 120, 60, 160], src="callout-marker")], figs)["callout_oversize"] == 0
+    assert S.case_invariants(case, fm, [sh([10, 110, 190, 290], src="pick")], figs)["callout_oversize"] == 0          # only callout targets are pinned
+
+
+def test_out_of_scope_is_a_pick_outcome():
+    ev = S.pick_eval([pk(0, outcome="out-of-scope", ci=None)], {0: "s1"}, SENTS, {"pt1": PART}, {0: fbox()})
+    assert S.pick_summary(ev, {"hits": 0, "n": 0, "good": 0, "ovals": 0})["by_outcome"]["out-of-scope"] == 1
+
+
 if __name__ == "__main__":
     fails = 0; tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

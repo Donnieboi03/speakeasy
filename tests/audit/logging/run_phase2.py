@@ -6,7 +6,7 @@ baseline commit (git archive of --baseline-ref, default 7004d6e). Never calls a 
 never touches ~/.speakeasy.
 Usage: run_phase2.py [--repo PATH] [--baseline-ref REF] [--only T,D,V,A,C,G,P,F,X,S,E] [--no-tracker]
 Output: one line per check `PASS|FAIL|SKIP <name> <detail>`, then `SUMMARY ...`. Exit 0 only if no FAIL."""
-import argparse, glob, json, os, re, shutil, signal, subprocess, sys, tempfile, threading, time, traceback
+import argparse, glob, json, math, os, re, shutil, signal, subprocess, sys, tempfile, threading, time, traceback
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import p2lib as L
 from p2lib import jl, Mock, mkhome, env_for, runs, focus_log, flat, sentinel_hits, TMPROOT, PY
@@ -36,11 +36,15 @@ def r2(v): return isnum(v) and abs(round(v, 2) - v) < 1e-9
 def r1(v): return isnum(v) and abs(round(v, 1) - v) < 1e-9
 
 # ---------------------------------------------------------------- contract vocabularies
-FIG_SRC = {"graphics", "whitespace", "caption-only", "detector"}
+FIG_SRC = {"graphics", "whitespace", "caption-only", "detector", "detector-substitute"}  # detector-substitute: phase5-parts.md A2.4
 TAB_SRC = {"graphics", "text-rows", "graphics+text-rows", "caption-only", "detector"}
 ALL_SRC = FIG_SRC | TAB_SRC
-TARGET_SRC_FIXED = {"lines", "panel-labels", "panel-guessed", "table-rows", "label-object", "label-pad", "vlm"}
-REASONS = {"no-fit", "superseded", "timeout", "error", "no-box", "too-large"}
+# Phase 5 (phase5-parts.md 6.3, A2.9, A4.1): callout / callout-marker / pick targets; the bbox_2d path (vlm target, no-box / too-large,
+# ground-vlm, ground_box_convention) is retired and must never be written
+TARGET_SRC_FIXED = {"lines", "panel-labels", "panel-guessed", "table-rows", "label-object", "label-pad", "callout", "callout-marker", "pick"}
+REASONS = {"no-fit", "superseded", "timeout", "error", "low-confidence", "off-menu", "no-logprobs", "unavailable", "out-of-scope"}
+MISS_REASONS = ("error", "low-confidence", "off-menu", "no-logprobs", "unavailable", "out-of-scope")   # counted in focus_methods ground-miss
+RETIRED_RUN_KEYS = {"ground_box_convention"}; RETIRED_METHODS = {"ground-vlm"}
 F_LABEL_RE = re.compile(r"^(Figure|Table) \d+[a-h]?( row \d+)?( \(grounded\))?$")
 def f_label_ok(v): return v is None or (isinstance(v, str) and bool(F_LABEL_RE.match(v)))
 def p2_redact(label):
@@ -65,6 +69,36 @@ CAP_SRC = {"regex", "regex+detector"}; PARA_SRC = {"detector", "lines"}
 LAYOUT_REASONS = {"disabled", "no-onnxruntime", "model-missing", "model-mismatch", "load-failed", "pdfkit-engine", "inference-failed"}
 DETECTOR_VERSION_RE = re.compile(r"^pp-doclayout-s/[0-9a-f]{12}$")
 P4_RUN = {"layout_events"}
+# Phase 5 (docs/contracts/phase5-parts.md 2, 6): runs part_picks; figures[].parts and panels[].src; doc_parse parts / panels.gutter counts
+P5_RUN = {"part_picks", "figure_mode_src", "stand_in_blocked", "no_target_chunks", "figures_degenerate", "area_page_rect", "area_region_src", "area_dropped", "area_pdf_error"}
+P5_COUNT_KEYS = {"parts", "text", "callout", "callout_attached", "gutter", "detector-substitute"}
+PICK_SKIPPED = {"too-few", "whole-figure", "disabled", "doc-not-ready", "degenerate-figure", "generic-phrase"}
+def part_picks_ok(v):
+    """runs part_picks (phase5-parts.md 6.2 as amended by A2.9 / A3.3): counts and enums only."""
+    if not isinstance(v, dict) or not {"requests", "called", "accepted", "applied", "outcomes", "skipped", "ms", "threshold", "breaker"} <= set(v): return False
+    if not all(isint(v[k]) and v[k] >= 0 for k in ("requests", "called", "accepted", "applied")): return False
+    if not (isinstance(v["outcomes"], dict) and set(v["outcomes"]) <= REASONS - {"no-fit", "superseded"} | {"accepted"} and all(isint(x) for x in v["outcomes"].values())): return False
+    if not (isinstance(v["skipped"], dict) and set(v["skipped"]) <= PICK_SKIPPED and all(isint(x) for x in v["skipped"].values())): return False
+    b = v["breaker"]
+    if not (b is None or b in ("unavailable", "no-logprobs") or (isinstance(b, dict) and set(b) <= {"local", "openrouter"} and all(x in (None, "unavailable", "no-logprobs") for x in b.values()))): return False
+    if "by_provider" in v and not (isinstance(v["by_provider"], dict) and set(v["by_provider"]) <= {"local", "openrouter"} and all(isint(x) for x in v["by_provider"].values())): return False
+    if "fallback" in v and not (isinstance(v["fallback"], dict) and set(v["fallback"]) <= {"unavailable", "no-logprobs"} and all(isint(x) for x in v["fallback"].values())): return False
+    return isnum(v["threshold"]) and isinstance(v["ms"], dict) and all(x is None or isint(x) for x in v["ms"].values())
+def breaker_local(v):
+    b = (v or {}).get("breaker"); return b.get("local") if isinstance(b, dict) else b
+def p5_same(k, x, y):
+    """Phase 5 additions inside an existing figure key: panels gain src (and gutter splits may replace caption guesses), objects may gain a panel."""
+    xv, yv = x.get(k), y.get(k)
+    if k == "objects" and isinstance(xv, list) and isinstance(yv, list):
+        return len(xv) == len(yv) and all(list(a)[:5] == list(b)[:5] for a, b in zip(xv, yv))
+    if k == "panels" and isinstance(xv, list) and isinstance(yv, list):
+        if any(isinstance(p, dict) and p.get("src") == "gutter" for p in yv): return True
+        if [a.get("label") for a in xv] == [b.get("label") for b in yv] and all(isinstance(b, dict) and b.get("src") == "label" for b in yv) and not any(a.get("guessed") for a in xv): return True   # A3.4 labels-below re-boxing
+        fb = y.get("bbox") or [-1e9, -1e9, 1e9, 1e9]
+        def clip(r): return [max(r[0], fb[0]), max(r[1], fb[1]), min(r[2], fb[2]), min(r[3], fb[3])]
+        return len(xv) == len(yv) and all(a.get("label") == b.get("label") and bool(a.get("guessed")) == bool(b.get("guessed")) and
+                                          max(abs(u - v) for u, v in zip(clip(a["bbox"]), b["bbox"])) <= 0.15 for a, b in zip(xv, yv))
+    return False
 EXC_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,80}$")
 def layout_ok(v, version):
     """pages[].layout (version=True) or doc_parse.layout (version=False)."""
@@ -363,7 +397,7 @@ def sentfig_case(name, n=2, bin_=CUR, dry=False, mock_kw=None, **envkw):
 def fixture_of(name):
     n = name.split("#")[0]
     for pre, f in (("fig5", "fig5.pdf"), ("x_t1", "fig5.pdf"), ("x_cap", "fig5.pdf"), ("two", FX["twocol"]), ("xf_", FX["twocol"]), ("paper", "paper.pdf"), ("multi", FX["multipage"]),
-                   ("g_", FX["sentfig"]), ("fit_", FX["sentfig"]), ("ver_", FX["sentfig"]), ("x_sf", FX["sentfig"])):
+                   ("g_", FX["sentfig"]), ("fit_", FX["sentfig"]), ("ver_", FX["sentfig"]), ("x_sf", FX["sentfig"]), ("p_", "fig5.pdf")):
         if n.startswith(pre): return f
     return None
 def shows(o): return [x for x in o["focus"] if x.get("state") == "show"]
@@ -380,7 +414,7 @@ def parse_output():
     for p in pub: docs["pub_" + os.path.basename(os.path.dirname(p))] = (p, None)
     if not pub: skip("D_public_bench_fixtures_invariants", "tests/audit/bench/fixtures/public/*/doc.pdf not present yet")
     # Phase 4 adds pages[].layout, layout, layout_events (shape-checked here) and figure split_from (4.5 two-way cut)
-    ALLOWED_NEW = {"page": {"columns", "blocks", "layout"}, "figure": {"bbox_src", "split_from"}, "top": {"layout", "layout_events"}, "panel": set()}
+    ALLOWED_NEW = {"page": {"columns", "blocks", "layout"}, "figure": {"bbox_src", "split_from", "parts", "degenerate"}, "top": {"layout", "layout_events"}, "panel": {"src", "guessed"}}
     for tag, (pdf, cols) in docs.items():
         rc, d, err = parse(pdf); add(f"D_{tag}_parse_pdf_exit0", rc == 0 and d is not None, err)
         if d is None: continue
@@ -405,7 +439,7 @@ def parse_output():
             for x, y in zip(bf, cf):
                 why = contract_box_change(x, y, bp, len(bf))
                 for k in x:
-                    if x[k] != y.get(k) and not (why and k in BOX_KEYS): diffs.append((bp.get("n"), x.get("label"), k))
+                    if x[k] != y.get(k) and not (why and k in BOX_KEYS) and not p5_same(k, x, y): diffs.append((bp.get("n"), x.get("label"), k))
                 if why is False: boxdiffs.append((bp.get("n"), x.get("label"), x.get("kind"), x.get("bbox"), y.get("bbox")))
                 extras |= {("figure", k) for k in set(y) - set(x) - ALLOWED_NEW["figure"]}
         if len(b.get("pages") or []) != len(d.get("pages") or []): diffs.append(("n_pages",))
@@ -552,6 +586,17 @@ def scenarios():
     SC["g_logtext"] = sentfig_case("g_logtext", mock_kw={"MOCK_GROUND": "no box here"}, SPEAKEASY_GROUND="local", SPEAKEASY_LOG_TEXT="1")
     SC["g_dry"] = sentfig_case("g_dry", dry=True, SPEAKEASY_GROUND="local")
     SC["g_late_nobox"] = sentfig_case("g_late_nobox", mock_kw={"MOCK_GROUND": "No box in this answer.", "MOCK_GROUND_DELAY": "1.5"}, SPEAKEASY_GROUND="local")
+    # Phase 5 picker (phase5-parts.md 4-6, A2.9): letter picks on the vector Fig. 5 through /api/chat; phrases name no label
+    f5 = fx("fig5.pdf"); pcap = find_line(f5, 1, "Fig. 5")
+    PS = "Figure 5 shows the drowsiness detector pipeline. The orange cable links the two rows. The grey cover protects the small board."
+    def top(e): return {"MOCK_PICK_TOP": json.dumps([{"token": t, "logprob": math.log(p)} for t, p in e])}
+    pk = dict(SPEAKEASY_GROUND="local", SPEAKEASY_PICK="on", STUB_PLAY_SEC="1.0")
+    for nm, mk, extra in (("p_acc", top([("A", 0.99)]), {}), ("p_offmenu", top([("The", 0.9), ("A", 0.05)]), {}), ("p_low", top([("A", 0.3), ("B", 0.3), ("C", 0.3)]), {}),
+                          ("p_nolp", {}, {}), ("p_http", {"MOCK_GROUND_STATUS": "500"}, {}), ("p_malformed", {"MOCK_PICK_MALFORMED": "1"}, {}),
+                          ("p_slow", dict(top([("A", 0.99)]), MOCK_GROUND_DELAY="20"), {}), ("p_off", top([("A", 0.99)]), {"SPEAKEASY_GROUND": "off"}),
+                          ("p_logtext", top([("The", 0.9)]), {"SPEAKEASY_LOG_TEXT": "1"}), ("p_default", top([("A", 0.99)]), {"SPEAKEASY_PICK": None})):
+        kw = dict(pk); kw.update(extra)
+        SC[nm] = bench_case(nm, f5, 1, [pcap, pcap + 1], PS, mock_kw=mk, **{k: v for k, v in kw.items() if v is not None})
     # capture fit forced to fail (OCR returns no lines) vs landing, on a figure-part sentence with grounding
     for nm, mode in (("fit_miss", "empty"), ("fit_ok", "pass")):
         w = ocr_wrapper(mode)
@@ -618,7 +663,7 @@ def check_focus(o, F):
         if kind == "table_row" and ts != "table-rows": v["kind_table_row_target_src_table_rows"].append(ts)
         if kind in ("line", "lines") and ts != "lines": v["kind_line_target_src_lines"].append(ts)
         if kind == "panel" and ts not in ("panel-labels", "panel-guessed"): v["kind_panel_target_src_panel"].append(ts)
-        if kind == "object" and "(grounded)" in lab and ts != "vlm": v["grounded_object_target_src_vlm"].append(ts)
+        if kind == "object" and "(grounded)" in lab and ts != "pick": v["grounded_object_target_src_vlm"].append(ts)   # pick: phase5-parts.md 6.3 (bbox_2d retired)
         if kind == "object" and "(grounded)" not in lab and ts not in ("label-object", "label-pad"): v["label_object_target_src_label"].append((lab[:0], ts))
         page = d.get("page"); base_label = re.match(r"^((?:Figure|Table) \d+)", lab); base_label = base_label.group(1) if base_label else None
         cf = cache_fig(o["home"], page, base_label) if base_label else None
@@ -671,7 +716,7 @@ def check_run(o):
         if dp.get("figs_done") is False:
             if set(dp) != {"columns", "figs_done", "blocks"} or not isinstance(bl, dict) or set(bl) != {"paragraph"}: errs.append(("figs_false_keys", sorted(dp), sorted(bl or {})))
         else:
-            want = {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "layout"}   # layout: phase4-layout.md 6.3
+            want = {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "layout", "parts"}   # layout: phase4-layout.md 6.3; parts: phase5-parts.md 2.5
             if set(dp) != want: errs.append(("keys", sorted(set(dp) ^ want)))
             if "layout" in dp and not layout_ok(dp["layout"], False): errs.append(("layout", dp.get("layout")))
             if not (isinstance(bl, dict) and set(bl) == BLOCK_KINDS and all(isint(x) and x >= 0 for x in bl.values())): errs.append(("blocks", bl))
@@ -680,7 +725,9 @@ def check_run(o):
             ls = dp.get("labels_src")
             if not (isinstance(ls, dict) and set(ls) == {"pdf", "ocr", "none"} and all(isint(x) and x >= 0 for x in ls.values())): errs.append(("labels_src", ls))
             pn = dp.get("panels")
-            if not (isinstance(pn, dict) and set(pn) == {"labels", "guessed"} and all(isint(x) and x >= 0 for x in pn.values())): errs.append(("panels", pn))
+            if not (isinstance(pn, dict) and set(pn) == {"labels", "guessed", "gutter"} and all(isint(x) and x >= 0 for x in pn.values())): errs.append(("panels", pn))
+            pt = dp.get("parts")
+            if not (isinstance(pt, dict) and set(pt) == {"text", "callout", "callout_attached"} and all(isint(x) and x >= 0 for x in pt.values()) and pt["callout_attached"] <= pt["callout"]): errs.append(("parts", pt))
             if not (isint(dp.get("split")) and dp["split"] >= 0): errs.append(("split", dp.get("split")))
             if not errs:
                 nf = bl["figure"] + bl["table"]
@@ -705,7 +752,11 @@ def check_run(o):
                 cl = {k: sum(1 for f in figs if f.get("labels_src") == k) for k in ("pdf", "ocr", "none")}
                 if dp["labels_src"] != cl: x.append(("labels_src", dp["labels_src"], cl))
                 g = sum(1 for f in figs for pp in f.get("panels") or [] if pp.get("guessed")); lb = sum(1 for f in figs for pp in f.get("panels") or [] if not pp.get("guessed"))
-                if dp["panels"] != {"labels": lb, "guessed": g}: x.append(("panels", dp["panels"], {"labels": lb, "guessed": g}))
+                gu = sum(1 for f in figs for pp in f.get("panels") or [] if pp.get("src") == "gutter"); lb -= gu
+                if dp["panels"] != {"labels": lb, "guessed": g, "gutter": gu}: x.append(("panels", dp["panels"], {"labels": lb, "guessed": g, "gutter": gu}))
+                cp_ = {"text": sum(1 for f in figs for q in f.get("parts") or [] if q.get("kind") == "text"), "callout": sum(1 for f in figs for q in f.get("parts") or [] if q.get("kind") == "callout"),
+                       "callout_attached": sum(1 for f in figs for q in f.get("parts") or [] if q.get("kind") == "callout" and q.get("attached"))}
+                if dp.get("parts") != cp_: x.append(("parts", dp.get("parts"), cp_))
                 sp = sum(1 for f in figs if f.get("split_from"))
                 if dp["split"] != sp: x.append(("split", dp["split"], sp))
                 pl = {k: v for k, v in (p.get("layout") or {}).items() if k != "detector_version"}
@@ -717,18 +768,22 @@ def check_run(o):
         e = []
         if not (isinstance(gm, dict) and gm and set(gm) <= REASONS and all(isint(c) and c >= 0 for c in gm.values()) and sum(gm.values()) >= 1): e.append(("shape", gm))
         else:
-            if gm.get("error", 0) + gm.get("no-box", 0) + gm.get("too-large", 0) != fm.get("ground-miss", 0): e.append(("sum_ne_ground_miss", gm, fm.get("ground-miss", 0)))
+            if sum(gm.get(r, 0) for r in MISS_REASONS) != fm.get("ground-miss", 0):
+                e.append(("sum_ne_ground_miss", gm, fm.get("ground-miss", 0)))
             if gm.get("error", 0) and not raw.get("ground_errors"): e.append(("error_without_ground_errors", gm))
             if isinstance(raw.get("ground_errors"), dict) and gm.get("error", 0) > (raw["ground_errors"].get("count") or 0): e.append(("error_gt_ground_errors.count", gm.get("error"), raw["ground_errors"].get("count")))
-            if "ground_posts" in o and sum(gm.values()) > len(o["ground_posts"]) + gm.get("timeout", 0): e.append(("more_reasons_than_ground_requests", gm, len(o["ground_posts"])))
+            if "ground_posts" in o and sum(gm.values()) - gm.get("unavailable", 0) - gm.get("no-logprobs", 0) > len(o["ground_posts"]) + gm.get("timeout", 0): e.append(("more_reasons_than_ground_requests", gm, len(o["ground_posts"])))
         v["ground_miss_reasons_valid"] = e
     else:
         v["ground_miss_reasons_absent_means_no_ground_miss"] = [] if not fm.get("ground-miss") else [fm.get("ground-miss")]
         if raw.get("ground_errors"): v["ground_errors_imply_ground_miss_reasons"] = [raw.get("ground_errors")]
-    if "ground_posts" in o:
-        # submitted == requests seen by the mock, except that a request still unanswered at exit (counted as timeout) may not have reached it yet
-        tot = (sum(gm.values()) if isinstance(gm, dict) else 0) + fm.get("ground-vlm", 0); seen = len(o["ground_posts"]); to = (gm or {}).get("timeout", 0) if isinstance(gm, dict) else 0
-        v["ground_all_reasons_plus_vlm_eq_submitted"] = [] if (tot == seen or (seen < tot <= seen + to)) else [(gm, fm.get("ground-vlm", 0), seen)]
+    # Phase 5: every pick is counted once, under a reason or as ground-pick (6.2 invariant); picks sent == called <= requests
+    pk = raw.get("part_picks"); tot = (sum(gm.values()) if isinstance(gm, dict) else 0) + fm.get("ground-pick", 0)
+    v["ground_reasons_plus_pick_eq_part_picks_requests"] = [] if tot == ((pk or {}).get("requests") or 0) else [(gm, fm.get("ground-pick", 0), (pk or {}).get("requests"))]
+    if "part_picks" in raw: v["part_picks_shape"] = [] if part_picks_ok(pk) else [pk]
+    if "ground_posts" in o and isinstance(pk, dict):
+        v["pick_requests_seen_eq_called"] = [] if len(o["ground_posts"]) <= (pk.get("called") or 0) <= len(o["ground_posts"]) + (gm or {}).get("timeout", 0) else [(len(o["ground_posts"]), pk.get("called"))]
+    v["no_retired_bbox_keys"] = sorted((RETIRED_RUN_KEYS & set(raw)) | (RETIRED_METHODS & set(fm)) | ({"no-box", "too-large"} & set(gm or {})))
     return v
 
 def new_field_values(o):
@@ -741,7 +796,7 @@ def new_field_values(o):
         for k in ("target_src", "split_from"):
             if k in d: vals.append(("doc." + k, d[k]))
     for rec in o["recs"]:
-        for k in NEW_RUN_KEYS | P4_RUN:
+        for k in NEW_RUN_KEYS | P4_RUN | {"part_picks"}:
             if k in rec: vals.append(("runs." + k, rec[k]))
     return vals
 def textfree(k, val):
@@ -749,7 +804,8 @@ def textfree(k, val):
     if k == "runs.layout_events": return isinstance(val, list) and all(layout_event_ok(e) for e in val)
     if isinstance(val, dict) and k == "runs.doc_parse" and "layout" in val:
         return layout_ok(val["layout"], False) and textfree(k, {kk: vv for kk, vv in val.items() if kk != "layout"})
-    if isinstance(val, dict): return all(isinstance(kk, str) and (kk in BLOCK_KINDS | ALL_SRC | REASONS | {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "pdf", "ocr", "none", "labels", "guessed"}) and textfree(k, vv) for kk, vv in val.items())
+    if k == "runs.part_picks": return part_picks_ok(val)
+    if isinstance(val, dict): return all(isinstance(kk, str) and (kk in BLOCK_KINDS | ALL_SRC | REASONS | {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "pdf", "ocr", "none", "labels", "guessed"} | P5_COUNT_KEYS) and textfree(k, vv) for kk, vv in val.items())
     if isinstance(val, list): return all(textfree(k, x) for x in val)
     if isinstance(val, str): return (k == "doc.target_src" and target_src_ok(val)) or (k == "doc.split_from" and bool(LABEL_RE.match(val)))
     return val is None or isinstance(val, (bool, int, float))
@@ -802,14 +858,18 @@ def focus_checks():
     if t4: add("A_twocol_standalone_table4_has_no_split_from", all("split_from" not in d for d in t4), [d.get("split_from") for d in t4][:3])
     else: skip("A_twocol_standalone_table4_has_no_split_from", "no Table 4 show")
     pg = [x["doc"] for o in S["paper_fig4"] for x in docshows(o) if x["doc"].get("kind") == "panel"]
-    if pg: add("A_paper_fig4_guessed_panels_target_src_panel_guessed", all(d.get("target_src") == "panel-guessed" for d in pg), [d.get("target_src") for d in pg])
+    cur_paper = parse(fx("paper.pdf"))[1] or {}
+    pgd = [pp.get("guessed") for f in ((cur_paper.get("pages") or [{}, {}])[1].get("figures") or []) if f.get("label") == "Figure 4" for pp in f.get("panels") or []]
+    psrc = pgd; want_ts = "panel-guessed" if any(pgd) else "panel-labels"     # Phase 5 2.1: a gutter split is not guessed; only caption guesses are
+    if pg: add("A_paper_fig4_panels_target_src_matches_panel_src", all(d.get("target_src") == want_ts for d in pg), ([d.get("target_src") for d in pg], sorted(map(str, psrc))))
     else: skip("A_paper_fig4_guessed_panels_target_src_panel_guessed", "no panel show for Figure 4 (guessed panels)")
     pl = [x["doc"] for o in S["fig5_cap"] for x in docshows(o) if x["doc"].get("kind") == "panel"]
     if pl: add("A_fig5_drawn_panel_labels_target_src_panel_labels", all(d.get("target_src") == "panel-labels" for d in pl), [d.get("target_src") for d in pl])
     else: skip("A_fig5_drawn_panel_labels_target_src_panel_labels", "no panel show in the Fig. 5 caption runs")
-    gr = [x["doc"] for o in S["g_box"] for x in docshows(o) if "(grounded)" in str(x["doc"].get("label"))]
-    if gr: add("A_grounded_box_target_src_vlm", all(d.get("target_src") == "vlm" for d in gr), [d.get("target_src") for d in gr])
-    else: skip("A_grounded_box_target_src_vlm", "no grounded show in the g_box runs")
+    gr = [x["doc"] for o in S["p_acc"] for x in docshows(o) if "(grounded)" in str(x["doc"].get("label"))]
+    if gr: add("A_grounded_pick_target_src_pick", all(d.get("target_src") == "pick" for d in gr), [d.get("target_src") for d in gr])
+    else: skip("A_grounded_pick_target_src_pick", "no applied pick in the p_acc runs")
+    add("A_no_vlm_target_src_anywhere", not any(x["doc"].get("target_src") == "vlm" for o in ALL for x in docshows(o)), "")
     # live focus file carries the same keys
     live = [x for o in ALL for x in o["live"] if x.get("state") == "show"]
     add("A_live_show_has_sent", live and all(isint(x.get("sent")) for x in live), [x.get("sent") for x in live][:6])
@@ -892,38 +952,52 @@ def grounding_checks():
     S = scenarios()  # noqa
     def m(nm): return S[nm][-1]
     def gm(o): return (o["raw"] or {}).get("ground_miss_reasons"), ((o["raw"] or {}).get("focus_methods") or {})
-    o = m("g_nobox"); g, fm = gm(o)
-    add("G_cov_nobox_made_ground_requests", len(o["ground_posts"]) >= 1, len(o["ground_posts"]))
-    add("G_acc_nobox_reason_equals_ground_miss", isinstance(g, dict) and fm.get("ground-miss", 0) >= 1 and g.get("no-box") == fm.get("ground-miss"), (g, fm))
-    add("G_nobox_no_other_counted_reasons", isinstance(g, dict) and not (set(g) & {"error", "too-large"}), g)
-    o = m("g_huge"); g, fm = gm(o)
-    add("G_full_crop_box_reason_too_large", isinstance(g, dict) and fm.get("ground-miss", 0) >= 1 and g.get("too-large") == fm.get("ground-miss"), (g, fm))
-    o = m("g_err"); g, fm = gm(o); ge = (o["raw"] or {}).get("ground_errors")
-    add("G_http_error_counted_in_ground_errors", isinstance(ge, dict) and ge.get("count", 0) >= 1, ge)
-    add("G_http_error_reason_error_counted_and_le_ground_errors_count", isinstance(g, dict) and isinstance(ge, dict) and 1 <= g.get("error", 0) <= ge.get("count", 0), (g, ge))
-    add("G_http_error_no_no_box_or_too_large", isinstance(g, dict) and not (set(g) & {"no-box", "too-large"}), g)
-    add("G_http_error_sum_invariant", isinstance(g, dict) and g.get("error", 0) + g.get("no-box", 0) + g.get("too-large", 0) == fm.get("ground-miss", 0), (g, fm))
-    o = m("g_box"); g, fm = gm(o)
-    if fm.get("ground-vlm") and not fm.get("ground-miss"): add("G_valid_box_answers_only_uncounted_reasons", g is None or set(g) <= {"timeout", "superseded"}, g)
-    else: skip("G_valid_box_answers_only_uncounted_reasons", f"g_box focus_methods {fm}")
-    add("G_cov_box_answer_drew_oval", bool(fm.get("ground-vlm")), fm)
-    o = m("g_off"); add("G_ground_off_no_requests_no_reasons", not o["ground_posts"] and "ground_miss_reasons" not in (o["raw"] or {}), (len(o["ground_posts"]), (o["raw"] or {}).get("ground_miss_reasons")))
-    o = m("g_slow"); g, fm = gm(o)
-    if o["ground_posts"] and not fm.get("ground-vlm"):
+    # Phase 5 letter picker (the bbox_2d answers of Phase 2 are retired, phase5-parts.md A2.9 / A3.5)
+    def picks(o): return [x for x in o["focus"] if x.get("state") == "part_pick"]
+    def pp(o): return (o["raw"] or {}).get("part_picks") or {}
+    o = m("p_offmenu"); g, fm = gm(o)
+    add("G_cov_offmenu_made_pick_requests", len(o["ground_posts"]) >= 1, len(o["ground_posts"]))
+    add("G_offmenu_reason_equals_ground_miss", isinstance(g, dict) and fm.get("ground-miss", 0) >= 1 and g.get("off-menu") == fm.get("ground-miss"), (g, fm))
+    add("G_offmenu_no_other_miss_reasons", isinstance(g, dict) and not (set(g) & (set(MISS_REASONS) - {"off-menu"})), g)
+    o = m("p_low"); g, fm = gm(o)
+    add("G_low_confidence_reason_equals_ground_miss", isinstance(g, dict) and fm.get("ground-miss", 0) >= 1 and g.get("low-confidence") == fm.get("ground-miss"), (g, fm))
+    o = m("p_nolp"); g, fm = gm(o)
+    add("G_no_logprobs_reason_and_breaker", isinstance(g, dict) and g.get("no-logprobs", 0) >= 1 and breaker_local(pp(o)) == "no-logprobs", (g, pp(o).get("breaker")))
+    add("G_no_logprobs_breaker_one_request", len(o["ground_posts"]) == 1, len(o["ground_posts"]))
+    o = m("p_http"); g, fm = gm(o); ge = (o["raw"] or {}).get("ground_errors")
+    add("G_http_500_unavailable_and_breaker", isinstance(g, dict) and g.get("unavailable", 0) >= 1 and breaker_local(pp(o)) == "unavailable" and len(o["ground_posts"]) == 1, (g, pp(o).get("breaker"), len(o["ground_posts"])))
+    add("G_http_500_sum_invariant", isinstance(g, dict) and sum(g.get(r, 0) for r in MISS_REASONS) == fm.get("ground-miss", 0), (g, fm))
+    o = m("p_malformed"); g, fm = gm(o); ge = (o["raw"] or {}).get("ground_errors")
+    add("G_malformed_reason_error_counted_and_le_ground_errors_count", isinstance(g, dict) and isinstance(ge, dict) and 1 <= g.get("error", 0) <= ge.get("count", 0), (g, ge))
+    o = m("p_acc"); g, fm = gm(o); P_ = picks(o)
+    add("G_cov_accepted_pick", any(x.get("outcome") == "accepted" for x in P_), [x.get("outcome") for x in P_])
+    add("G_accepted_ground_pick_equals_applied", fm.get("ground-pick", 0) == sum(1 for x in P_ if x.get("applied")), (fm, [x.get("applied") for x in P_]))
+    if fm.get("ground-pick") and not fm.get("ground-miss"): add("G_accepted_answers_only_uncounted_reasons", g is None or set(g) <= {"timeout", "superseded", "no-fit"}, g)
+    else: skip("G_accepted_answers_only_uncounted_reasons", f"p_acc focus_methods {fm}")
+    add("G_accepted_ground_provider_local", (o["raw"] or {}).get("ground_provider") == "local", (o["raw"] or {}).get("ground_provider"))
+    o = m("p_off"); add("G_ground_off_no_requests_no_reasons", not o["ground_posts"] and "ground_miss_reasons" not in (o["raw"] or {}) and not picks(o), (len(o["ground_posts"]), (o["raw"] or {}).get("ground_miss_reasons")))
+    o = m("p_default"); add("G_picker_default_off_no_requests", not o["ground_posts"] and not picks(o), (len(o["ground_posts"]), pp(o).get("skipped")))
+    o = m("p_slow"); g, fm = gm(o)
+    if o["ground_posts"]:
         add("G_slow_answer_reported_timeout_or_superseded", isinstance(g, dict) and set(g) <= {"timeout", "superseded"} and sum(g.values()) >= 1, (g, fm))
         add("G_slow_answer_not_a_ground_miss", fm.get("ground-miss", 0) == 0, fm)
     else: skip("G_slow_answer_reported_timeout_or_superseded", f"posts={len(o['ground_posts'])} methods={fm}")
-    o = m("g_late_nobox"); g, fm = gm(o)
-    if o["ground_posts"] and not fm.get("ground-vlm"):
-        add("G_late_no_box_answer_counted_superseded_or_timeout_first", isinstance(g, dict) and set(g) <= {"superseded", "timeout"} and sum(g.values()) == len(o["ground_posts"]), (g, len(o["ground_posts"])))
-        add("G_late_no_box_answer_not_a_ground_miss", fm.get("ground-miss", 0) == 0, fm)
-    else: skip("G_late_no_box_answer_counted_superseded_or_timeout_first", f"posts={len(o['ground_posts'])} methods={fm}")
+    for nm in ("p_acc", "p_offmenu", "p_low", "p_nolp", "p_http", "p_malformed", "p_slow", "p_logtext"):
+        bad = [(x.get("provider"), x.get("fallback_from"), x.get("confidence")) for x in picks(m(nm)) if x.get("provider") != "local" or x.get("fallback_from") is not None
+               or x.get("confidence") not in (("logprob",) if x.get("outcome") in ("accepted", "low-confidence") else ("logprob", None))]
+        add(f"G_{nm}_part_pick_provider_local_fallback_null_confidence", not bad, bad[:3])
+        bp = pp(m(nm)).get("by_provider")
+        if bp is not None: add(f"G_{nm}_by_provider_local_only", isinstance(bp, dict) and not bp.get("openrouter") and bp.get("local", 0) == len(picks(m(nm))), (bp, len(picks(m(nm)))))
+    for nm in ("g_box", "g_nobox", "g_huge", "g_err", "g_slow", "g_late_nobox"):
+        o = m(nm); fm = (o["raw"] or {}).get("focus_methods") or {}
+        add(f"G_{nm}_retired_bbox_path_not_written", not (RETIRED_RUN_KEYS & set(o["raw"] or {})) and not (RETIRED_METHODS & set(fm)), sorted((RETIRED_RUN_KEYS & set(o["raw"] or {})) | (RETIRED_METHODS & set(fm))))
     if "fit_miss" in S:
         o = m("fit_miss"); g, fm = gm(o)
         add("G_cov_fit_miss_path_taken", fm.get("fit-miss", 0) >= 1 and any(x.get("hold") for x in o["focus"]), (fm, sum(1 for x in o["focus"] if x.get("hold"))))
-        add("G_cov_fit_miss_made_ground_requests", len(o["ground_posts"]) >= 1, len(o["ground_posts"]))
-        add("G_acc_capture_fit_failure_counted_no_fit", isinstance(g, dict) and g.get("no-fit", 0) >= 1, g)
-        add("G_no_fit_requests_not_counted_as_ground_miss", isinstance(g, dict) and g.get("error", 0) + g.get("no-box", 0) + g.get("too-large", 0) == fm.get("ground-miss", 0), (g, fm))
+        if o["ground_posts"]:
+            add("G_acc_capture_fit_failure_counted_no_fit", isinstance(g, dict) and g.get("no-fit", 0) >= 1, g)
+            add("G_no_fit_requests_not_counted_as_ground_miss", isinstance(g, dict) and sum(g.get(r, 0) for r in MISS_REASONS) == fm.get("ground-miss", 0), (g, fm))
+        else: skip("G_acc_capture_fit_failure_counted_no_fit", "no pick on the raster sentinel figure (picker default-off, A5.1)")
         o = m("fit_ok"); g, fm = gm(o)
         add("G_cov_fit_ok_hold_then_fit", any(x.get("hold") for x in o["focus"]) and not fm.get("fit-miss"), (fm, sum(1 for x in o["focus"] if x.get("hold"))))
         add("G_fit_landed_no_no_fit_reason", not (isinstance(g, dict) and g.get("no-fit")), g)
@@ -931,9 +1005,10 @@ def grounding_checks():
         add("G_hold_clear_records_have_sent", hc and all(isint(x.get("sent")) for x in hc), [x.get("sent") for x in hc][:6])
     else:
         for c in ("G_acc_capture_fit_failure_counted_no_fit", "G_fit_landed_no_no_fit_reason"): skip(c, "tracker (OCR) not buildable: " + str(TRK.get("why")))
-    o = m("g_logtext"); g, fm = gm(o)
+    o = m("p_logtext"); g, fm = gm(o)
     add("G_logtext_on_reasons_still_counts_only", isinstance(g, dict) and textfree("runs.ground_miss_reasons", g), g)
-    for nm in ("g_nobox", "g_huge", "g_err"):
+    add("G_logtext_on_part_picks_counts_only", textfree("runs.part_picks", (o["raw"] or {}).get("part_picks")), (o["raw"] or {}).get("part_picks"))
+    for nm in ("p_offmenu", "p_low", "p_nolp", "p_http", "p_malformed", "g_nobox", "g_huge", "g_err"):
         sh = [x for x in shows(m(nm)) if "(grounded)" in str((x.get("doc") or {}).get("label"))]
         add(f"G_{nm}_no_oval_drawn", not sh, len(sh))
 
@@ -1026,7 +1101,7 @@ def label_privacy():
     add("F_default_labels_are_redacted_logtext_labels", labels(d3) == [p2_redact(l) for l in labels(o3)] and labels(d3), (labels(d3)[:4], [p2_redact(l) for l in labels(o3)][:4]))
     geo = lambda o: [(x["doc"].get("kind"), x["doc"].get("target"), x.get("shape"), x.get("cue_kind"), x.get("rect")) for x in docshows(o)]
     add("F_target_kind_shape_rect_unchanged_by_redaction", geo(d3) == geo(o3) and geo(d3), "")
-    gl = [l for nm in ("g_box", "fit_ok") if nm in S for o in S[nm] for l in labels(o) if l and "grounded" in l]
+    gl = [l for nm in ("p_acc", "g_box", "fit_ok") if nm in S for o in S[nm] for l in labels(o) if l and "grounded" in l]
     add("F_grounded_label_suffix_form", gl and all(f_label_ok(l) and l.endswith(" (grounded)") for l in gl), gl[:3])
     rl = [l for o in S["fig5_t1"] + S["two_t2"] for l in labels(o) if l and " row " in l]
     if rl: add("F_table_row_label_form", all(f_label_ok(l) for l in rl), rl[:3])
@@ -1056,7 +1131,7 @@ def additive():
         "fig5_cap": lambda b: bench_case("x_cap", f5, 1, [cap, cap + 1], "Figure 5 shows the drowsiness detector pipeline. In panel a, ear recordings are re-referenced and filtered. Panel b shows cross-validation.", bin_=b),
         "sentfig": lambda b: sentfig_case("x_sf", bin_=b, SPEAKEASY_GROUND="local"),
     }
-    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN | P4_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
+    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN | P4_RUN | P5_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
     for nm, fn in pairs.items():
         b, c = fn(BIN_BASE), fn(CUR)
         def keys(runs_, st):
@@ -1066,6 +1141,7 @@ def additive():
         for st in ("runs", "map", "show", "clear", "doc"):
             bk, ck = keys(b, st), keys(c, st); ckm = keys(c[-1:], st); bkm = keys(b[-1:], st)
             missing = sorted(bkm - ck); extra = sorted(ckm - bk - ALLOW[st])
+            if st == "runs": missing = sorted(set(missing) - RETIRED_RUN_KEYS - {"ground_ms", "ground_provider"})   # bbox_2d path retired (A2.9); ground_provider only after an answered pick
             add(f"X_{nm}_{st}_keeps_every_baseline_key", not missing, missing)
             add(f"X_{nm}_{st}_adds_only_contract_keys", not extra, extra)
         # types of shared keys unchanged (runs)
@@ -1103,7 +1179,8 @@ def schema_doc():
         add(f"S_schema_optional_table_has_{k}", k in rows, sorted(rows)[:10])
         if k in rows: add(f"S_schema_{k}_type_column", ty in rows[k][1] or (ty == "dict" and "object" in rows[k][1]), rows[k][1])
     gr = rows.get("ground_miss_reasons", [""] * 4)
-    add("S_schema_ground_miss_reasons_lists_reasons", all(x in " ".join(gr) for x in ("error", "no-box", "too-large", "timeout", "superseded")), gr[-1][:160] if gr else "")
+    add("S_schema_ground_miss_reasons_lists_reasons", all(x in " ".join(gr) for x in ("error", "timeout", "superseded", "low-confidence", "off-menu", "no-logprobs", "unavailable", "out-of-scope")), gr[-1][:160] if gr else "")
+    add("S_schema_has_part_picks_row", "part_picks" in rows, "")
 
 # ================================================================ E. tracker draw records (headless: invalid window id, real panel)
 @section("E")
@@ -1141,6 +1218,9 @@ def tracker():
         add(f"E_{tag}_page_rect_null_iff_page_fit_null", all((x.get("page_rect") is None) == (x.get("page_fit") is None) for x in D), [(x.get("page_rect"), x.get("page_fit")) for x in D][:3])
         add(f"E_{tag}_page_rect_shape_rounded", all(x.get("page_rect") is None or (isinstance(x["page_rect"], list) and len(x["page_rect"]) == 4 and all(r1(v) for v in x["page_rect"])) for x in D), [x.get("page_rect") for x in D][:3])
         add(f"E_{tag}_existing_draw_keys_kept", all("rect" in x and "text_rect" in x for x in D), "")
+        fd = [x.get("first_draw_src") for x in D if "first_draw_src" in x]
+        add(f"E_{tag}_first_draw_src_on_first_draw_enum", bool(fd) and "first_draw_src" in D[0] and all(v in ("page-fit", "capture+offset", "held") for v in fd), [(x.get("seq"), x.get("first_draw_src")) for x in D][:4])
+    if D1 and "first_draw_src" in D1[0]: add("E_doc_transform_first_draw_src_page_fit", D1[0].get("first_draw_src") == "page-fit", D1[0].get("first_draw_src"))
     if D2: add("E_no_doc_no_fit_page_rect_null", all(x.get("page_rect") is None and x.get("page_fit") is None for x in D2), [(x.get("page_rect"), x.get("page_fit")) for x in D2][:3])
     ev = [x for x in D1 if x.get("page_fit") == "event-transform"]
     if ev:
@@ -1188,7 +1268,7 @@ def selftest():
     v = check_focus(o, o["focus"])
     add("T_flags_sent_gap", bool(v["map_sent_0_to_k_minus_1_in_order"])); add("T_flags_runner_up_gt_score", bool(v["map_runner_up_le_score"]))
     add("T_flags_show_sent_without_map", bool(v["show_sent_refers_to_map"])); add("T_flags_plain_clear_with_sent", bool(v["clear_plain_has_no_sent"]))
-    r = {"command": "speak", "page": None, "first_focus_ms": 12.5, "doc_ready_ms": None, "ground_miss_reasons": {"no-box": 2}, "focus_methods": {"ground-miss": 1}, "ground_provider": "local"}
+    r = {"command": "speak", "page": None, "first_focus_ms": 12.5, "doc_ready_ms": None, "ground_miss_reasons": {"error": 2}, "focus_methods": {"ground-miss": 1}, "ground_provider": "local"}
     v = check_run({"rec": r, "raw": r, "focus": [], "home": TMPROOT, "t0": time.time()})
     add("T_flags_float_ms", bool(v["first_focus_ms_int_or_null"])); add("T_flags_ground_miss_sum", bool(v["ground_miss_reasons_valid"])); add("T_flags_focus_ms_without_show", bool(v["first_focus_ms_null_iff_no_show"]))
     # privacy_audit.py label check flags a planted leak, accepts clean / text-mode logs

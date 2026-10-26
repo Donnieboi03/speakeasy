@@ -2,7 +2,10 @@
 """Mock OpenAI-compatible server for the phase-1 holdout tests. Logs every request body in full (image payloads are
 replaced by their sha256 so prompts can be compared byte for byte).
 Env: MOCK_PORT, MOCK_LOG, MOCK_TEXT (text reply), MOCK_VISION (streamed/any image reply), MOCK_GROUND (non-streamed image
-reply), MOCK_HANG=1 (accept and never answer), MOCK_TOKEN_DELAY, MOCK_FIRST_DELAY. Phase-2 additions: MOCK_GROUND_DELAY (s, grounding only), MOCK_GROUND_STATUS (HTTP code for grounding)."""
+reply), MOCK_HANG=1 (accept and never answer), MOCK_TOKEN_DELAY, MOCK_FIRST_DELAY. Phase-2 additions: MOCK_GROUND_DELAY (s, grounding only), MOCK_GROUND_STATUS (HTTP code for grounding).
+Phase-5 picker (Ollama /api/chat with images, docs/contracts/phase5-parts.md 4.4): MOCK_GROUND_DELAY / MOCK_GROUND_STATUS apply too;
+MOCK_PICK_TOP (JSON list of {token, logprob}) is returned as logprobs[0].top_logprobs; without it the reply has no logprobs;
+MOCK_PICK_MALFORMED=1 returns a body that is not JSON."""
 import hashlib, json, os, re, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = os.environ.get("MOCK_LOG", "/dev/null")
@@ -37,6 +40,18 @@ class H(BaseHTTPRequestHandler):
         self._log({"t": time.time(), "method": "POST", "path": self.path, "image": img, "stream": bool(req.get("stream")), "model": req.get("model"), "body": scrub(req)})
         if cfg("MOCK_HANG", "") == "1":
             time.sleep(3600); return
+        if self.path.split("?")[0].rstrip("/").endswith("/api/chat") and img:
+            if cfg("MOCK_GROUND_DELAY", ""): time.sleep(float(cfg("MOCK_GROUND_DELAY", "0")))
+            try:
+                if cfg("MOCK_GROUND_STATUS", ""): return self._json({"error": "mock failure"}, int(cfg("MOCK_GROUND_STATUS", "500")))
+                if cfg("MOCK_PICK_MALFORMED", "") == "1":
+                    b = b'{"message": {"content": "A"'; self.send_response(200); self.send_header("Content-Length", str(len(b))); self.end_headers(); self.wfile.write(b); return
+                out = {"model": req.get("model"), "done": True, "message": {"role": "assistant", "content": "A"}}
+                if cfg("MOCK_PICK_TOP", ""):
+                    top = json.loads(cfg("MOCK_PICK_TOP", "[]")); best = max(top, key=lambda e: e["logprob"])
+                    out["message"]["content"] = best["token"]; out["logprobs"] = [{"token": best["token"], "logprob": best["logprob"], "top_logprobs": top}]
+                return self._json(out)
+            except (BrokenPipeError, ConnectionResetError): return
         if not self.path.rstrip("/").endswith("chat/completions"): return self._json({"done": True, "response": ""})
         if img and not req.get("stream"):
             # phase-2 additions: grounding-only failure modes (non-streamed image requests)

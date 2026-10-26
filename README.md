@@ -81,9 +81,12 @@ When the selection is a figure's caption, or the screenshot goes to the vision m
 figure itself: a named object ("the WANDmini", "EEG", "Base Station") is circled using the figure's own text labels
 (PDF text inside the figure, or text recognition for raster figures) and the graphic next to them; "Figure 4a" / "panel b"
 boxes that panel; anything else boxes the whole figure. The vision prompt lists the figure and panel labels so the narration
-says "In Figure 4a, ...". When no label matches, the vision model itself grounds the phrase on the figure crop (one
-request per sentence, local by default) and the box moves when it answers. `SPEAKEASY_GROUND=auto|local|openrouter|off`
-(default auto). Run logs record `ground_provider`, `ground_box_convention` and `ground_errors` (count and error class names).
+says "In Figure 4a, ...". Numbered callouts ("Callout 3") are found from the figure's own markers and leader lines.
+With `SPEAKEASY_PICK=on` (default off), a sentence that names an object no label matches asks the local vision model to
+pick one of the figure's lettered candidate regions; the box becomes an oval only when it is confident. With
+`SPEAKEASY_GROUND=openrouter` the same marked crop goes to OpenRouter only when the local model is unavailable.
+`SPEAKEASY_GROUND=auto|local|openrouter|off` (default auto). Run logs record `ground_provider`, `part_picks` and
+`ground_errors` (counts and error class names).
 
 ## Logs (observability)
 

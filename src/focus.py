@@ -1,5 +1,7 @@
 """Focus box: maps each spoken sentence to its source lines / figure part and writes focus events for the tracker."""
 import hashlib, json, os, re, threading, time
+from collections import Counter
+import partpick
 import speakeasy_state as state
 from speakeasy_state import docmap
 from selog import home, _on, text_logging_on
@@ -183,7 +185,8 @@ class Focus:
         self.run_t0 = rec.get("_t0") or time.time()
         self.prev_line, self.n, self.events, self.methods = 0, 0, 0, {}
         self.match_score = self.match_runner_up = None
-        self.ground_requests = []                       # every grounding request submitted this run
+        self.ground_requests = []                       # every grounding request / pick submitted this run
+        self.pick_skipped = {"too-few": 0, "whole-figure": 0, "disabled": 0, "doc-not-ready": 0, "degenerate-figure": 0}
         self.prev_start, self.ref_lines, self.map_note = 1, None, None
         self.sentence_id = self.sentence_ids = None
         self.prev_band, self.prev_sentence = None, (None, [])
@@ -285,6 +288,9 @@ class Focus:
             a = m.align(sentence, *m.line_window(t[1], t[2]))
         a = a or m.align(sentence)
         if a and a.kind == "verbatim": return "align", a, None
+        if self._area_run():                        # area prose read verbatim out of order keeps its text band too (A6)
+            back = m.align_back(sentence)
+            if back and back.kind == "verbatim": return "align", back, None
         if self._text_table_rows() and not self._has_page():           # C.4.3 (amendment 5): the row line the chunk names
             row = self._named_row(sentence)
             if row is None: return self._fallback(None)
@@ -310,10 +316,21 @@ class Focus:
         others = [sc[i] for i in rows if i != best]
         self.match_score, self.match_runner_up = round(sc[best], 2), round(max(others), 2) if others else None
         return best
+    def _no_stand_in(self):
+        """A2.3: figure mode, vision, explain / summary modes and area runs never fall back to the whole selection or area,
+        unless the selection is one source sentence."""
+        if len(self.smap.sentences) == 1: return False
+        reading = self.rec.get("mode") in ("read-through", "verbatim", "table") and os.environ.get("SPEAKEASY_READ_MODE", "read").lower() != "summary"
+        return self._area_run() or bool(self.rec.get("image")) or not reading or getattr(self, "_fm", None) is not None
     def _fallback(self, back):
-        """Hold the current band (a back-reference, or a read-through / verbatim chunk below 0.6), else the whole block."""
+        """Hold the current band (a back-reference, or a read-through / verbatim chunk below 0.6), else the whole block;
+        where stand-ins are not allowed (A2.3), hold the current band, else nothing new ("none")."""
         holds = self.rec.get("mode") in ("read-through", "verbatim", "table") and os.environ.get("SPEAKEASY_READ_MODE", "read").lower() != "summary"
         if self.prev_band is not None and (back is not None or holds): return "hold", None, back
+        if self._no_stand_in():
+            if getattr(self, "_fm", None) is None:                    # in figure mode the figure cue replaced the block anyway
+                self.rec["stand_in_blocked"] = self.rec.get("stand_in_blocked", 0) + 1
+            return ("hold", None, back) if self.prev_band is not None else ("none", None, None)
         return "block", None, None
     def _locate_sentence(self, method, a, back):
         """Screen rect for an assigned chunk: one rect per band line (unmerged), the union as the rect."""
@@ -358,6 +375,20 @@ class Focus:
             elif self.ref_lines: r.ref = [round(v, 1) for v in self._line_rect(*self.ref_lines)]
         r.band = band
         return r, method
+    def _no_target(self, sentence):
+        """A2.3, no aligned span and no current band: the figure / panel / part cue in figure mode; else the current cue
+        stays ("hold", nothing new drawn) or there is none ("none"). Returns (rect or None, method)."""
+        self.n += 1; self.last_lines = None; self.map_note = None
+        self.sentence_id, self.sentence_ids = None, []
+        r = FocusRect(self.rect); r.sent = self.n - 1; r.sentence = (None, None, None)
+        try: nr, method = self._doc_target(r, "none", sentence)
+        except Exception as e:                                         # document mapping never breaks speech
+            self.rec["doc_note"] = f"focus: {type(e).__name__}: {e}"[:160]; nr = r
+        if nr is not r and (nr.doc or {}).get("kind") not in (None, "line"):
+            nr.sent, nr.sentence = r.sent, r.sentence
+            return nr, method
+        self.rec["no_target_chunks"] = self.rec.get("no_target_chunks", 0) + 1
+        return None, "hold" if getattr(self, "_cued", False) else "none"
     def _band_target(self, r, method, sentence):
         """C.4 on an assigned chunk: its text band (method stays the assignment method, F amendment 3) or a Phase 2
         figure / table cue (doc-<kind>, no score)."""
@@ -380,10 +411,19 @@ class Focus:
         self._attach_page()
         if self.smap.page_line_of_key is None: return rect
         rect.band = dict(band, page_lines=self.smap.band_for_keys(band["keys"])["page_lines"])
+        rect.late = True                                                # located before the parse: never picked (A3.3)
         return self._band_target(rect, None, text)[0]
     def locate(self, sentence, tag):
         """(rect, method); the rect also carries .src (source lines, for the live tracker to re-find on screen)
-        and .rng (absolute AX character range of those lines, when the hotkey supplied per-line offsets)."""
+        and .rng (absolute AX character range of those lines, when the hotkey supplied per-line offsets).
+        rect is None when the chunk draws nothing new (A2.3)."""
+        # the held panel follows the chunks in speech order, whether or not the document was read when each was located,
+        # so a chunk's scope never depends on parse timing (A3.3)
+        self._held_panel = docmap.said_panel(sentence) or getattr(self, "_held_panel", None)
+        r, method = self._locate_chunk(sentence, tag)
+        if r is not None: self._cued = True; r.held_panel = self._held_panel
+        return r, method
+    def _locate_chunk(self, sentence, tag):
         self.ref_lines = None; self.map_note = None; self.match_score = self.match_runner_up = None
         self.sentence_id = self.sentence_ids = None
         if self.smap is not None:
@@ -392,6 +432,7 @@ class Focus:
             except Exception as e:                                     # alignment never breaks speech: Phase 2 matcher
                 self.rec["doc_note"] = f"align: {type(e).__name__}: {e}"[:160]
                 assigned = None
+            if assigned is not None and assigned[0] == "none": return self._no_target(sentence)
             if assigned is not None:
                 r, method = self._locate_sentence(*assigned)
                 r.sent = self.n - 1
@@ -443,7 +484,7 @@ class Focus:
                 else: runs.append(cur); cur = [i]
             runs.append(cur)
             out = max(runs, key=len)
-        return out
+        return self._eligible(d, out)
     def _selection_page_lines(self):
         """Page lines of the whole selection: the sentence map's page alignment when attached, else by text (Phase 2)."""
         if self.smap is not None and self.smap.page_line_of_key is not None:
@@ -461,8 +502,30 @@ class Focus:
             cov = len(st & set(t for l in inside for t in docmap._toks(l[4]))) / len(st)
             if inside and cov >= 0.6: self._tb = f; break
         return self._tb
+    def _area_region(self):
+        """A2.1, area runs: the area's page rect from the area fit, else the area mapped through the capture fit once it
+        lands, else None (area_region_src "none": screen-only cues)."""
+        if self.rec.get("area_page_rect"): return self.rec["area_page_rect"]
+        cf = getattr(self, "_cf_done", None)
+        if cf is not None and not cf.is_set(): return None                  # the capture fit is still running
+        if cf is not None and self._cf:
+            s, ox, oy = self._cf[:3]; x, y, w, h = self.area_clip
+            self.rec.update(area_page_rect=[round((x - ox) / s, 1), round((y - oy) / s, 1), round((x + w - ox) / s, 1), round((y + h - oy) / s, 1)],
+                            area_region_src="capture-fit")
+            return self.rec["area_page_rect"]
+        self.rec["area_region_src"] = "none"
+        return None
+    def _area_run(self):
+        return getattr(self, "area_clip", None) is not None
+    def _eligible(self, d, ix):
+        """A2.1: in area runs only page lines whose centre lies inside the area rect may join a band."""
+        if not self._area_run(): return ix
+        reg = self._area_region()
+        return [i for i in ix if reg and docmap._centre_in(d["page"]["lines"][i], reg)]
     def _sel_region(self, d):
-        """Page-space region the selection / capture covers (union of the selected lines, and the capture rect mapped back)."""
+        """Page-space region the selection / capture covers (union of the selected lines, and the capture rect mapped back);
+        in area runs the area rect (A2.1)."""
+        if self._area_run(): return self._area_region()
         if hasattr(self, "_sr"): return self._sr
         self._sr = None
         ix = self._doc_lines(1, len(self.lines)) if self.lines else []
@@ -485,22 +548,38 @@ class Focus:
     def _fig_mode(self, d):
         """The figure this run is about: the selection is (mostly) its caption, or the screenshot went to the vision model."""
         if getattr(self, "_fm_done", False): return self._fm
-        figs = [f for f in d.get("figures") or [] if f.get("kind") == "figure" and f.get("page") == d["page"]["n"] and f.get("bbox")]
-        self._fm = None
-        if not figs: self._fm_done = True; return None
+        # a degenerate (hairline) figure is never a figure-mode figure (A2.4)
+        figs = [f for f in d.get("figures") or [] if f.get("kind") == "figure" and f.get("page") == d["page"]["n"] and f.get("bbox") and not f.get("degenerate")]
+        self._fm = None; self.rec["figure_mode_src"] = None
+        if not figs: self._fm_done = True; self.rec["doc_figure_mode"] = False; return None
+        if self._area_run():
+            reg = self._area_region()
+            if reg is None:
+                self._fm_done = self.rec.get("area_region_src") == "none"; self.rec["doc_figure_mode"] = False
+                return None
+            elig = [l for l in d["page"]["lines"] if docmap._centre_in(l, reg)]
+            best = None
+            for f in figs:                                              # A2.2: the area covers the figure, or is mostly its labels
+                inter = docmap._area(docmap._clip(f["bbox"], reg)) if docmap._overlap(f["bbox"], reg) else 0.0
+                src = ("area-overlap" if inter >= 0.5 * docmap._area(f["bbox"]) or inter >= 0.5 * docmap._area(reg)
+                       else "area-labels" if elig and sum(docmap._centre_in(l, f["bbox"]) for l in elig) >= 0.5 * len(elig) else None)
+                if src and (best is None or inter > best[0]): best = (inter, f, src)
+            if best: self._fm, self.rec["figure_mode_src"] = best[1], best[2]
+            self._fm_done = True; self.rec["doc_figure_mode"] = bool(self._fm)
+            return self._fm
         sel = set(docmap._toks(self.text_all))
         best = max(figs, key=lambda f: len(sel & set(docmap._toks(f.get("caption") or ""))))
         ov = len(sel & set(docmap._toks(best.get("caption") or ""))) / max(1, len(sel))
         vision = bool(self.rec.get("image"))
         if ov >= 0.4:
-            self._fm = best                                             # the selection is the caption
+            self._fm = best; self.rec["figure_mode_src"] = "caption"      # the selection is the caption
         elif vision:
             # the screenshot must actually contain the figure body: a paragraph that cites "Fig. 3e" stays in text mode
             reg = self._sel_region(d)
             vis = [f for f in figs if reg is None or docmap._overlap(f["bbox"], reg)]
             if vis:
                 b2 = max(vis, key=lambda f: len(sel & set(docmap._toks(f.get("caption") or ""))))
-                if ov >= 0.15 and b2 is best or len(vis) == 1: self._fm = b2
+                if ov >= 0.15 and b2 is best or len(vis) == 1: self._fm = b2; self.rec["figure_mode_src"] = "vision"
         self._fm_done = vision or self.rec.get("vision_gate") is not None   # decided once the vision choice is known
         self.rec["doc_figure_mode"] = bool(self._fm)
         return self._fm
@@ -587,38 +666,54 @@ class Focus:
                 return nr, "doc-md"
             return r, method
         if not d.get("page"): return r, method
+        if self._area_run() and self._area_region() is None: return r, method   # no page region: screen-only cues (A2.1)
         tgt, kind, label, shape, target_src = None, None, None, None, None
         fm = self._fig_mode(d)
         if f and f.get("page") != d["page"]["n"]:
             f = None                                                    # drawn on another page: named in speech, not boxed
+        if f and f.get("degenerate"):
+            f = None; self.pick_skipped["degenerate-figure"] += 1      # a hairline box is never drawn or grounded (A2.4)
         named = f is not None and f is not fm and (f.get("kind") == "table" or self._visible(d, f.get("bbox") or [0, 0, 0, 0]))
         text_band = band is not None and not named and (verbatim or (fm is None and not self._table_for_selection(d)))
         if text_band:
             f = None                                                    # C.4.2 / C.4.4 / E: the chunk's own text band
         elif fm is not None and (f is None or f is fm):
-            # the run is about a figure: box the object the sentence names, else its panel, else the whole figure
+            # the run is about a figure: the callout the sentence names, else the object its words name, else its panel,
+            # else the whole figure (a Set-of-Mark pick may replace that box later)
             f = fm; self.last_fig = fm
-            if panel: self.cur_panel = panel                             # "In Figure 4a, ..." holds until another panel is named
-            panel = panel or getattr(self, "cur_panel", None)
+            said_panel = panel or docmap.said_panel(sentence)          # "In Figure 4a, ..." holds until another panel is named
+            panel = said_panel or getattr(r, "held_panel", getattr(self, "_held_panel", None))
             prect = next((p["bbox"] for p in fm.get("panels") or [] if p["label"] == panel), None) if panel else None
+            area = self._sel_region(d) if self._area_run() else None     # A2.9: area runs scope to the panel / figure in the area
             fp = docmap.focus_phrase(sentence)
-            use_g = GROUNDER.enabled() and docmap.content_words(fp)
-            g = docmap.ground_label(fp, fm, prect) or docmap.ground_label(sentence, fm, prect)
-            if g:
+            cref, g, cp = docmap.callout_ref(sentence), None, None
+            if cref is not None:                                        # a callout reference skips word matching
+                cp = docmap.callout_part(fm, cref, said_panel, panel, area)
+                said = said_panel if any(p["label"] == said_panel for p in fm.get("panels") or []) else None
+                pick_rect, pick_panel = (next(p["bbox"] for p in fm["panels"] if p["label"] == said), said) if said else (fm["bbox"], None)
+            else:
+                hint = docmap._clip(prect or fm["bbox"], area) if area else prect
+                g = docmap.ground_label(fp, fm, hint) or docmap.ground_label(sentence, fm, hint)
+                pick_rect, pick_panel = (prect, panel) if prect else (fm["bbox"], None)
+            if area: pick_rect = docmap._clip(pick_rect, area)
+            if cp:
+                tgt, kind, shape = cp["rect"], "object", "ellipse"; label = fm["label"] + (cp["panel"] or "")
+                target_src = "callout" if cp["attached"] else "callout-marker"     # no eligible target: the number itself (A4.1)
+            elif g:
                 tgt, kind, shape = g[0], "object", "ellipse"; label = fm["label"] + (panel or "") + (": " + g[1][:40] if text_logging_on() else "")
                 target_src = "label-object" if g[3] else "label-pad"
-                if not g[3] and use_g and docmap.device_alias(fp, fm):
-                    # the label sits on a raster picture: find the named thing next to it (e.g. "the device" near "WANDmini")
+                if not g[3] and docmap.device_alias(fp, fm):
+                    # the label sits on a raster picture: pick the named thing next to it (e.g. "the device" near "WANDmini"),
+                    # which must lie within the label's neighbourhood (A2.6)
                     fb = fm["bbox"]; lr = g[0]; pad = 90
                     clip = [max(fb[0], lr[0] - pad), max(fb[1], lr[1] - pad), min(fb[2], lr[2] + pad), min(fb[3], lr[3] + pad)]
-                    ph = docmap.object_phrase(fp)
-                    if docmap.docmap_generic(ph) or not docmap.content_words(ph): ph = g[1]
-                    r.pending = self._submit_ground(d["page"]["n"], clip, ph); r.pending.max_frac = 0.9
+                    self._consider_pick(r, d, fm, (pick_rect, pick_panel), sentence, False, region=clip)
             else:
                 tgt, kind = (prect, "panel") if prect else (fm["bbox"], "figure"); label = fm["label"] + (panel or "")
                 target_src = _box_target_src(fm, kind, panel)
-                if use_g:
-                    r.pending = self._submit_ground(d["page"]["n"], prect or fm["bbox"], docmap.object_phrase(fp))
+                # A2.5 / Amendment 1: only a chunk that names a specific object may turn the box into an oval
+                if cref is not None or docmap.names_object(sentence): self._consider_pick(r, d, fm, (pick_rect, pick_panel), sentence, cref is not None)
+                else: self.pick_skipped["whole-figure"] += 1
         elif f and (f.get("kind") == "table" or self._visible(d, f.get("bbox") or [0, 0, 0, 0])):
             self.last_fig = f
             tgt, kind = docmap.target_rect(f, panel); label = f["label"] + (panel or "")
@@ -635,7 +730,8 @@ class Focus:
             rows = self._rows.get(f["label"]) if hasattr(self, "_rows") else None
             if rows is None:
                 if not hasattr(self, "_rows"): self._rows, self._row_at = {}, {}
-                rows = self._rows[f["label"]] = docmap.table_rows(d["page"]["lines"], f["bbox"], f.get("caption_bbox"))
+                lines = [d["page"]["lines"][i] for i in self._eligible(d, range(len(d["page"]["lines"])))]
+                rows = self._rows[f["label"]] = docmap.table_rows(lines, f["bbox"], f.get("caption_bbox"))
             if len(rows) >= 2:
                 i = docmap.match_row(rows, sentence, self._row_at.get(f["label"], 0))
                 if i is not None:
@@ -645,6 +741,7 @@ class Focus:
         line_ix = None
         if tgt is None and (band is not None or self.last_lines):
             line_ix = band["page_lines"] if band is not None else self._doc_lines(*self.last_lines)   # never bag-of-words for a band
+            line_ix = self._eligible(d, line_ix)
             if line_ix:
                 ls = [d["page"]["lines"][i] for i in line_ix]
                 tgt = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]; kind = "line"; target_src = "lines"
@@ -802,7 +899,9 @@ class Focus:
         if clip and rect:                       # Read area: the user drew the region; cues never leave it (12 pt slack)
             x0, y0 = max(rect[0], clip[0] - 12), max(rect[1], clip[1] - 12)
             x1, y1 = min(rect[0] + rect[2], clip[0] + clip[2] + 12), min(rect[1] + rect[3], clip[1] + clip[3] + 12)
-            if x1 - x0 < 8 or y1 - y0 < 8: x0, y0, x1, y1 = clip[0], clip[1], clip[0] + clip[2], clip[1] + clip[3]
+            if (x1 - x0 < 8 or y1 - y0 < 8) and [x0, y0, x1 - x0, y1 - y0] != list(rect):   # A2.1: never the whole area; the previous cue stays
+                self.rec["area_dropped"] = self.rec.get("area_dropped", 0) + 1
+                return
             if [x0, y0, x1 - x0, y1 - y0] != list(rect):
                 self.rec["area_clamped"] = self.rec.get("area_clamped", 0) + 1
                 nr = FocusRect([x0, y0, x1 - x0, y1 - y0]); nr.__dict__.update(getattr(rect, "__dict__", {}))   # keep doc.target etc.
@@ -848,7 +947,7 @@ class Focus:
                         self.events += 1; ev["seq"] = self.events                # new key: the overlay saw this seq as the hold clear
                         if fut is not None:
                             if fut.done.is_set(): self._apply_ground(rect, fut, ev)
-                            else: self._ground_missed(fut, "timeout")           # no answer yet when the box went up: never applied
+                            else: self._late_ground(rect, fut, ev)
                         self._write(ev)
                     if not ev.get("late_fit"):
                         self.methods["fit-miss"] = self.methods.get("fit-miss", 0) + 1
@@ -860,43 +959,81 @@ class Focus:
             return
         if fut is not None and fut.done.is_set(): self._apply_ground(rect, fut, ev)
         self._write(ev)
-        if fut is not None and not fut.done.is_set():
-            seq = self.events
-            def late():                                             # grounding finished after the sentence started: update the box
-                answered = fut.done.wait(6.0)
-                if state.STOP.is_set(): return
-                if not answered: self._ground_missed(fut, "timeout"); return
-                if self.events != seq: self._ground_missed(fut, "superseded"); return
-                ev2 = dict(ev); ev2["doc"] = dict(ev["doc"])
-                if self._apply_ground(rect, fut, ev2):
-                    self.events += 1; ev2["seq"] = self.events; self._write(ev2)
-            threading.Thread(target=late, daemon=True).start()
-    def _submit_ground(self, page, clip, phrase):
-        fut = GROUNDER.submit(state.DOC.path, page, clip, phrase); self.ground_requests.append(fut)
-        return fut
+        if fut is not None and not fut.done.is_set(): self._late_ground(rect, fut, ev)
+    def _late_ground(self, rect, fut, ev):
+        """The answer arrives after the chunk's show: update the box while the chunk is still the current one."""
+        seq = self.events
+        def late():
+            answered = fut.wait()
+            if state.STOP.is_set(): return
+            if not answered: return                                     # summary() settles it
+            if self.events != seq: self._ground_missed(fut, "superseded"); return
+            ev2 = dict(ev); ev2["doc"] = dict(ev["doc"])
+            if self._apply_ground(rect, fut, ev2):
+                self.events += 1; ev2["seq"] = self.events; self._write(ev2)
+        threading.Thread(target=late, daemon=True).start()
+    def _consider_pick(self, r, d, fm, scope, sentence, callout, region=None):
+        """Contract 4.1 / A3.3: queue a Set-of-Mark pick for a figure chunk with no deterministic oval, located against the
+        finished parse of its page, or count why not (part_picks.skipped)."""
+        rect, panel = scope
+        area = self._sel_region(d) if self._area_run() else None
+        if not GROUNDER.pick_enabled(): why = "disabled"
+        elif getattr(r, "late", False) or not d["page"].get("figs_done") or any("parts" not in f for f in d["page"]["figures"]): why = "doc-not-ready"
+        else:
+            cands = [c for c in partpick.candidates(fm, rect, panel, callout) if area is None or docmap._centre_in(c, area)]
+            why = "too-few" if len(cands) < 2 else None
+        if why: self.pick_skipped[why] += 1; return
+        meta = {"sent": r.sent if r.sent is not None else self.n - 1, "sentence_id": r.sentence[0] if r.sentence else self.sentence_id,
+                "fig": fm["label"], "panel": panel, "scope": "panel" if panel else "figure"}
+        r.pending = GROUNDER.submit_pick(d["page"]["n"], rect, cands, partpick.phrase(sentence, callout), meta, region)
+        self.ground_requests.append(r.pending)
+    GROUND_MISS = ("error", "low-confidence", "off-menu", "no-logprobs", "unavailable", "out-of-scope")
     def _ground_missed(self, fut, reason):
-        """Runs-log ground_miss_reasons: count a request that drew no oval, once (the first reason that applies wins)."""
+        """A pick that drew no oval: dropped (superseded / no-fit) once decided; summary() settles undecided ones."""
+        if reason in ("superseded", "no-fit"): fut.drop = fut.drop or reason
+        return self._pick_final(fut) if fut.done.is_set() else False
+    def _pick_final(self, fut, applied=False):
+        """Settle a pick once: focus_methods / ground_miss_reasons and its part_pick record (focus log only)."""
+        reason = "ground-pick" if applied else (fut.drop or "superseded") if fut.outcome == "accepted" else fut.outcome or "timeout"
         if not fut.settle(reason): return False
-        reasons = self.rec.setdefault("ground_miss_reasons", {}); reasons[reason] = reasons.get(reason, 0) + 1
+        fut.applied = applied
+        if applied: self.methods["ground-pick"] = self.methods.get("ground-pick", 0) + 1
+        else:
+            reasons = self.rec.setdefault("ground_miss_reasons", {}); reasons[reason] = reasons.get(reason, 0) + 1
+            if reason in self.GROUND_MISS: self.methods["ground-miss"] = self.methods.get("ground-miss", 0) + 1
+        try:
+            d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
+            with open(os.path.join(d, "focus.jsonl"), "a") as f: f.write(json.dumps(dict(fut.record(), ts=round(time.time(), 3), pid=os.getpid())) + "\n")
+        except OSError as e:
+            self.rec["doc_note"] = f"part_pick log: {type(e).__name__}"
         return True
     def _apply_ground(self, rect, fut, ev):
+        """An accepted pick turns its own chunk's box into an oval; any other outcome only settles the pick."""
         b = fut.best()
-        if not b:
-            if self._ground_missed(fut, fut.miss_reason()): self.methods["ground-miss"] = self.methods.get("ground-miss", 0) + 1
-            return False
+        if not b or not self._pick_final(fut, applied=True):
+            self._pick_final(fut); return False
         ev["doc"]["target"] = [round(v, 1) for v in b]; ev["doc"]["kind"] = "object"; ev["shape"] = "ellipse"; ev["cue_kind"] = "part_oval"
-        ev["doc"]["target_src"] = "vlm"; ev["doc"].pop("split_from", None)
+        ev["doc"]["target_src"] = "pick"; ev["doc"].pop("split_from", None)
         ev["doc"]["label"] = _logged_label((ev["doc"].get("label") or "") + " (grounded)")
         t = self._doc_transform()
         if t and t != "pending": ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]
-        if fut.settle("vlm"): self.methods["ground-vlm"] = self.methods.get("ground-vlm", 0) + 1   # after the runs record: drawn, not counted
         self.rec["ground_ms"] = fut.ms
         return True
     def clear(self):
         self._write({"state": "clear", "seq": self.events + 1})
     def summary(self):
-        for fut in self.ground_requests:               # still unsettled when the runs record is written
-            self._ground_missed(fut, "superseded" if fut.done.is_set() else "timeout")
+        picks = self.ground_requests
+        for fut in picks:                              # speech is over: wait for each open decision (bounded by its deadline)
+            fut.wait()
+            if fut.outcome == "accepted" and not fut.drop: fut.drop = "superseded"
+            self._pick_final(fut)
+        if picks or any(self.pick_skipped.values()):
+            ms = sorted(f.ms for f in picks if f.called and f.ms is not None)
+            self.rec["part_picks"] = {"requests": len(picks), "called": sum(f.called for f in picks), "accepted": sum(f.outcome == "accepted" for f in picks),
+                                      "applied": sum(f.applied for f in picks), "outcomes": dict(sorted(Counter(f.outcome or "timeout" for f in picks).items())),
+                                      "skipped": dict(self.pick_skipped), "ms": {"p50": ms[len(ms) // 2] if ms else None, "max": ms[-1] if ms else None},
+                                      "threshold": partpick.PICK_MIN_P, "breaker": dict(GROUNDER.breaker), "fallback": dict(GROUNDER.fallback),
+                                      "by_provider": {p: sum(f.provider == p for f in picks) for p in ("local", "openrouter")}}
         if self.smap is not None: self._attach_page()
         tot = sum(self.methods.values())
         self.rec["focus_events"] = self.events

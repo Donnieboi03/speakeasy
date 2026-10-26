@@ -5,6 +5,8 @@ import speakeasy_state as state
 from speakeasy_state import docmap
 from observe import is_owned_capture, tempfile_dir
 from prompts import DOC_RULE
+from grounding import GROUNDER
+from llm_client import model_name, prewarm, vision_model
 
 class DocJob(threading.Thread):
     """Find and read the source document (read-only, local) alongside the audio; never blocks speech."""
@@ -64,7 +66,9 @@ class DocJob(threading.Thread):
                     k = re.sub(r"\s+", " ", l[4].strip().lower())
                     if len(k) >= 14 and k not in seen: seen.add(k); anc.append(l)
                 out["anchors"] = [[round(v, 1) for v in a[:4]] + [a[4][:80]] for a in anc][:48]
-                self._fill(page=pg["n"], doc_parse=docmap.parse_summary(pg))
+                self._fill(page=pg["n"], doc_parse=docmap.parse_summary(pg), figures_degenerate=sum(bool(f.get("degenerate")) for f in pg["figures"]))
+                if any(f["kind"] == "figure" for f in pg["figures"]) and vision_model() != model_name() and GROUNDER.pick_enabled():
+                    prewarm([vision_model()])                       # load the picker's model while the text model speaks
         else:
             lines = doc["lines"]; first = next((l.strip() for l in self.sel.splitlines() if l.strip()), "")
             at = None
@@ -137,8 +141,10 @@ def area_pdf_text(ocr_text, args, rec, wait=4.0):
     try:
         end = time.time() + wait
         while not state.DOC.done.is_set() and time.time() < end: state.DOC.done.wait(0.02)
-        read = state.DOC.out if state.DOC.done.is_set() else None
-        if not read or not read.get("page") or read.get("kind") == "md": rec["area_pdf"] = "no-doc"; return None
+        read = state.DOC.out
+        why = ("doc-timeout" if not state.DOC.done.is_set() else "doc-unresolved" if not state.DOC.path else "doc-failed" if read is None
+               else "markdown" if read.get("kind") == "md" else "no-page" if not read.get("page") else None)
+        if why: rec["area_pdf"] = why; return None
         line_bounds_json = json.load(open(args.line_bounds))
         ocr = []
         for e in line_bounds_json:
@@ -163,9 +169,10 @@ def area_pdf_text(ocr_text, args, rec, wait=4.0):
                         "rect": [round(scale * l[0] + dx, 1), round(scale * l[1] + dy, 1), round(scale * (l[2] - l[0]), 1), round(scale * (l[3] - l[1]), 1)]})
             parts.append(t); loc += len(t) + 1
         with open(args.line_bounds, "w") as f: json.dump(out, f)
-        rec.update(area_text="pdf", area_pdf="ok", area_pdf_lines=len(lines), area_fit_rms=round(fit[3], 1), area_fit_anchors=fit[4])
+        rec.update(area_text="pdf", area_pdf="ok", area_pdf_lines=len(lines), area_fit_rms=round(fit[3], 1), area_fit_anchors=fit[4],
+                   area_page_rect=[round(v, 1) for v in page_rect], area_region_src="area-fit")   # the run's selection region (A2.1)
         return "\n".join(parts)
     except (OSError, ValueError, KeyError, TypeError) as e:
-        rec["area_pdf"] = f"error: {type(e).__name__}"; return None
+        rec.update(area_pdf="error", area_pdf_error=type(e).__name__); return None
     finally:
         rec["area_pdf_ms"] = int((time.time() - t0) * 1000)

@@ -1,0 +1,1114 @@
+{
+ "entries": {
+  "00d3b29c4723ec0d7a6f46f5743128bf55ba00e6a18baccace2c7cf9f13f7696": {
+   "top_logprobs": [
+    {
+     "logprob": -4.70549,
+     "token": "A"
+    },
+    {
+     "logprob": -5.080284,
+     "token": "D"
+    },
+    {
+     "logprob": -6.069073,
+     "token": "L"
+    },
+    {
+     "logprob": -6.306763,
+     "token": "C"
+    },
+    {
+     "logprob": -6.371849,
+     "token": "F"
+    },
+    {
+     "logprob": -8.644144,
+     "token": "B"
+    },
+    {
+     "logprob": -10.319954,
+     "token": "G"
+    },
+    {
+     "logprob": -11.058231,
+     "token": "E"
+    },
+    {
+     "logprob": -11.226437,
+     "token": "O"
+    },
+    {
+     "logprob": -11.503239,
+     "token": "K"
+    },
+    {
+     "logprob": -11.67234,
+     "token": "I"
+    },
+    {
+     "logprob": -12.30142,
+     "token": "P"
+    },
+    {
+     "logprob": -12.56525,
+     "token": "J"
+    },
+    {
+     "logprob": -13.346279,
+     "token": "H"
+    },
+    {
+     "logprob": -0.021608,
+     "token": "<other>"
+    }
+   ]
+  },
+  "0fada29fe5db03bcc74c53ba1107cce7d547039cebea7edfbec56ac381038d02": {
+   "top_logprobs": [
+    {
+     "logprob": -4.490895,
+     "token": "C"
+    },
+    {
+     "logprob": -6.521504,
+     "token": "D"
+    },
+    {
+     "logprob": -10.955219,
+     "token": "A"
+    },
+    {
+     "logprob": -12.437471,
+     "token": "H"
+    },
+    {
+     "logprob": -12.465185,
+     "token": "B"
+    },
+    {
+     "logprob": -14.238609,
+     "token": "G"
+    },
+    {
+     "logprob": -17.807835,
+     "token": "E"
+    },
+    {
+     "logprob": -17.982136,
+     "token": "F"
+    },
+    {
+     "logprob": -0.012789,
+     "token": "<other>"
+    }
+   ]
+  },
+  "10cc22ac5f704fe68ff66f0f50c6e4784213f7e97c9de4c32b2080d99cee073d": {
+   "top_logprobs": [
+    {
+     "logprob": -5.964157,
+     "token": "D"
+    },
+    {
+     "logprob": -6.43084,
+     "token": "A"
+    },
+    {
+     "logprob": -10.392416,
+     "token": "B"
+    },
+    {
+     "logprob": -11.569469,
+     "token": "N"
+    },
+    {
+     "logprob": -11.649378,
+     "token": "H"
+    },
+    {
+     "logprob": -11.744938,
+     "token": "L"
+    },
+    {
+     "logprob": -11.778667,
+     "token": "C"
+    },
+    {
+     "logprob": -12.549179,
+     "token": "E"
+    },
+    {
+     "logprob": -13.926804,
+     "token": "F"
+    },
+    {
+     "logprob": -13.950987,
+     "token": "M"
+    },
+    {
+     "logprob": -14.912125,
+     "token": "J"
+    },
+    {
+     "logprob": -0.004259,
+     "token": "<other>"
+    }
+   ]
+  },
+  "2653e15897020f50a8c25e641dac51922c1871c5ea5efb70def9e8cc57a751cc": {
+   "top_logprobs": [
+    {
+     "logprob": -0.471024,
+     "token": "D"
+    },
+    {
+     "logprob": -6.31638,
+     "token": "C"
+    },
+    {
+     "logprob": -7.645489,
+     "token": "A"
+    },
+    {
+     "logprob": -9.158078,
+     "token": "B"
+    },
+    {
+     "logprob": -10.794765,
+     "token": "H"
+    },
+    {
+     "logprob": -12.678018,
+     "token": "G"
+    },
+    {
+     "logprob": -14.441501,
+     "token": "E"
+    },
+    {
+     "logprob": -14.870431,
+     "token": "F"
+    },
+    {
+     "logprob": -17.954523,
+     "token": " D"
+    },
+    {
+     "logprob": -0.98558,
+     "token": "<other>"
+    }
+   ]
+  },
+  "3f5095dd58418c2eb7031ce12da6de3f3343d197e809fc198aae74296927996f": {
+   "top_logprobs": [
+    {
+     "logprob": -6.57602,
+     "token": "L"
+    },
+    {
+     "logprob": -8.011231,
+     "token": "A"
+    },
+    {
+     "logprob": -12.318521,
+     "token": "J"
+    },
+    {
+     "logprob": -13.515492,
+     "token": "K"
+    },
+    {
+     "logprob": -13.693421,
+     "token": "O"
+    },
+    {
+     "logprob": -14.42809,
+     "token": "P"
+    },
+    {
+     "logprob": -15.917424,
+     "token": "C"
+    },
+    {
+     "logprob": -15.954957,
+     "token": "M"
+    },
+    {
+     "logprob": -16.763933,
+     "token": "B"
+    },
+    {
+     "logprob": -17.326532,
+     "token": "F"
+    },
+    {
+     "logprob": -17.505812,
+     "token": "N"
+    },
+    {
+     "logprob": -0.001734,
+     "token": "<other>"
+    }
+   ]
+  },
+  "4d6980eb92ca2512f309fd9b05f7e68dfec307ffaae25ef484ae0bbcfb8f4ed0": {
+   "top_logprobs": [
+    {
+     "logprob": -10.662854,
+     "token": "A"
+    },
+    {
+     "logprob": -14.56261,
+     "token": "B"
+    },
+    {
+     "logprob": -16.94018,
+     "token": "C"
+    },
+    {
+     "logprob": -19.3678,
+     "token": "D"
+    },
+    {
+     "logprob": -2.4e-05,
+     "token": "<other>"
+    }
+   ]
+  },
+  "695a96a797287a2cd1882b3b1d2a88bf8b0f3450b93425e689070070f6a89273": {
+   "top_logprobs": [
+    {
+     "logprob": -3.887585,
+     "token": "A"
+    },
+    {
+     "logprob": -8.983301,
+     "token": "C"
+    },
+    {
+     "logprob": -9.330399,
+     "token": "G"
+    },
+    {
+     "logprob": -14.192636,
+     "token": "E"
+    },
+    {
+     "logprob": -15.136391,
+     "token": "B"
+    },
+    {
+     "logprob": -16.418537,
+     "token": "D"
+    },
+    {
+     "logprob": -0.020927,
+     "token": "<other>"
+    }
+   ]
+  },
+  "6b2f217e9ed561bad00e3708791cd55f179a9cfbb0a1192767ecd1d4927edbd2": {
+   "top_logprobs": [
+    {
+     "logprob": -3.3102,
+     "token": "I"
+    },
+    {
+     "logprob": -3.656265,
+     "token": "J"
+    },
+    {
+     "logprob": -9.285166,
+     "token": "A"
+    },
+    {
+     "logprob": -9.493946,
+     "token": "C"
+    },
+    {
+     "logprob": -9.781458,
+     "token": "K"
+    },
+    {
+     "logprob": -10.595156,
+     "token": "D"
+    },
+    {
+     "logprob": -10.838802,
+     "token": "L"
+    },
+    {
+     "logprob": -11.456005,
+     "token": "O"
+    },
+    {
+     "logprob": -11.6705,
+     "token": "E"
+    },
+    {
+     "logprob": -12.1891,
+     "token": "B"
+    },
+    {
+     "logprob": -12.281265,
+     "token": "G"
+    },
+    {
+     "logprob": -12.33585,
+     "token": "H"
+    },
+    {
+     "logprob": -12.386003,
+     "token": "F"
+    },
+    {
+     "logprob": -13.564669,
+     "token": "N"
+    },
+    {
+     "logprob": -13.772852,
+     "token": "M"
+    },
+    {
+     "logprob": -13.801624,
+     "token": "P"
+    },
+    {
+     "logprob": -0.064696,
+     "token": "<other>"
+    }
+   ]
+  },
+  "6ec599a29338e8156875f51125f1bac5eb263527cc4371c59f78b02cff99274a": {
+   "top_logprobs": [
+    {
+     "logprob": -0.032061,
+     "token": "J"
+    },
+    {
+     "logprob": -8.938517,
+     "token": "N"
+    },
+    {
+     "logprob": -11.420801,
+     "token": "M"
+    },
+    {
+     "logprob": -11.691439,
+     "token": "A"
+    },
+    {
+     "logprob": -12.984007,
+     "token": "L"
+    },
+    {
+     "logprob": -13.980001,
+     "token": "C"
+    },
+    {
+     "logprob": -14.021433,
+     "token": "F"
+    },
+    {
+     "logprob": -14.274555,
+     "token": "K"
+    },
+    {
+     "logprob": -14.672359,
+     "token": "D"
+    },
+    {
+     "logprob": -14.802042,
+     "token": "E"
+    },
+    {
+     "logprob": -15.092932,
+     "token": "B"
+    },
+    {
+     "logprob": -15.653433,
+     "token": "H"
+    },
+    {
+     "logprob": -15.895144,
+     "token": "G"
+    },
+    {
+     "logprob": -16.085878,
+     "token": "I"
+    },
+    {
+     "logprob": -17.788336,
+     "token": "O"
+    },
+    {
+     "logprob": -18.043253,
+     "token": " J"
+    },
+    {
+     "logprob": -3.46108,
+     "token": "<other>"
+    }
+   ]
+  },
+  "807f9d7e801487e3f1c239cb774f2b3870ee2fbebf87953e1ac202d77cfb9324": {
+   "top_logprobs": [
+    {
+     "logprob": -0.237644,
+     "token": "B"
+    },
+    {
+     "logprob": -1.652595,
+     "token": "A"
+    },
+    {
+     "logprob": -3.927757,
+     "token": "F"
+    },
+    {
+     "logprob": -8.534871,
+     "token": "C"
+    },
+    {
+     "logprob": -11.331126,
+     "token": "D"
+    },
+    {
+     "logprob": -11.683036,
+     "token": "E"
+    },
+    {
+     "logprob": -17.185627,
+     "token": "G"
+    },
+    {
+     "logprob": -17.298191,
+     "token": "H"
+    },
+    {
+     "logprob": -17.314314,
+     "token": "L"
+    },
+    {
+     "logprob": -9.726672,
+     "token": "<other>"
+    }
+   ]
+  },
+  "851620c120f13a3cf972a9330f97df4a1986e4c788a39a0648fe30d205ded71a": {
+   "top_logprobs": [
+    {
+     "logprob": -4.075298,
+     "token": "A"
+    },
+    {
+     "logprob": -9.5355,
+     "token": "C"
+    },
+    {
+     "logprob": -11.318712,
+     "token": "B"
+    },
+    {
+     "logprob": -13.383286,
+     "token": "D"
+    },
+    {
+     "logprob": -0.017221,
+     "token": "<other>"
+    }
+   ]
+  },
+  "85eed6d7e5564f137cd4caa3f4c0a2a1c61767538430c6b68cb9396fc9da81d4": {
+   "top_logprobs": [
+    {
+     "logprob": -6.64417,
+     "token": "P"
+    },
+    {
+     "logprob": -10.500024,
+     "token": "A"
+    },
+    {
+     "logprob": -12.324574,
+     "token": "F"
+    },
+    {
+     "logprob": -14.021323,
+     "token": "C"
+    },
+    {
+     "logprob": -14.708364,
+     "token": "E"
+    },
+    {
+     "logprob": -15.627126,
+     "token": "B"
+    },
+    {
+     "logprob": -15.777726,
+     "token": "D"
+    },
+    {
+     "logprob": -16.356895,
+     "token": "G"
+    },
+    {
+     "logprob": -16.661911,
+     "token": "O"
+    },
+    {
+     "logprob": -17.57456,
+     "token": "L"
+    },
+    {
+     "logprob": -0.001336,
+     "token": "<other>"
+    }
+   ]
+  },
+  "87520136860030ad21e2e811e54be7363acbfdf41083ea661827254267454ed3": {
+   "top_logprobs": [
+    {
+     "logprob": -10.498823,
+     "token": "A"
+    },
+    {
+     "logprob": -16.528879,
+     "token": "D"
+    },
+    {
+     "logprob": -19.297842,
+     "token": "C"
+    },
+    {
+     "logprob": -20.547573,
+     "token": "B"
+    },
+    {
+     "logprob": -2.8e-05,
+     "token": "<other>"
+    }
+   ]
+  },
+  "a2265f189d961813739139e7b29d3581121e9cf2638abe7b13e0ec0c704732be": {
+   "top_logprobs": [
+    {
+     "logprob": -8.358787,
+     "token": "F"
+    },
+    {
+     "logprob": -8.597831,
+     "token": "C"
+    },
+    {
+     "logprob": -10.413318,
+     "token": "A"
+    },
+    {
+     "logprob": -11.304568,
+     "token": "E"
+    },
+    {
+     "logprob": -11.308757,
+     "token": "D"
+    },
+    {
+     "logprob": -12.152852,
+     "token": "B"
+    },
+    {
+     "logprob": -20.196514,
+     "token": "O"
+    },
+    {
+     "logprob": -20.76778,
+     "token": "I"
+    },
+    {
+     "logprob": -0.000479,
+     "token": "<other>"
+    }
+   ]
+  },
+  "bc230eb66a76faf9d835cc3ac742cd12b18eb2afb2bb9c7256bcda0ab7f6232b": {
+   "top_logprobs": [
+    {
+     "logprob": -0.00258,
+     "token": "K"
+    },
+    {
+     "logprob": -5.973336,
+     "token": "G"
+    },
+    {
+     "logprob": -10.639165,
+     "token": "H"
+    },
+    {
+     "logprob": -13.201001,
+     "token": "C"
+    },
+    {
+     "logprob": -13.641105,
+     "token": "A"
+    },
+    {
+     "logprob": -13.846799,
+     "token": "L"
+    },
+    {
+     "logprob": -14.16929,
+     "token": "J"
+    },
+    {
+     "logprob": -14.813191,
+     "token": "I"
+    },
+    {
+     "logprob": -15.069825,
+     "token": "B"
+    },
+    {
+     "logprob": -15.442422,
+     "token": "N"
+    },
+    {
+     "logprob": -15.661794,
+     "token": "D"
+    },
+    {
+     "logprob": -16.084234,
+     "token": "F"
+    },
+    {
+     "logprob": -16.38122,
+     "token": "E"
+    },
+    {
+     "logprob": -16.381817,
+     "token": "M"
+    },
+    {
+     "logprob": -17.716211,
+     "token": " K"
+    },
+    {
+     "logprob": -13.830904,
+     "token": "<other>"
+    }
+   ]
+  },
+  "c3849ee518aa3a09fd5b2f6cdc161b9f75a937e7c69089cbca536ce76d526cd5": {
+   "top_logprobs": [
+    {
+     "logprob": -6.063776,
+     "token": "A"
+    },
+    {
+     "logprob": -7.390062,
+     "token": "L"
+    },
+    {
+     "logprob": -9.892168,
+     "token": "O"
+    },
+    {
+     "logprob": -10.37225,
+     "token": "P"
+    },
+    {
+     "logprob": -10.934755,
+     "token": "C"
+    },
+    {
+     "logprob": -11.998388,
+     "token": "B"
+    },
+    {
+     "logprob": -12.246017,
+     "token": "D"
+    },
+    {
+     "logprob": -12.601429,
+     "token": "I"
+    },
+    {
+     "logprob": -12.843288,
+     "token": "J"
+    },
+    {
+     "logprob": -13.281389,
+     "token": "K"
+    },
+    {
+     "logprob": -14.199928,
+     "token": "E"
+    },
+    {
+     "logprob": -14.232756,
+     "token": "G"
+    },
+    {
+     "logprob": -0.003067,
+     "token": "<other>"
+    }
+   ]
+  },
+  "ce3ddf73a739c222b5938edf74b9a6edd885e1be4650ffd0da6c40578aa1d2b7": {
+   "top_logprobs": [
+    {
+     "logprob": -0.000515,
+     "token": "H"
+    },
+    {
+     "logprob": -10.878506,
+     "token": "N"
+    },
+    {
+     "logprob": -11.542755,
+     "token": "A"
+    },
+    {
+     "logprob": -15.88316,
+     "token": "B"
+    },
+    {
+     "logprob": -16.258112,
+     "token": "C"
+    },
+    {
+     "logprob": -16.326597,
+     "token": "G"
+    },
+    {
+     "logprob": -16.479338,
+     "token": "L"
+    },
+    {
+     "logprob": -16.669712,
+     "token": "K"
+    },
+    {
+     "logprob": -16.806765,
+     "token": "D"
+    },
+    {
+     "logprob": -17.539297,
+     "token": "E"
+    },
+    {
+     "logprob": -17.767799,
+     "token": " H"
+    },
+    {
+     "logprob": -17.91341,
+     "token": "M"
+    },
+    {
+     "logprob": -17.941294,
+     "token": "F"
+    },
+    {
+     "logprob": -17.975313,
+     "token": "I"
+    },
+    {
+     "logprob": -19.100147,
+     "token": "J"
+    },
+    {
+     "logprob": -19.540829,
+     "token": "O"
+    },
+    {
+     "logprob": -7.629858,
+     "token": "<other>"
+    }
+   ]
+  },
+  "d310f5b7f203286e623ca0baebc9a4c75a9e6af13e77d2744a15dcb455a38f60": {
+   "top_logprobs": [
+    {
+     "logprob": -0.086081,
+     "token": "A"
+    },
+    {
+     "logprob": -9.238024,
+     "token": "C"
+    },
+    {
+     "logprob": -13.344809,
+     "token": "B"
+    },
+    {
+     "logprob": -16.565935,
+     "token": "D"
+    },
+    {
+     "logprob": -19.490438,
+     "token": " A"
+    },
+    {
+     "logprob": -19.81105,
+     "token": "O"
+    },
+    {
+     "logprob": -20.464701,
+     "token": "E"
+    },
+    {
+     "logprob": -21.207972,
+     "token": "I"
+    },
+    {
+     "logprob": -2.496399,
+     "token": "<other>"
+    }
+   ]
+  },
+  "d5c0093cef33b82b40b1d18805917860f807f9d35bd8dde66736183e6dbc691f": {
+   "top_logprobs": [
+    {
+     "logprob": -15.360669,
+     "token": "A"
+    },
+    {
+     "logprob": -21.623327,
+     "token": "O"
+    },
+    {
+     "logprob": -22.037447,
+     "token": "P"
+    },
+    {
+     "logprob": -22.540693,
+     "token": "N"
+    },
+    {
+     "logprob": -22.987417,
+     "token": "I"
+    },
+    {
+     "logprob": -23.074118,
+     "token": "L"
+    },
+    {
+     "logprob": -0.0,
+     "token": "<other>"
+    }
+   ]
+  },
+  "d5e7d27767d81d8379214e6966ae82c805510203e7d0cdb17aa652eadbd35d0a": {
+   "top_logprobs": [
+    {
+     "logprob": -1.023647,
+     "token": "D"
+    },
+    {
+     "logprob": -4.242851,
+     "token": "C"
+    },
+    {
+     "logprob": -6.081207,
+     "token": "A"
+    },
+    {
+     "logprob": -8.952658,
+     "token": "B"
+    },
+    {
+     "logprob": -9.239174,
+     "token": "E"
+    },
+    {
+     "logprob": -17.150795,
+     "token": "O"
+    },
+    {
+     "logprob": -17.557858,
+     "token": "I"
+    },
+    {
+     "logprob": -0.471863,
+     "token": "<other>"
+    }
+   ]
+  },
+  "d9780406c8abc6947316743c51fe493118923a33a39efc84a4f8f7778bcc8797": {
+   "top_logprobs": [
+    {
+     "logprob": -18.5679,
+     "token": "A"
+    },
+    {
+     "logprob": -24.439617,
+     "token": "D"
+    },
+    {
+     "logprob": -26.844912,
+     "token": "B"
+    },
+    {
+     "logprob": -27.964615,
+     "token": "C"
+    },
+    {
+     "logprob": -29.041868,
+     "token": "O"
+    },
+    {
+     "logprob": -0.0,
+     "token": "<other>"
+    }
+   ]
+  },
+  "e3d26a69bf0536b84d73904185b7278f8a4ee2b4db0d79845ee5c5f3c46bf6bc": {
+   "top_logprobs": [
+    {
+     "logprob": -13.617395,
+     "token": "H"
+    },
+    {
+     "logprob": -17.490705,
+     "token": "A"
+    },
+    {
+     "logprob": -19.830656,
+     "token": "G"
+    },
+    {
+     "logprob": -20.194983,
+     "token": "E"
+    },
+    {
+     "logprob": -22.018389,
+     "token": "F"
+    },
+    {
+     "logprob": -1e-06,
+     "token": "<other>"
+    }
+   ]
+  },
+  "e99be4e79c88d227460646fd772a663a083342b99608e3453d92746415e816a8": {
+   "top_logprobs": [
+    {
+     "logprob": -10.886134,
+     "token": "H"
+    },
+    {
+     "logprob": -13.682864,
+     "token": "A"
+    },
+    {
+     "logprob": -14.53036,
+     "token": "C"
+    },
+    {
+     "logprob": -17.290112,
+     "token": "G"
+    },
+    {
+     "logprob": -17.88286,
+     "token": "B"
+    },
+    {
+     "logprob": -18.098217,
+     "token": "E"
+    },
+    {
+     "logprob": -18.437014,
+     "token": "F"
+    },
+    {
+     "logprob": -20.462456,
+     "token": "D"
+    },
+    {
+     "logprob": -2e-05,
+     "token": "<other>"
+    }
+   ]
+  },
+  "ea207ddb68d034e5c26d041412fadbe03a9485ea3d69e0d0c4a0311d686491af": {
+   "top_logprobs": [
+    {
+     "logprob": -0.885467,
+     "token": "F"
+    },
+    {
+     "logprob": -8.886024,
+     "token": "C"
+    },
+    {
+     "logprob": -9.656203,
+     "token": "E"
+    },
+    {
+     "logprob": -10.851447,
+     "token": "D"
+    },
+    {
+     "logprob": -10.890431,
+     "token": "A"
+    },
+    {
+     "logprob": -12.982518,
+     "token": "B"
+    },
+    {
+     "logprob": -0.532329,
+     "token": "<other>"
+    }
+   ]
+  },
+  "edaa872f75b6d74089323ec771d2fe073d1b8de26b7cffb49a2f52b9cbeeab09": {
+   "top_logprobs": [
+    {
+     "logprob": -10.477263,
+     "token": "J"
+    },
+    {
+     "logprob": -10.704707,
+     "token": "A"
+    },
+    {
+     "logprob": -12.130694,
+     "token": "E"
+    },
+    {
+     "logprob": -14.223327,
+     "token": "B"
+    },
+    {
+     "logprob": -15.928246,
+     "token": "C"
+    },
+    {
+     "logprob": -16.82023,
+     "token": "F"
+    },
+    {
+     "logprob": -17.146524,
+     "token": "D"
+    },
+    {
+     "logprob": -5.7e-05,
+     "token": "<other>"
+    }
+   ]
+  }
+ },
+ "header": {
+  "commit": "91166c478bc1a8b6512caf52070ca66e7ac30b17",
+  "model": "qwen3-vl:4b-instruct",
+  "model_digest": "84f7ed8042fa7cdbd902f7dcb7d0370e032095047cc3244179f263b77b5bc318",
+  "ollama_version": "0.40.10",
+  "pillow": "13.0.0",
+  "pypdfium2": "5.14.0",
+  "recorded_at": "2026-10-26T16:24:19Z",
+  "src_sha": "2b598eaa75d601d0c0fc03d7caa507ea334aabdc1a835fee73c851b112e135c3"
+ }
+}

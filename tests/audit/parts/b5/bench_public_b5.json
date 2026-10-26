@@ -1,0 +1,1527 @@
+{
+ "commit": null,
+ "complete": true,
+ "config": {
+  "box_iou_hit": 0.75,
+  "box_iou_pr": 0.5,
+  "geometry": {
+   "backing": 2,
+   "display": [
+    0,
+    33
+   ],
+   "zoom": 1.25
+  },
+  "line_axis_overlap": 0.5,
+  "line_cover_frac": 0.75,
+  "line_extra_max": 1,
+  "mock_first_delay_s": 0.5,
+  "mock_token_delay_s": 0.002,
+  "speed_budget_ms": 300,
+  "stub_play_s": 0.05
+ },
+ "dirty": false,
+ "duration_s": 262.1,
+ "errors": [],
+ "fixtures": {
+  "public": {
+   "cases": 64,
+   "docs": 9,
+   "manifest_sha256": "b74c84a3fc5c4d237b2793220d14ebfd9bd8e4ef70d35d8ed480f9f1ec6cf783"
+  }
+ },
+ "generated_at": "2026-10-26T12:30:38+00:00",
+ "mode": "gated",
+ "schema": "speakeasy-bench/1",
+ "sets": {
+  "public": {
+   "boxes": {
+    "by_doc": {
+     "arx-2402.10153": {
+      "gt": 12,
+      "hits": 12,
+      "matched_50": 12,
+      "pred": 12
+     },
+     "arx-2405.08223": {
+      "gt": 9,
+      "hits": 9,
+      "matched_50": 9,
+      "pred": 9
+     },
+     "arx-2406.06619": {
+      "gt": 27,
+      "hits": 27,
+      "matched_50": 27,
+      "pred": 50
+     },
+     "syn-capnamed-01": {
+      "gt": 11,
+      "hits": 11,
+      "matched_50": 11,
+      "pred": 11
+     },
+     "syn-fig5-01": {
+      "gt": 14,
+      "hits": 14,
+      "matched_50": 14,
+      "pred": 15
+     },
+     "syn-fullwidth-01": {
+      "gt": 11,
+      "hits": 11,
+      "matched_50": 11,
+      "pred": 12
+     },
+     "syn-panels-01": {
+      "gt": 11,
+      "hits": 11,
+      "matched_50": 11,
+      "pred": 12
+     },
+     "syn-report-01": {
+      "gt": 17,
+      "hits": 17,
+      "matched_50": 17,
+      "pred": 18
+     },
+     "syn-twocol-01": {
+      "gt": 10,
+      "hits": 10,
+      "matched_50": 10,
+      "pred": 10
+     }
+    },
+    "by_kind": {
+     "caption": {
+      "gt": 27,
+      "hits": 27,
+      "precision_50": 100.0,
+      "recall_50": 100.0,
+      "score": 100.0
+     },
+     "figure": {
+      "gt": 16,
+      "hits": 16,
+      "precision_50": 100.0,
+      "recall_50": 100.0,
+      "score": 100.0
+     },
+     "paragraph": {
+      "gt": 68,
+      "hits": 68,
+      "precision_50": 71.58,
+      "recall_50": 100.0,
+      "score": 100.0
+     },
+     "table": {
+      "gt": 11,
+      "hits": 11,
+      "precision_50": 100.0,
+      "recall_50": 100.0,
+      "score": 100.0
+     }
+    },
+    "by_subset": {
+     "real": {
+      "gt": 48,
+      "gt_source": "agent",
+      "hits": 48,
+      "matched_50": 48,
+      "precision_50": 67.61,
+      "pred": 71,
+      "recall_50": 100.0,
+      "reviewed_by_human": false,
+      "score": 100.0
+     },
+     "synthetic": {
+      "gt": 74,
+      "hits": 74,
+      "matched_50": 74,
+      "precision_50": 94.87,
+      "pred": 78,
+      "recall_50": 100.0,
+      "score": 100.0
+     }
+    },
+    "gt": 122,
+    "hits": 122,
+    "matched_50": 122,
+    "precision_50": 81.88,
+    "pred": 149,
+    "recall_50": 100.0,
+    "score": 100.0,
+    "wrong_type": {
+     "caption": {
+      "as": {},
+      "n": 0
+     },
+     "figure": {
+      "as": {},
+      "n": 0
+     },
+     "paragraph": {
+      "as": {
+       "equation": 1,
+       "heading": 1
+      },
+      "n": 2
+     },
+     "table": {
+      "as": {},
+      "n": 0
+     }
+    }
+   },
+   "cases": [
+    {
+     "case_id": "arx-2402.10153/c01",
+     "doc_id": "arx-2402.10153",
+     "first_highlight_ms": 66,
+     "lines": {
+      "hits": 5,
+      "n": 5
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2402.10153/c02",
+     "doc_id": "arx-2402.10153",
+     "first_highlight_ms": 43,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2402.10153/c03",
+     "doc_id": "arx-2402.10153",
+     "first_highlight_ms": 44,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2402.10153/c04",
+     "doc_id": "arx-2402.10153",
+     "first_highlight_ms": 35,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2402.10153/c05",
+     "doc_id": "arx-2402.10153",
+     "first_highlight_ms": 28,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "centre_outside",
+       "sentence_id": "s20"
+      },
+      {
+       "category": "parts",
+       "reason": "centre_outside",
+       "sentence_id": "s21"
+      }
+     ],
+     "parts": {
+      "good": 2,
+      "hits": 2,
+      "n": 4,
+      "ovals": 4
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2402.10153/c06",
+     "doc_id": "arx-2402.10153",
+     "first_highlight_ms": 28,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 4,
+      "ovals": 5
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2405.08223/c01",
+     "doc_id": "arx-2405.08223",
+     "first_highlight_ms": 53,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2405.08223/c02",
+     "doc_id": "arx-2405.08223",
+     "first_highlight_ms": 49,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2405.08223/c03",
+     "doc_id": "arx-2405.08223",
+     "first_highlight_ms": 30,
+     "lines": {
+      "hits": 2,
+      "n": 2
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2405.08223/c04",
+     "doc_id": "arx-2405.08223",
+     "first_highlight_ms": 32,
+     "lines": {
+      "hits": 2,
+      "n": 4
+     },
+     "misses": [
+      {
+       "category": "lines",
+       "reason": "under_cover",
+       "sentence_id": "s10"
+      },
+      {
+       "category": "lines",
+       "reason": "under_cover",
+       "sentence_id": "s11"
+      }
+     ],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2405.08223/c05",
+     "doc_id": "arx-2405.08223",
+     "first_highlight_ms": 112,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2405.08223/c06",
+     "doc_id": "arx-2405.08223",
+     "first_highlight_ms": 34,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s16"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s17"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s18"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s19"
+      }
+     ],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 4,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c01",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 40,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c02",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 40,
+     "lines": {
+      "hits": 2,
+      "n": 2
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c03",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 65,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c04",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 474,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c05",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 39,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "centre_outside",
+       "sentence_id": "s18"
+      },
+      {
+       "category": "parts",
+       "reason": "centre_outside",
+       "sentence_id": "s19"
+      },
+      {
+       "category": "parts",
+       "reason": "centre_outside",
+       "sentence_id": "s20"
+      }
+     ],
+     "parts": {
+      "good": 2,
+      "hits": 2,
+      "n": 5,
+      "ovals": 6
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c06",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 41,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c07",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 41,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s26"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s27"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s28"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s29"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s30"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s31"
+      }
+     ],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 6,
+      "ovals": 1
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "arx-2406.06619/c08",
+     "doc_id": "arx-2406.06619",
+     "first_highlight_ms": 54,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "real"
+    },
+    {
+     "case_id": "syn-capnamed-01/c01",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 38,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c02",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 37,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c03",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 44,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c04",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 47,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c05",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 33,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 4,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c06",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 32,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "centre_outside",
+       "sentence_id": "s31"
+      }
+     ],
+     "parts": {
+      "good": 3,
+      "hits": 3,
+      "n": 4,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c07",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 53,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-capnamed-01/c08",
+     "doc_id": "syn-capnamed-01",
+     "first_highlight_ms": 40,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c01",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 41,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c02",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 36,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c03",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 33,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c04",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 38,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c05",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 39,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 6,
+      "hits": 6,
+      "n": 6,
+      "ovals": 6
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c06",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 27,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fig5-01/c07",
+     "doc_id": "syn-fig5-01",
+     "first_highlight_ms": 21,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c01",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 40,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c02",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 47,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c03",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 44,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c04",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 35,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c05",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 32,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s29"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s30"
+      }
+     ],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 6,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c06",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 31,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-fullwidth-01/c07",
+     "doc_id": "syn-fullwidth-01",
+     "first_highlight_ms": 34,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c01",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 46,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c02",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 42,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c03",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 28,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 4,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c04",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 26,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s34"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s35"
+      }
+     ],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 6,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c05",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 26,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s37"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s38"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s39"
+      },
+      {
+       "category": "parts",
+       "reason": "no_oval",
+       "sentence_id": "s40"
+      }
+     ],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 4,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c06",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 41,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c07",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 50,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-panels-01/c08",
+     "doc_id": "syn-panels-01",
+     "first_highlight_ms": 23,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c01",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 32,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c02",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 46,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c03",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 52,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c04",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 34,
+     "lines": {
+      "hits": 3,
+      "n": 3
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c05",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 23,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c06",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 25,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 4,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-report-01/c07",
+     "doc_id": "syn-report-01",
+     "first_highlight_ms": 26,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c01",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 50,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c02",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 51,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c03",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 39,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c04",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 52,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c05",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 49,
+     "lines": {
+      "hits": 4,
+      "n": 4
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c06",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 30,
+     "lines": {
+      "hits": 0,
+      "n": 0
+     },
+     "misses": [],
+     "parts": {
+      "good": 4,
+      "hits": 4,
+      "n": 4,
+      "ovals": 4
+     },
+     "subset": "synthetic"
+    },
+    {
+     "case_id": "syn-twocol-01/c07",
+     "doc_id": "syn-twocol-01",
+     "first_highlight_ms": 29,
+     "lines": {
+      "hits": 1,
+      "n": 1
+     },
+     "misses": [],
+     "parts": {
+      "good": 0,
+      "hits": 0,
+      "n": 0,
+      "ovals": 0
+     },
+     "subset": "synthetic"
+    }
+   ],
+   "layout": {
+    "missing": 0,
+    "ms": {
+     "n": 29,
+     "p50": 27,
+     "p95": 45
+    },
+    "pages": 29,
+    "reasons": {},
+    "src": {
+     "detector": 29,
+     "heuristic": 0
+    }
+   },
+   "lines": {
+    "by_subset": {
+     "real": {
+      "gt_source": "agent",
+      "hits": 45,
+      "n": 47,
+      "reviewed_by_human": false,
+      "score": 95.74
+     },
+     "synthetic": {
+      "hits": 99,
+      "n": 99,
+      "score": 100.0
+     }
+    },
+    "hits": 144,
+    "miss_reasons": {
+     "no_doc_target": 0,
+     "no_show": 0,
+     "not_spoken": 0,
+     "over_extend": 0,
+     "under_cover": 2,
+     "wrong_cue": 0,
+     "wrong_page": 0
+    },
+    "n": 146,
+    "score": 98.63
+   },
+   "parts": {
+    "by_style": {
+     "adjacent": {
+      "hits": 9,
+      "n": 13,
+      "score": 69.23
+     },
+     "callout": {
+      "hits": 0,
+      "n": 8,
+      "score": 0.0
+     },
+     "inside": {
+      "hits": 32,
+      "n": 43,
+      "score": 74.42
+     },
+     "raster": {
+      "hits": 0,
+      "n": 1,
+      "score": 0.0
+     }
+    },
+    "by_subset": {
+     "real": {
+      "good": 8,
+      "gt_source": "agent",
+      "hits": 8,
+      "n": 23,
+      "ovals": 16,
+      "precision": 50.0,
+      "reviewed_by_human": false,
+      "score": 34.78
+     },
+     "synthetic": {
+      "good": 33,
+      "hits": 33,
+      "n": 42,
+      "ovals": 34,
+      "precision": 97.06,
+      "score": 78.57
+     }
+    },
+    "good_ovals": 41,
+    "hits": 41,
+    "miss_reasons": {
+     "centre_outside": 6,
+     "no_oval": 18,
+     "no_show": 0,
+     "not_spoken": 0,
+     "wrong_page": 0
+    },
+    "n": 65,
+    "ovals": 50,
+    "precision": 82.0,
+    "score": 63.08
+   },
+   "speed": {
+    "audio_to_box_ms": {
+     "p50": 1,
+     "p95": 1
+    },
+    "first_highlight_ms": {
+     "n": 64,
+     "p50": 39,
+     "p95": 65
+    },
+    "n_missing": 0
+   }
+  }
+ },
+ "versions": {
+  "layout_model": "pp-doclayout-s/33688dbee1c2",
+  "onnxruntime": "1.31.0",
+  "pdfplumber": null,
+  "pillow": "13.0.0",
+  "pypdfium2": "5.14.0",
+  "python": "3.12.13",
+  "reportlab": null
+ }
+}
