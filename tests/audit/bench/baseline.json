@@ -1,8 +1,8 @@
 {
  "schema": "speakeasy-bench-baseline/1",
  "set": "public",
- "recorded_at": "2026-10-26T19:30:59+00:00",
- "commit": "c19daddba92684eb579125647cbed70435af4c17",
+ "recorded_at": "2026-10-26T22:30:40+00:00",
+ "commit": "f519b5313fc4188719420a790b467bcd43ba3d3a",
  "dirty": false,
  "config": {
   "box_iou_hit": 0.75,

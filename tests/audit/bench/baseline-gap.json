@@ -1,0 +1,58 @@
+{
+ "schema": "speakeasy-bench-baseline/1",
+ "set": "public-gap",
+ "recorded_at": "2026-10-26T22:36:26+00:00",
+ "commit": "f519b5313fc4188719420a790b467bcd43ba3d3a",
+ "dirty": false,
+ "config": {
+  "box_iou_hit": 0.75,
+  "box_iou_pr": 0.5,
+  "line_cover_frac": 0.75,
+  "line_axis_overlap": 0.5,
+  "line_extra_max": 1,
+  "speed_budget_ms": 300,
+  "mock_first_delay_s": 0.5,
+  "mock_token_delay_s": 0.002,
+  "stub_play_s": 0.05,
+  "geometry": {
+   "zoom": 1.25,
+   "backing": 2,
+   "display": [
+    0,
+    33
+   ]
+  }
+ },
+ "manifest_sha256": "ef7e3b5de988841e0bd93c54a2ff5b8e60dd559657b8919c6135f86e8161e20a",
+ "versions": {
+  "python": "3.12.13",
+  "pypdfium2": "5.14.0",
+  "reportlab": null,
+  "pdfplumber": null,
+  "onnxruntime": "1.31.0",
+  "pillow": "13.0.0",
+  "layout_model": "pp-doclayout-s/33688dbee1c2",
+  "figcls_model": null
+ },
+ "metrics": {
+  "kind": {
+   "score": 6.52,
+   "precision": 100.0,
+   "wrong_type": 0,
+   "by_gap": {
+    "image-table": 33.33,
+    "lexicon": 0.0,
+    "no-text": 0.0,
+    "standard": 100.0,
+    "uncaptioned": 0.0
+   },
+   "prose_decoys_kept": 6
+  },
+  "speed": {
+   "p50": 34,
+   "p95": 45
+  }
+ },
+ "detail": {},
+ "baseline": "B6-pre"
+}
