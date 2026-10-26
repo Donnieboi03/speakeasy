@@ -1,0 +1,205 @@
+[
+ {
+  "case_id": "gap-imgtable-01/c01",
+  "doc_id": "gap-imgtable-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Inland holds the most crates by a wide margin. Ridge is due a restock before the end of the",
+    "rect": [
+     56.0,
+     290.0,
+     515.81,
+     300.0
+    ]
+   },
+   {
+    "text": "month.",
+    "rect": [
+     56.0,
+     303.0,
+     91.63,
+     313.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s4",
+    "text": "Inland holds the most crates by a wide margin."
+   },
+   {
+    "sentence_id": "s5",
+    "text": "Ridge is due a restock before the end of the month."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-imgtable-01/c02",
+  "doc_id": "gap-imgtable-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Each count passes through four steps before it is reported. A second person checks every",
+    "rect": [
+     56.0,
+     420.0,
+     506.75,
+     430.0
+    ]
+   },
+   {
+    "text": "figure against the shelf labels.",
+    "rect": [
+     56.0,
+     433.0,
+     207.8,
+     443.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s6",
+    "text": "Each count passes through four steps before it is reported."
+   },
+   {
+    "sentence_id": "s7",
+    "text": "A second person checks every figure against the shelf labels."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-imgtable-01/c03",
+  "doc_id": "gap-imgtable-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Cedar has the most empty bins this week. Elm will receive the next delivery of bins.",
+    "rect": [
+     56.0,
+     290.0,
+     477.44,
+     300.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s13",
+    "text": "Cedar has the most empty bins this week."
+   },
+   {
+    "sentence_id": "s14",
+    "text": "Elm will receive the next delivery of bins."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-imgtable-01/r01",
+  "doc_id": "gap-imgtable-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Table 2: Depot stock at the start of May.",
+    "rect": [
+     110.0,
+     130.0,
+     282.29,
+     138.5
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s15",
+    "text": "North holds 42 crates and 12 pallets."
+   },
+   {
+    "sentence_id": "s16",
+    "text": "Quay holds 37 crates and 9 pallets."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "Inland holds 55 crates and 16 pallets."
+   },
+   {
+    "sentence_id": "s18",
+    "text": "Ridge holds 29 crates and 7 pallets."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-imgtable-01/r02",
+  "doc_id": "gap-imgtable-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Tabelle 4: Lagerbestand je Halle.",
+    "rect": [
+     110.0,
+     480.0,
+     250.35,
+     488.5
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s19",
+    "text": "Halle Ost has 61 Kisten and 18 Paletten."
+   },
+   {
+    "sentence_id": "s20",
+    "text": "Halle Mitte has 47 Kisten and 13 Paletten."
+   },
+   {
+    "sentence_id": "s21",
+    "text": "Halle Hafen has 33 Kisten and 11 Paletten."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-imgtable-01/r03",
+  "doc_id": "gap-imgtable-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "TABLE II",
+    "rect": [
+     130.0,
+     110.0,
+     164.66,
+     118.5
+    ]
+   },
+   {
+    "text": "Empty bins per yard.",
+    "rect": [
+     130.0,
+     121.05,
+     219.04,
+     129.55
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s22",
+    "text": "Alder has 80 bins and 14 are empty."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "Birch has 64 bins and 9 are empty."
+   },
+   {
+    "sentence_id": "s24",
+    "text": "Cedar has 72 bins and 21 are empty."
+   },
+   {
+    "sentence_id": "s25",
+    "text": "Elm has 58 bins and 5 are empty."
+   }
+  ]
+ }
+]

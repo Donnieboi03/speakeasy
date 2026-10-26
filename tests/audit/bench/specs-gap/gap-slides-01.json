@@ -1,0 +1,33 @@
+{
+ "doc_id": "gap-slides-01", "page": [720, 405], "size": 11,
+ "pages": [
+  {"items": [
+   {"decoy": "background", "seed": 3},
+   {"text": "Quarterly operations review", "at": [36, 22], "size": 20},
+   {"figure": "F1", "body": "bars", "rect": [40, 78, 340, 330], "data": [12, 18, 9, 21, 15], "labels": ["Jan", "Feb", "Mar", "Apr", "May"]},
+   {"table": "T1", "style": "borderless", "rect": [380, 86, 690], "size": 9,
+    "rows": [["Site", "Trucks", "Staff"], ["Harbour", "14", "38"], ["Ridge", "9", "21"], ["Valley", "11", "27"], ["Mill", "6", "15"]]},
+   {"para": "p1", "rect": [380, 230, 690], "size": 11,
+    "s": ["Deliveries rose in four of the five months.", "The harbour site carried most of the load.", "Staffing stayed flat across the quarter."]},
+   {"decoy": "logo", "rect": [596, 356, 700, 392], "word": "NORDA"}
+  ]},
+  {"items": [
+   {"decoy": "band", "rect": [0, 0, 720, 14]},
+   {"text": "Field photos and process", "at": [36, 26], "size": 20},
+   {"figure": "F2", "body": "photo", "rect": [40, 72, 300, 300], "seed": 11},
+   {"figure": "F3", "body": "flow", "rect": [330, 86, 690, 150], "labels": ["Collect", "Sort", "Weigh", "Ship"]},
+   {"figure": "F4", "body": "line", "rect": [330, 180, 690, 372], "data": [4, 6, 5, 9, 8, 12, 11]},
+   {"decoy": "icon", "rect": [40, 318, 98, 376], "color": [80, 150, 120]}
+  ]},
+  {"items": [
+   {"text": "Where the budget goes", "at": [36, 22], "size": 20},
+   {"figure": "F5", "body": "pie", "rect": [40, 76, 330, 296], "data": [42, 23, 19, 16], "labels": ["Fuel", "Wages", "Repairs", "Rent"]},
+   {"table": "T2", "style": "ruled", "rect": [370, 78, 690], "size": 9,
+    "rows": [["Item", "2025", "2026", "Change"], ["Fuel", "410", "455", "+11%"], ["Wages", "230", "238", "+3%"], ["Repairs", "190", "171", "-10%"], ["Rent", "160", "160", "0%"], ["Total", "990", "1024", "+3%"]]},
+   {"decoy": "textbox", "rect": [370, 250, 690, 336], "size": 10,
+    "s": ["Key point: fuel is still the largest cost.", "Repairs fell after the new depot opened."]},
+   {"decoy": "logo", "rect": [36, 350, 150, 390], "word": "NORDA", "color": [60, 110, 170]}
+  ]}
+ ],
+ "cases": [{"id": "c01", "select": "p1"}]
+}

@@ -18,13 +18,29 @@ MOCK_PICK_DELAY (s) delays every pick reply. MOCK_PICK_HEADER (JSON) adds pypdfi
 header. MOCK_RUN_TAG_FILE: a file the harness rewrites before each CLI run; its content is logged as "run" on every request record, so
 warm-up and measured requests can be told apart without any field from the app (phase5-parts.md A3.3).
 Every pick also logs {"event": "pick_reply", t0, t1, key, result, n_letters}. Non-pick /api/chat requests (load-only prewarm) get an
-empty successful reply. Cassettes hold hashes and letter logprobs only: no prompt, image or model text."""
-import base64, hashlib, io, json, math, os, socket, threading, time, urllib.parse, urllib.request
+empty successful reply. Cassettes hold hashes and letter logprobs only: no prompt, image or model text.
+
+Block-kind requests (docs/contracts/phase6-block-classifier.md 12.4): an image /api/chat whose prompt is the stage C KIND_PROMPT (its
+sha256 is in MOCK_KIND_PROMPT_SHA256, comma-separated, or, without that, the prompt names the fixed options: running text, table and
+chart/plot) is a *kind* request. It is answered exactly like a pick, but from the MOCK_KIND* settings (MOCK_KIND none | replay |
+proxy | fixed | malformed | status:NNN | reset, MOCK_KIND_CASSETTE, MOCK_KIND_UPSTREAM, MOCK_KIND_TOP_LOGPROBS, MOCK_KIND_DELAY,
+MOCK_KIND_HEADER) and its own cassette, and logs {"event": "kind_reply", ..., "prompt_sha", "png_sha"} (hashes only). The cassette key
+is the pick key (model, prompt, crop PNG sha256)."""
+import base64, hashlib, io, json, math, os, re, socket, threading, time, urllib.parse, urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = os.environ.get("MOCK_LOG", "/tmp/mock_llm.jsonl")
 def cfg(k, d): return os.environ.get(k, d)
 LETTERS = [chr(c) for c in range(ord("A"), ord("P") + 1)]
-_CAS_LOCK = threading.Lock(); _CAS = {"header": {}, "entries": {}}
+_CAS_LOCK = threading.Lock(); _CAS = {"header": {}, "entries": {}}; _KCAS = {"header": {}, "entries": {}}
+KIND_HINT = re.compile(r"running text", re.I)
+
+
+def is_kind_prompt(prompt):
+    """True for the stage C KIND_PROMPT (by sha256 when MOCK_KIND_PROMPT_SHA256 is set, else by its fixed option words)."""
+    shas = [x.strip() for x in cfg("MOCK_KIND_PROMPT_SHA256", "").split(",") if x.strip()]
+    if shas: return hashlib.sha256((prompt or "").encode()).hexdigest() in shas
+    p = prompt or ""
+    return bool(KIND_HINT.search(p) and re.search(r"\btable\b", p, re.I) and re.search(r"\b(chart|plot)\b", p, re.I))
 
 
 def pick_key(model, prompt, png):
@@ -67,16 +83,17 @@ def chat_reply(model, top):
     return out
 
 
-def cas_load(path):
+def cas_load(path, cas=None):
+    cas = _CAS if cas is None else cas
     try:
         d = json.load(open(path))
-        if isinstance(d, dict) and isinstance(d.get("entries"), dict): _CAS.update(header=d.get("header") or {}, entries=d["entries"])
+        if isinstance(d, dict) and isinstance(d.get("entries"), dict): cas.update(header=d.get("header") or {}, entries=d["entries"])
     except (OSError, ValueError): pass
 
 
-def cas_save(path):
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f: json.dump({"header": _CAS["header"], "entries": dict(sorted(_CAS["entries"].items()))}, f, indent=1, sort_keys=True); f.write("\n")
+def cas_save(path, cas=None):
+    cas = _CAS if cas is None else cas; tmp = path + ".tmp"
+    with open(tmp, "w") as f: json.dump({"header": cas["header"], "entries": dict(sorted(cas["entries"].items()))}, f, indent=1, sort_keys=True); f.write("\n")
     os.replace(tmp, path)
 
 
@@ -91,6 +108,7 @@ def loopback(url):
 
 
 if cfg("MOCK_PICK", "none") in ("replay", "proxy") and cfg("MOCK_PICK_CASSETTE", ""): cas_load(cfg("MOCK_PICK_CASSETTE", ""))
+if cfg("MOCK_KIND", "none") in ("replay", "proxy") and cfg("MOCK_KIND_CASSETTE", ""): cas_load(cfg("MOCK_KIND_CASSETTE", ""), _KCAS)
 def img_dims(msgs):
     out = []
     for m in msgs:
@@ -138,11 +156,14 @@ class H(BaseHTTPRequestHandler):
     def _api_chat(self, req):
         model = req.get("model"); pp = pick_parts(req)
         if pp is None: return self._json({"model": model, "created_at": "1970-01-01T00:00:00Z", "message": {"role": "assistant", "content": ""}, "done": True, "done_reason": "load", "response": ""})
-        t0 = time.time(); mode = cfg("MOCK_PICK", "none"); key = pick_key(model, *pp); result = mode; top = None; n_letters = None
-        time.sleep(float(cfg("MOCK_PICK_DELAY", "0") or 0))
+        kind = is_kind_prompt(pp[0]); P = "MOCK_KIND" if kind else "MOCK_PICK"; CAS = _KCAS if kind else _CAS
+        t0 = time.time(); mode = cfg(P, "none"); key = pick_key(model, *pp); result = mode; top = None; n_letters = None
+        time.sleep(float(cfg(P + "_DELAY", "0") or 0))
         def done():
-            self._log({"t": time.time(), "event": "pick_reply", "t0": t0, "t1": time.time(), "key": key, "result": result, "n_letters": n_letters,
-                       "logprobs_req": req.get("logprobs"), "top_logprobs_req": req.get("top_logprobs"), "options": req.get("options"), "stream": req.get("stream")})
+            rec = {"t": time.time(), "event": "kind_reply" if kind else "pick_reply", "t0": t0, "t1": time.time(), "key": key, "result": result, "n_letters": n_letters,
+                   "logprobs_req": req.get("logprobs"), "top_logprobs_req": req.get("top_logprobs"), "options": req.get("options"), "stream": req.get("stream")}
+            if kind: rec.update(prompt_sha=hashlib.sha256((pp[0] or "").encode()).hexdigest(), png_sha=hashlib.sha256(pp[1]).hexdigest(), keep_alive=req.get("keep_alive"), model=model)
+            self._log(rec)
         try:
             if mode == "reset":
                 try: self.connection.shutdown(socket.SHUT_RDWR)
@@ -154,15 +175,15 @@ class H(BaseHTTPRequestHandler):
             if mode.startswith("status:"):
                 return self._json({"error": "mock status"}, int(mode.split(":", 1)[1]))
             if mode == "fixed":
-                top = json.loads(cfg("MOCK_PICK_TOP_LOGPROBS", "[]"))
+                top = json.loads(cfg(P + "_TOP_LOGPROBS", "[]"))
             elif mode == "replay":
-                e = _CAS["entries"].get(key)
+                e = CAS["entries"].get(key)
                 if e is None: result = "miss"
                 else: result = "hit"; top = e.get("top_logprobs")
             elif mode == "proxy":
-                up = cfg("MOCK_PICK_UPSTREAM", "http://127.0.0.1:11434")
+                up = cfg(P + "_UPSTREAM", "http://127.0.0.1:11434")
                 if not loopback(up): result = "upstream-refused"; return self._json({"error": "upstream must be loopback"}, 502)
-                try: r = upstream_json(up, "/api/chat", json.dumps(req).encode(), timeout=float(cfg("MOCK_PICK_UPSTREAM_TIMEOUT", "120")))
+                try: r = upstream_json(up, "/api/chat", json.dumps(req).encode(), timeout=float(cfg(P + "_UPSTREAM_TIMEOUT", "120")))
                 except Exception as ex: result = "upstream-error:" + type(ex).__name__; return self._json({"error": "upstream failed"}, 502)
                 lp = r.get("logprobs") if isinstance(r, dict) else None
                 raw = (lp[0] or {}).get("top_logprobs") if isinstance(lp, list) and lp and isinstance(lp[0], dict) else None
@@ -170,17 +191,18 @@ class H(BaseHTTPRequestHandler):
                 else:
                     top = letter_entries(raw); result = "recorded"
                     with _CAS_LOCK:
-                        _CAS["entries"][key] = {"top_logprobs": top}
-                        if not _CAS["header"].get("recorded_at"):
+                        CAS["entries"][key] = {"top_logprobs": top}
+                        if not CAS["header"].get("recorded_at"):
                             hdr = {"model": model, "model_digest": None, "ollama_version": None, "pypdfium2": None, "pillow": None, "commit": None, "src_sha": None}
                             try: hdr["ollama_version"] = upstream_json(up, "/api/version", timeout=5).get("version")
                             except Exception: pass
                             try: hdr["model_digest"] = next((m.get("digest") for m in upstream_json(up, "/api/tags", timeout=5).get("models", []) if m.get("name") == model or m.get("model") == model), None)
                             except Exception: pass
-                            try: hdr.update({k: v for k, v in json.loads(cfg("MOCK_PICK_HEADER", "{}")).items() if k in ("pypdfium2", "pillow", "commit", "src_sha")})
+                            try: hdr.update({k: v for k, v in json.loads(cfg(P + "_HEADER", "{}")).items() if k in ("pypdfium2", "pillow", "commit", "src_sha", "figcls_model")})
                             except ValueError: pass
-                            hdr["recorded_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()); _CAS["header"] = hdr
-                        if cfg("MOCK_PICK_CASSETTE", ""): cas_save(cfg("MOCK_PICK_CASSETTE", ""))
+                            if kind: hdr["prompt_sha"] = hashlib.sha256((pp[0] or "").encode()).hexdigest()
+                            hdr["recorded_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()); CAS["header"] = hdr
+                        if cfg(P + "_CASSETTE", ""): cas_save(cfg(P + "_CASSETTE", ""), CAS)
             elif mode != "none":
                 result = "unknown-mode"
             n_letters = sum(1 for e in top or [] if isinstance(e, dict) and str(e.get("token", "")).strip() in LETTERS) if top is not None else None

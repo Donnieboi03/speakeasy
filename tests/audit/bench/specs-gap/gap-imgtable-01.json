@@ -1,0 +1,332 @@
+{
+ "doc_id": "gap-imgtable-01",
+ "page": [
+  595.3,
+  841.9
+ ],
+ "size": 10,
+ "pages": [
+  {
+   "items": [
+    {
+     "text": "4 Depot stock",
+     "at": [
+      56,
+      58
+     ],
+     "size": 13
+    },
+    {
+     "para": "p1",
+     "rect": [
+      56,
+      82,
+      539
+     ],
+     "s": [
+      "Stock was counted by hand at every depot on the first of May.",
+      "The counts were typed into a sheet and pasted into this report as a picture."
+     ]
+    },
+    {
+     "table": "T1",
+     "style": "ruled",
+     "image": true,
+     "rect": [
+      110,
+      130,
+      485
+     ],
+     "size": 9,
+     "gap": "image-table",
+     "rows": [
+      [
+       "Depot",
+       "Crates",
+       "Pallets"
+      ],
+      [
+       "North",
+       "42",
+       "12"
+      ],
+      [
+       "Quay",
+       "37",
+       "9"
+      ],
+      [
+       "Inland",
+       "55",
+       "16"
+      ],
+      [
+       "Ridge",
+       "29",
+       "7"
+      ]
+     ],
+     "caption": {
+      "text": [
+       "Table 2: Depot stock at the start of May."
+      ],
+      "style": "standard",
+      "label": "Table 2"
+     }
+    },
+    {
+     "para": "p2",
+     "rect": [
+      56,
+      290,
+      539
+     ],
+     "s": [
+      "Inland holds the most crates by a wide margin.",
+      "Ridge is due a restock before the end of the month."
+     ]
+    },
+    {
+     "figure": "F1",
+     "body": "flow",
+     "rect": [
+      76,
+      346,
+      520,
+      400
+     ],
+     "labels": [
+      "Count",
+      "Type",
+      "Check",
+      "Report"
+     ]
+    },
+    {
+     "para": "p3",
+     "rect": [
+      56,
+      420,
+      539
+     ],
+     "s": [
+      "Each count passes through four steps before it is reported.",
+      "A second person checks every figure against the shelf labels."
+     ]
+    },
+    {
+     "table": "T2",
+     "style": "grid",
+     "image": true,
+     "rect": [
+      110,
+      480,
+      485
+     ],
+     "size": 9,
+     "gap": "image-table",
+     "rows": [
+      [
+       "Halle",
+       "Kisten",
+       "Paletten"
+      ],
+      [
+       "Ost",
+       "61",
+       "18"
+      ],
+      [
+       "Mitte",
+       "47",
+       "13"
+      ],
+      [
+       "Hafen",
+       "33",
+       "11"
+      ],
+      [
+       "Bahn",
+       "25",
+       "6"
+      ]
+     ],
+     "caption": {
+      "text": [
+       "Tabelle 4: Lagerbestand je Halle."
+      ],
+      "style": "tabelle",
+      "label": "Tabelle 4"
+     }
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "para": "p4",
+     "rect": [
+      56,
+      64,
+      539
+     ],
+     "s": [
+      "The yard teams keep their own tally of empty bins.",
+      "Their sheet uses the older report style."
+     ]
+    },
+    {
+     "table": "T3",
+     "style": "borderless",
+     "image": true,
+     "rect": [
+      130,
+      110,
+      465
+     ],
+     "size": 9,
+     "gap": "image-table",
+     "rows": [
+      [
+       "Yard",
+       "Bins",
+       "Empty"
+      ],
+      [
+       "Alder",
+       "80",
+       "14"
+      ],
+      [
+       "Birch",
+       "64",
+       "9"
+      ],
+      [
+       "Cedar",
+       "72",
+       "21"
+      ],
+      [
+       "Elm",
+       "58",
+       "5"
+      ]
+     ],
+     "caption": {
+      "text": [
+       "TABLE II",
+       "Empty bins per yard."
+      ],
+      "break": true,
+      "style": "table-roman",
+      "label": "TABLE II"
+     }
+    },
+    {
+     "para": "p5",
+     "rect": [
+      56,
+      290,
+      539
+     ],
+     "s": [
+      "Cedar has the most empty bins this week.",
+      "Elm will receive the next delivery of bins."
+     ]
+    },
+    {
+     "decoy": "band",
+     "rect": [
+      56,
+      780,
+      539,
+      792
+     ],
+     "color": [
+      70,
+      110,
+      170
+     ]
+    }
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "id": "c01",
+   "select": "p2"
+  },
+  {
+   "id": "c02",
+   "select": "p3"
+  },
+  {
+   "id": "c03",
+   "select": "p5"
+  },
+  {
+   "id": "r01",
+   "select": "T1:caption",
+   "script": [
+    {
+     "text": "North holds 42 crates and 12 pallets.",
+     "row": 1
+    },
+    {
+     "text": "Quay holds 37 crates and 9 pallets.",
+     "row": 2
+    },
+    {
+     "text": "Inland holds 55 crates and 16 pallets.",
+     "row": 3
+    },
+    {
+     "text": "Ridge holds 29 crates and 7 pallets.",
+     "row": 4
+    }
+   ]
+  },
+  {
+   "id": "r02",
+   "select": "T2:caption",
+   "script": [
+    {
+     "text": "Halle Ost has 61 Kisten and 18 Paletten.",
+     "row": 1
+    },
+    {
+     "text": "Halle Mitte has 47 Kisten and 13 Paletten.",
+     "row": 2
+    },
+    {
+     "text": "Halle Hafen has 33 Kisten and 11 Paletten.",
+     "row": 3
+    }
+   ]
+  },
+  {
+   "id": "r03",
+   "select": "T3:caption",
+   "script": [
+    {
+     "text": "Alder has 80 bins and 14 are empty.",
+     "row": 1
+    },
+    {
+     "text": "Birch has 64 bins and 9 are empty.",
+     "row": 2
+    },
+    {
+     "text": "Cedar has 72 bins and 21 are empty.",
+     "row": 3
+    },
+    {
+     "text": "Elm has 58 bins and 5 are empty.",
+     "row": 4
+    }
+   ]
+  }
+ ]
+}

@@ -16,6 +16,7 @@ import hashlib, json, os, re, sys, unicodedata
 
 GAP = 10.0
 SLACK = 1.0
+GAP_KEYS = ("gap", "caption_style", "raster", "body", "table_style", "polluted", "decoy")  # phase6-block-classifier.md 12.2 block flags
 
 
 def r2(v): return round(float(v) + 0.0, 2)
@@ -116,9 +117,13 @@ def build(spec_path, out):
                     i, j = b["lines"]; bb = union([L[x][0] for x in range(i, j + 1)])
                 e = {"id": f"p{pa['n']}b{k + 1}", "kind": b["kind"], "bbox": bb}
                 if b.get("label"): e["label"] = b["label"]
+                e.update({x: b[x] for x in GAP_KEYS if x in b})
                 blocks.append(e)
             keep = [r for r, t in L if not any(centre_in(r, g) for g in regions)]
-            pages.append({"n": pa["n"], "w": r2(pg.width), "h": r2(pg.height), "blocks_scored": True, "lines": keep, "blocks": blocks})
+            P = {"n": pa["n"], "w": r2(pg.width), "h": r2(pg.height), "blocks_scored": pa.get("blocks_scored", True), "lines": keep, "blocks": blocks}
+            if "kind_scored" in pa:
+                P.update(kind_scored=pa["kind_scored"], scan=False, prose_decoys=[L[x][0] for x in pa.get("prose_decoys", [])])
+            pages.append(P)
             figs = {b.get("label"): b for b in blocks if b["kind"] in ("figure", "table")}
             for pt in spec.get("parts", []):
                 if pt["page"] != pa["n"]: continue
@@ -156,6 +161,7 @@ def build(spec_path, out):
           "reviewed_by_human": bool(spec.get("reviewed_by_human", False)), "license": spec["license"], "pages": pages,
           "sentences": sentences, "parts": parts, "features": spec.get("features", {}),
           "source": {k: spec[k] for k in ("arxiv", "title", "license_url") if k in spec}}
+    if spec.get("family"): gt = dict({"schema": gt["schema"], "family": spec["family"]}, **gt, areas=[])
     with open(os.path.join(out, "gt.json"), "w", encoding="utf-8") as f: json.dump(gt, f, indent=1); f.write("\n")
     with open(os.path.join(out, "cases.json"), "w", encoding="utf-8") as f: json.dump(cases, f, indent=1); f.write("\n")
     return gt, cases

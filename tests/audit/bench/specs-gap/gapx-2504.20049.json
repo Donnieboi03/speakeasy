@@ -1,0 +1,122 @@
+{
+ "license": "CC-BY-4.0",
+ "license_url": "https://creativecommons.org/licenses/by/4.0/",
+ "source": "arxiv",
+ "family": "gap",
+ "doc_id": "gapx-2504.20049",
+ "arxiv": "2504.20049v1",
+ "title": "It's the same but not the same: Do LLMs distinguish Spanish varieties?",
+ "authors": "Marina Mayor-Rocher, Cristina Pozo, Nina Melero, Gonzalo Martínez, María Grandury, Pedro Reviriego",
+ "url": "https://arxiv.org/pdf/2504.20049v1",
+ "pdf_sha256": "6e9ee0972e0932c99b3d26e2fb9a8618edfbf06b883c8c3c3f872aa76d43cb24",
+ "features": {
+  "columns": 2,
+  "multi_panel": false
+ },
+ "pages": [
+  {
+   "n": 2,
+   "blocks_scored": false,
+   "kind_scored": true,
+   "blocks": [
+    {
+     "kind": "table",
+     "region": [
+      349,
+      196,
+      488,
+      296
+     ],
+     "label": "Tabla 1",
+     "gap": "lexicon",
+     "caption_style": "tabla",
+     "raster": false,
+     "table_style": "grid"
+    },
+    {
+     "kind": "caption",
+     "lines": [
+      91,
+      91
+     ],
+     "label": "Tabla 1"
+    }
+   ]
+  },
+  {
+   "n": 8,
+   "blocks_scored": false,
+   "kind_scored": true,
+   "blocks": [
+    {
+     "kind": "figure",
+     "region": [
+      119,
+      69,
+      476,
+      308
+     ],
+     "label": "Figura 1",
+     "gap": "lexicon",
+     "caption_style": "figura",
+     "raster": true,
+     "body": "raster-chart"
+    },
+    {
+     "kind": "caption",
+     "lines": [
+      0,
+      0
+     ],
+     "label": "Figura 1"
+    },
+    {
+     "kind": "figure",
+     "region": [
+      127,
+      323,
+      468,
+      495
+     ],
+     "label": "Figura 2",
+     "gap": "lexicon",
+     "caption_style": "figura",
+     "raster": true,
+     "body": "raster-chart"
+    },
+    {
+     "kind": "caption",
+     "lines": [
+      1,
+      1
+     ],
+     "label": "Figura 2"
+    },
+    {
+     "kind": "figure",
+     "region": [
+      116,
+      516,
+      479,
+      735
+     ],
+     "label": "Figura 3",
+     "gap": "lexicon",
+     "caption_style": "figura",
+     "raster": true,
+     "body": "raster-chart"
+    },
+    {
+     "kind": "caption",
+     "lines": [
+      2,
+      3
+     ],
+     "label": "Figura 3"
+    }
+   ]
+  }
+ ],
+ "parts": [],
+ "cases": []
+}

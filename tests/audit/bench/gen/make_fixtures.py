@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 """Build every spec of a set into fixtures and write the manifest; --check regenerates into a temp dir and diffs.
 
-  make_fixtures.py [--set public|hidden] [--holdout DIR] [--check] [--only DOC_ID]
+  make_fixtures.py [--set public|hidden] [--family default|gap] [--holdout DIR] [--check] [--only DOC_ID]
 
 public: specs/*.json -> fixtures/public/<doc_id>/, manifest fixtures/public/manifest.json
 hidden: <holdout>/specs/*.json -> <holdout>/fixtures/<doc_id>/, manifest <holdout>/manifest.json
+--family gap (phase6-block-classifier.md 12.2): specs-gap/ -> fixtures/public-gap/ and <holdout>/gap/specs -> <holdout>/gap/fixtures,
+each with its own manifest.json. Gap synthetic specs (with "pages") go through gen/gap_synth.py, which also writes area-<id>.png
+files; the manifest hashes every file of a fixture dir.
 Synthetic specs (with "flow") go through gen/synth.py; real specs ("source": "arxiv") through gen/snap_gt.py, which reads the
 committed, unmodified doc.pdf (downloaded from the spec's url when missing, then checked against pdf_sha256)."""
 import argparse, filecmp, hashlib, json, os, shutil, sys, tempfile, urllib.request
@@ -16,16 +19,24 @@ FILES = ("doc.pdf", "gt.json", "cases.json")
 def sha(p): return hashlib.sha256(open(p, "rb").read()).hexdigest()
 
 
-def paths(set_name, holdout):
+def paths(set_name, holdout, family="default"):
+    if family == "gap":
+        if set_name == "public": return os.path.join(BENCH, "specs-gap"), os.path.join(BENCH, "fixtures", "public-gap"), os.path.join(BENCH, "fixtures", "public-gap", "manifest.json")
+        g = os.path.join(holdout, "gap"); return os.path.join(g, "specs"), os.path.join(g, "fixtures"), os.path.join(g, "manifest.json")
     if set_name == "public": return os.path.join(BENCH, "specs"), os.path.join(BENCH, "fixtures", "public"), os.path.join(BENCH, "fixtures", "public", "manifest.json")
     return os.path.join(holdout, "specs"), os.path.join(holdout, "fixtures"), os.path.join(holdout, "manifest.json")
+
+
+def doc_files(d):
+    """The three fixture files plus any area capture PNGs (gap family)."""
+    return FILES + tuple(sorted(f for f in os.listdir(d) if f.startswith("area-") and f.endswith(".png"))) if os.path.isdir(d) else FILES
 
 
 def manifest(set_name, fx, doc_ids):
     docs = []
     for d in sorted(doc_ids):
         gt = json.load(open(os.path.join(fx, d, "gt.json")))
-        docs.append({"doc_id": d, "subset": gt["subset"], "sha256": {f: sha(os.path.join(fx, d, f)) for f in FILES}})
+        docs.append({"doc_id": d, "subset": gt["subset"], "sha256": {f: sha(os.path.join(fx, d, f)) for f in doc_files(os.path.join(fx, d))}})
     body = json.dumps(docs, sort_keys=True, separators=(",", ":"))
     return {"schema": "speakeasy-bench-manifest/1", "set": set_name, "docs": docs, "manifest_sha256": hashlib.sha256(body.encode()).hexdigest()}
 
@@ -44,6 +55,9 @@ def build_one(spec_path, outdir, committed_pdf=None):
         if sha(dst) != spec["pdf_sha256"]: raise SystemExit(f"{spec['doc_id']}: downloaded PDF sha256 differs from pdf_sha256")
         if os.path.getsize(dst) > 8 * 1024 * 1024: raise SystemExit(f"{spec['doc_id']}: PDF larger than 8 MB")
         snap_gt.build(spec_path, outdir)
+    elif "pages" in spec:
+        import gap_synth
+        gap_synth.build(spec_path, outdir)
     else:
         import synth
         synth.build(spec_path, outdir)
@@ -54,11 +68,12 @@ def main():
     ap = argparse.ArgumentParser(); ap.add_argument("--set", default="public", choices=("public", "hidden"))
     ap.add_argument("--holdout", default=os.environ.get("SPEAKEASY_HOLDOUT", os.path.expanduser("~/speakeasy-holdout/bench")))
     ap.add_argument("--check", action="store_true"); ap.add_argument("--only")
+    ap.add_argument("--family", default="default", choices=("default", "gap"))
     a = ap.parse_args()
     import importlib.util
     if importlib.util.find_spec("reportlab") is None:
         print("reportlab not importable", file=sys.stderr); sys.exit(2)
-    specs_dir, fx, man = paths(a.set, a.holdout)
+    specs_dir, fx, man = paths(a.set, a.holdout, a.family)
     if not os.path.isdir(specs_dir): print(f"no specs dir {specs_dir}", file=sys.stderr); sys.exit(2)
     specs = sorted(os.path.join(specs_dir, f) for f in os.listdir(specs_dir) if f.endswith(".json"))
     if a.check:
@@ -69,9 +84,10 @@ def main():
                 d = json.load(open(sp))["doc_id"]; ids.append(d)
                 if a.only and d != a.only: continue
                 build_one(sp, os.path.join(tmp, d), committed_pdf=os.path.join(fx, d, "doc.pdf"))
-                for f in FILES:
+                for f in sorted(set(doc_files(os.path.join(tmp, d))) | set(doc_files(os.path.join(fx, d)))):
                     c = os.path.join(fx, d, f)
-                    if not os.path.exists(c) or not filecmp.cmp(c, os.path.join(tmp, d, f), shallow=False): drift.append(f"{d}/{f}")
+                    t = os.path.join(tmp, d, f)
+                    if not os.path.exists(c) or not os.path.exists(t) or not filecmp.cmp(c, t, shallow=False): drift.append(f"{d}/{f}")
             if not a.only and os.path.exists(man):
                 if json.load(open(man)) != manifest(a.set, fx, ids): drift.append("manifest.json")
             elif not a.only: drift.append("manifest.json (missing)")

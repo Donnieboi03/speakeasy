@@ -1,0 +1,371 @@
+{
+ "doc_id": "gap-report-01",
+ "page": [
+  595.3,
+  841.9
+ ],
+ "size": 10,
+ "pages": [
+  {
+   "items": [
+    {
+     "text": "1 Operations summary",
+     "at": [
+      56,
+      58
+     ],
+     "size": 13
+    },
+    {
+     "para": "p1",
+     "rect": [
+      56,
+      82,
+      539
+     ],
+     "decoy": true,
+     "s": [
+      "Table 2 shows the totals for each depot in the spring.",
+      "The numbers are drawn from the weekly logs kept by each shift lead.",
+      "They have not yet been audited by the finance team."
+     ]
+    },
+    {
+     "figure": "F1",
+     "body": "line",
+     "rect": [
+      120,
+      136,
+      475,
+      300
+     ],
+     "data": [
+      31,
+      35,
+      33,
+      40,
+      38,
+      44,
+      47
+     ]
+    },
+    {
+     "para": "p2",
+     "rect": [
+      56,
+      316,
+      539
+     ],
+     "s": [
+      "Volumes climbed steadily through the first half of the year.",
+      "A short dip in March matched the planned maintenance window.",
+      "By June the network was moving more freight than ever before."
+     ]
+    },
+    {
+     "figure": "F2",
+     "body": "bars",
+     "rect": [
+      56,
+      382,
+      290,
+      540
+     ],
+     "data": [
+      14,
+      22,
+      17,
+      25
+     ],
+     "labels": [
+      "Mon",
+      "Tue",
+      "Wed",
+      "Thu"
+     ],
+     "gap": "lexicon",
+     "caption": {
+      "text": [
+       "Exhibit 3: Weekly deliveries by depot."
+      ],
+      "style": "exhibit",
+      "label": "Exhibit 3"
+     }
+    },
+    {
+     "table": "T1",
+     "style": "ruled",
+     "rect": [
+      320,
+      382,
+      539
+     ],
+     "size": 8,
+     "gap": "lexicon",
+     "rows": [
+      [
+       "Depot",
+       "Bays",
+       "Staff"
+      ],
+      [
+       "North",
+       "12",
+       "40"
+      ],
+      [
+       "Quay",
+       "8",
+       "26"
+      ],
+      [
+       "Inland",
+       "10",
+       "31"
+      ]
+     ],
+     "caption": {
+      "text": [
+       "TABLE IV",
+       "Depot capacity and staff."
+      ],
+      "break": true,
+      "style": "table-roman",
+      "label": "TABLE IV"
+     }
+    },
+    {
+     "para": "p3",
+     "rect": [
+      56,
+      600,
+      539
+     ],
+     "decoy": true,
+     "s": [
+      "Chart 1 of the plan lists every new route for the autumn.",
+      "Each route was scored for cost, distance and expected demand.",
+      "The three best routes start in October."
+     ]
+    },
+    {
+     "decoy": "logo",
+     "rect": [
+      430,
+      14,
+      539,
+      46
+     ],
+     "word": "NORDA"
+    }
+   ]
+  },
+  {
+   "items": [
+    {
+     "para": "p4",
+     "rect": [
+      56,
+      64,
+      539
+     ],
+     "s": [
+      "Cost per crate is now the main measure the board watches.",
+      "Fuel and wages make up most of that cost.",
+      "Rent is fixed until the leases end."
+     ]
+    },
+    {
+     "figure": "F3",
+     "body": "pie",
+     "rect": [
+      150,
+      116,
+      445,
+      270
+     ],
+     "data": [
+      45,
+      30,
+      15,
+      10
+     ],
+     "labels": [
+      "Fuel",
+      "Wages",
+      "Rent",
+      "Other"
+     ]
+    },
+    {
+     "para": "p5",
+     "rect": [
+      56,
+      286,
+      539
+     ],
+     "s": [
+      "The split between fuel and wages has barely moved in two years.",
+      "Small gains came from better routing rather than cheaper fuel."
+     ]
+    },
+    {
+     "figure": "F4",
+     "body": "scatter",
+     "rect": [
+      56,
+      350,
+      290,
+      500
+     ],
+     "seed": 9,
+     "n": 26,
+     "gap": "lexicon",
+     "caption": {
+      "text": [
+       "Fig. S2. Sensor drift over the trial."
+      ],
+      "style": "fig-s",
+      "label": "Fig. S2"
+     }
+    },
+    {
+     "figure": "F5",
+     "body": "bars",
+     "rect": [
+      320,
+      350,
+      539,
+      500
+     ],
+     "data": [
+      120,
+      95,
+      140,
+      80
+     ],
+     "gap": "lexicon",
+     "caption": {
+      "text": [
+       "Fig. 3. Response time per request type."
+      ],
+      "style": "fig",
+      "label": "Fig. 3",
+      "polluted": "ygy"
+     }
+    },
+    {
+     "table": "T2",
+     "style": "grid",
+     "rect": [
+      56,
+      560,
+      290
+     ],
+     "size": 8,
+     "gap": "lexicon",
+     "rows": [
+      [
+       "Shift",
+       "Drivers",
+       "Loaders"
+      ],
+      [
+       "Early",
+       "14",
+       "22"
+      ],
+      [
+       "Day",
+       "18",
+       "30"
+      ],
+      [
+       "Late",
+       "11",
+       "16"
+      ]
+     ],
+     "caption": {
+      "text": [
+       "Exhibit 4: Staffing by shift."
+      ],
+      "style": "exhibit",
+      "label": "Exhibit 4"
+     }
+    },
+    {
+     "table": "T3",
+     "style": "ruled",
+     "rect": [
+      320,
+      560,
+      539
+     ],
+     "size": 8,
+     "gap": "standard",
+     "rows": [
+      [
+       "Route",
+       "Litres",
+       "Km"
+      ],
+      [
+       "R1",
+       "310",
+       "820"
+      ],
+      [
+       "R2",
+       "275",
+       "760"
+      ],
+      [
+       "R3",
+       "198",
+       "540"
+      ]
+     ],
+     "caption": {
+      "text": [
+       "Table 1: Fuel use per route."
+      ],
+      "style": "standard",
+      "label": "Table 1"
+     }
+    },
+    {
+     "para": "p6",
+     "rect": [
+      56,
+      680,
+      539
+     ],
+     "decoy": true,
+     "s": [
+      "Figure skating is popular in the northern towns.",
+      "Several drivers coach local clubs at the weekend."
+     ]
+    }
+   ]
+  }
+ ],
+ "cases": [
+  {
+   "id": "c01",
+   "select": "p1"
+  },
+  {
+   "id": "c02",
+   "select": "p2"
+  },
+  {
+   "id": "c03",
+   "select": "p4"
+  },
+  {
+   "id": "c04",
+   "select": "p5"
+  }
+ ]
+}

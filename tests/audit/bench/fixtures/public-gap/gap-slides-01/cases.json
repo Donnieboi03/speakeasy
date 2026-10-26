@@ -1,0 +1,50 @@
+[
+ {
+  "case_id": "gap-slides-01/c01",
+  "doc_id": "gap-slides-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Deliveries rose in four of the five months. The harbour",
+    "rect": [
+     380.0,
+     230.0,
+     679.74,
+     241.0
+    ]
+   },
+   {
+    "text": "site carried most of the load. Staffing stayed flat across",
+    "rect": [
+     380.0,
+     244.3,
+     686.45,
+     255.3
+    ]
+   },
+   {
+    "text": "the quarter.",
+    "rect": [
+     380.0,
+     258.6,
+     445.87,
+     269.6
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "Deliveries rose in four of the five months."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "The harbour site carried most of the load."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "Staffing stayed flat across the quarter."
+   }
+  ]
+ }
+]

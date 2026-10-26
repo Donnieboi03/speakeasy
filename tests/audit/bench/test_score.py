@@ -421,6 +421,200 @@ def test_out_of_scope_is_a_pick_outcome():
     assert S.pick_summary(ev, {"hits": 0, "n": 0, "good": 0, "ovals": 0})["by_outcome"]["out-of-scope"] == 1
 
 
+# ---------------------------------------------------------------- kind (phase6-block-classifier.md 12.3)
+def gblk(i, kind, bbox, gap="uncaptioned", **kw):
+    return dict({"id": i, "kind": kind, "bbox": bbox, "gap": gap, "caption_style": "none", "raster": False}, **kw)
+
+
+def kpage(blocks, decoys=()):
+    return {"n": 1, "w": 720, "h": 405, "blocks_scored": True, "kind_scored": True, "scan": False, "lines": [], "blocks": blocks, "prose_decoys": list(decoys)}
+
+
+def test_kind_match_at_half_iou_and_precision():
+    gt = {"pages": [kpage([gblk("f", "figure", [0, 0, 100, 100]), gblk("t", "table", [200, 0, 300, 100], gap="lexicon")])], "areas": []}
+    pr = {"d": {1: [{"kind": "figure", "bbox": [0, 0, 100, 50]}, {"kind": "table", "bbox": [200, 0, 300, 49]}]}}   # IoU 0.50 and 0.49
+    k = S.score_kind([("d", gt)], pr)
+    assert (k["score"], k["hits"], k["gt"], k["precision"], k["matched"], k["pred"]) == (50.0, 1, 2, 50.0, 1, 2), k
+    assert k["by_gap"]["uncaptioned"] == {"score": 100.0, "hits": 1, "n": 1} and k["by_gap"]["lexicon"]["score"] == 0.0, k["by_gap"]
+    assert k["unmatched"]["on_nothing"] == 1 and k["wrong_type"]["total"] == 0, k
+
+
+def test_kind_wrong_type_decoy_text_ignored_and_kind_src():
+    blocks = [gblk("f", "figure", [0, 0, 100, 100]), gblk("t", "table", [200, 0, 300, 100]),
+              {"id": "d", "kind": "decoration", "bbox": [400, 0, 480, 40], "decoy": "logo"}, {"id": "p", "kind": "paragraph", "bbox": [0, 200, 300, 260]},
+              {"id": "a", "kind": "other", "bbox": [400, 200, 600, 300]}]
+    pr = [{"kind": "table", "bbox": [0, 0, 100, 100], "kind_src": "classifier"},        # GT figure typed as table
+          {"kind": "table", "bbox": [200, 0, 300, 100], "kind_src": "classifier"},      # hit
+          {"kind": "figure", "bbox": [400, 0, 480, 40], "kind_src": "vlm"},             # on a logo
+          {"kind": "figure", "bbox": [10, 210, 120, 250], "kind_src": "classifier"},    # on prose
+          {"kind": "figure", "bbox": [400, 200, 600, 300]},                             # on an out-of-scope algorithm box: ignored
+          {"kind": "caption", "bbox": [0, 0, 100, 100]}]                                # not a kind prediction
+    k = S.score_kind([("d", {"pages": [kpage(blocks)], "areas": []})], {"d": {1: pr}})
+    assert k["wrong_type"] == {"figure_as_table": 1, "table_as_figure": 0, "total": 1}, k["wrong_type"]
+    assert k["spurious_on_decoy"] == 1 and k["unmatched"] == {"wrong_type": 1, "on_decoy": 1, "on_text": 1, "on_nothing": 0}, k["unmatched"]
+    assert k["ignored"] == 1 and k["pred"] == 4 and k["matched"] == 1 and k["precision"] == 25.0 and k["score"] == 50.0, k
+    assert k["by_kind_src"]["classifier"] == {"pred": 3, "matched": 1, "precision": 33.33} and k["by_kind_src"]["vlm"]["pred"] == 1, k["by_kind_src"]
+    assert k["by_kind"]["figure"]["score"] == 0.0 and k["by_kind"]["table"]["score"] == 100.0, k["by_kind"]
+
+
+def test_kind_one_to_one_and_unscored_pages():
+    gt = {"pages": [kpage([gblk("f", "figure", [0, 0, 100, 100])]), dict(kpage([gblk("g", "figure", [0, 0, 100, 100])]), n=2, kind_scored=False)], "areas": []}
+    pr = {"d": {1: [{"kind": "figure", "bbox": [0, 0, 100, 100]}, {"kind": "figure", "bbox": [0, 0, 100, 90]}], 2: [{"kind": "figure", "bbox": [500, 0, 600, 50]}]}}
+    k = S.score_kind([("d", gt)], pr)
+    assert k["hits"] == 1 and k["gt"] == 1 and k["pred"] == 2 and k["precision"] == 50.0, k      # duplicate box costs precision; page 2 unscored
+
+
+def test_kind_area_predictions_in_capture_pixels():
+    gt = {"pages": [], "areas": [{"id": "a1", "w": 1000, "h": 700, "kind_scored": True, "blocks": [gblk("a1b1", "figure", [40, 140, 480, 600], gap="no-text"),
+                                                                                                    gblk("a1b2", "table", [540, 160, 960, 620], gap="no-text")]}]}
+    ak = {"figure": [[42, 150, 470, 590]], "table": [], "outcomes": {"accepted": 1}, "candidates": 2, "ms": 30}
+    k = S.score_kind([("d", gt)], {}, {("d", "a1"): ak})
+    assert k["by_anchor"]["area"]["hits"] == 1 and k["by_anchor"]["area"]["gt"] == 2 and k["by_gap"]["no-text"] == {"score": 50.0, "hits": 1, "n": 2}, k
+    assert S.score_kind([("d", gt)], {}, {("d", "a1"): None})["hits"] == 0          # run without area_kinds: every area region missed
+    assert S.score_kind([("d", gt)], {}, {})["gt"] == 0                             # area case not run (--cases): not scored
+
+
+def test_kind_prose_decoys():
+    line = [56, 82, 400, 94]
+    gt = {"pages": [kpage([], decoys=[line, [56, 300, 400, 312]])], "areas": []}
+    pr = {"d": {1: [{"kind": "caption", "bbox": [56, 82, 400, 106]}, {"kind": "paragraph", "bbox": [56, 290, 500, 340]}]}}
+    pd = S.score_kind([("d", gt)], pr)["prose_decoys"]
+    assert pd == {"n": 2, "kept": 1, "broken": 1}, pd
+    pr = {"d": {1: [{"kind": "figure", "bbox": [0, 0, 600, 200]}]}}                 # a figure swallowing the decoy line breaks it too
+    assert S.score_kind([("d", gt)], pr)["prose_decoys"]["broken"] == 1
+
+
+def test_row_sentence_scoring():
+    snt = {"page": 1, "row_rect": [100, 200, 400, 212]}
+    row = {"cue_kind": "text_band", "doc": {"kind": "table_row", "page": 1, "target": [100, 199, 400, 213], "target_src": "table-rows"}}
+    assert S.score_row_sentence(snt, [row]) == (True, None)
+    assert S.score_row_sentence(snt, [dict(row, doc=dict(row["doc"], target=[100, 230, 400, 242]))]) == (False, "low_iou")
+    assert S.score_row_sentence(snt, [dict(row, doc=dict(row["doc"], page=2))]) == (False, "wrong_page")
+    assert S.score_row_sentence(snt, [{"cue_kind": "figure_box", "doc": {"kind": "table", "page": 1, "target": [90, 150, 410, 300], "target_src": "table:Table 2"}}]) == (False, "no_row_show")
+    assert S.score_row_sentence(snt, [None]) == (False, "no_show") and S.score_row_sentence(snt, []) == (False, "not_spoken")
+    assert S.rows_summary(0, 0, {}, reason="gated")["not_scored"] == "gated"
+
+
+def test_blockcls_summary_counts_only():
+    parse = {"blockcls": {"status": "ok", "classifier_version": "docling-figcls-v2.5/27ffc48c27ae", "reason": None, "T_B": 0.8, "T_C": 0.8},
+             "pages": [{"n": 1, "kinds": {"candidates": 3, "accepted": {"figure": 1, "table": 1}, "routed": 1, "rejected": 0, "skipped": {}, "ms": 31, "no_text": False}},
+                       {"n": 2, "kinds": {"candidates": 0, "accepted": {"figure": 0, "table": 0}, "routed": 0, "rejected": 0, "skipped": {}, "ms": 0, "no_text": False}}],
+             "blockcls_events": [{"event": "block_kind", "stage": "classifier", "outcome": "accepted", "ms": 9}, {"event": "block_kind", "stage": "classifier", "outcome": "accepted", "ms": 11},
+                                 {"event": "block_kind", "stage": "classifier", "outcome": "pending", "ms": 10}]}
+    b = S.blockcls_summary([parse, {"pages": []}])
+    assert b["pages"] == 2 and b["candidates"] == 3 and b["by_stage"] == {"classifier": 3} and b["by_outcome"] == {"accepted": 2, "pending": 1}, b
+    assert b["status"] == {"None": 1, "ok": 1} and b["ms"] == {"p50": 10, "p95": 11, "n": 3} and b["ms_page"]["n"] == 1, b
+    assert "ms" not in S._no_ms(b) and "ms_page" not in S._no_ms(b)
+
+
+def gap_bench(score=85.0, precision=95.0, by_gap=None, wt=0, kept=(4, 4), p95=120):
+    by_gap = by_gap or {"uncaptioned": 80.0, "lexicon": 90.0, "no-text": 70.0, "image-table": 100.0, "standard": 100.0}
+    k = {"score": score, "precision": precision, "hits": 40, "gt": 47, "matched": 40, "pred": 42, "by_gap": {g: {"score": v, "hits": 1, "n": 1} for g, v in by_gap.items()},
+         "by_kind_src": {}, "wrong_type": {"figure_as_table": wt, "table_as_figure": 0, "total": wt}, "unmatched": {}, "spurious_on_decoy": 0, "ignored": 0,
+         "prose_decoys": {"n": kept[1], "kept": kept[0], "broken": kept[1] - kept[0]}}
+    blk = {"kind": k, "speed": {"first_highlight_ms": {"p50": 50, "p95": p95, "n": 10}}}
+    b = {"schema": "speakeasy-bench/1", "family": "gap", "mode": "gated", "complete": True, "config": {"c": 1}, "fixtures": {"public-gap": {"manifest_sha256": "m"}},
+         "sets": {"public-gap": blk}}
+    bl = {"config": {"c": 1}, "manifest_sha256": "m", "metrics": S.baseline_metrics_gap(dict(blk, kind=dict(k, score=19.0, precision=100.0)))}
+    return b, bl
+
+
+def test_gap_gate_thresholds_and_refusals():
+    b, bl = gap_bench(); code, out = S.gap_gate(b, {"public-gap": bl})
+    assert code == 0 and out[-1] == "GATE PASS" and any("kind.score min 80.00 -> 85.00 (B6-pre 19.00, +66.00) PASS" in l for l in out), out
+    for kw, frag in ((dict(score=79.99), "kind.score"), (dict(precision=89.9), "kind.precision"), (dict(wt=3), "kind.wrong_type"),
+                     (dict(kept=(3, 4)), "prose_decoys"), (dict(p95=300), "p95"),
+                     (dict(by_gap={"uncaptioned": 59.0, "lexicon": 90.0, "no-text": 70.0}), "by_gap.uncaptioned")):
+        b2, bl2 = gap_bench(**kw); code, out = S.gap_gate(b2, {"public-gap": bl2})
+        assert code == 1 and any(frag in l and l.endswith("FAIL") for l in out), (kw, out)
+    b2, _ = gap_bench(by_gap={"uncaptioned": 80.0, "lexicon": 90.0}); code, out = S.gap_gate(b2, {"public-gap": bl})
+    assert code == 1 and any("by_gap.no-text" in l and l.endswith("FAIL") for l in out), out        # a gated gap with no regions fails
+    assert S.gap_gate(b, {"public-gap": None})[0] == 2
+    assert S.gap_gate(b, {"public-gap": dict(bl, manifest_sha256="x")})[1][0].startswith("baseline stale")
+    assert S.gap_gate(dict(b, mode="kind-replay"), {"public-gap": bl})[0] == 2
+    assert S.gap_gate(dict(b, family=None), {"public-gap": bl})[0] == 2
+    assert S.gap_gate(dict(b, complete=False), {"public-gap": bl})[0] == 2
+    code, out = S.gap_gate(b, {"public-gap": bl, "hidden-gap": bl}); assert code == 1 and "hidden-gap set not run  FAIL" in out, out
+    assert S.gap_gate(b, {"public-gap": bl, "hidden-gap": bl}, public_only=True)[0] == 0
+    assert S.gate(b, {"public": bl})[0] == 2                                                         # the Phase 2 gate never takes a gap bench
+
+
+def test_determinism_view_covers_kind_not_ms():
+    b, _ = gap_bench(); b["sets"]["public-gap"].update(boxes={}, lines={}, parts={}, blockcls={"candidates": 3, "ms": {"p50": 9}, "ms_page": {"p50": 30}})
+    v1 = S.determinism_view(b); b2 = copy.deepcopy(b); b2["sets"]["public-gap"]["blockcls"]["ms"]["p50"] = 12
+    assert S.diff_paths(v1, S.determinism_view(b2)) == []
+    b2["sets"]["public-gap"]["kind"]["hits"] = 39
+    assert S.diff_paths(v1, S.determinism_view(b2)) == ["$.sets.public-gap.kind.hits"]
+
+
+KIND_PROMPT_FAKE = "Which option describes the image? A: figure, diagram, illustration or photo. B: chart or plot of data. C: table. D: running text. E: none of these. Answer with the letter only."
+
+
+def test_mock_kind_routing_cassette_and_modes():
+    import base64, hashlib, json, math
+    png = b"\x89PNG crop"; body = {"model": "qwen3-vl:4b-instruct", "stream": False, "logprobs": True, "top_logprobs": 20, "options": {"temperature": 0, "num_predict": 1},
+                                   "messages": [{"role": "user", "content": KIND_PROMPT_FAKE, "images": [base64.b64encode(png).decode()]}]}
+    key = hashlib.sha256(b"qwen3-vl:4b-instruct\x00" + KIND_PROMPT_FAKE.encode() + b"\x00" + hashlib.sha256(png).hexdigest().encode()).hexdigest()
+    d0 = __import__("tempfile").mkdtemp(prefix="se_kcas_"); cas = os.path.join(d0, "k.json")
+    json.dump({"header": {}, "entries": {key: {"top_logprobs": [{"token": "C", "logprob": math.log(0.97)}, {"token": "<other>", "logprob": math.log(0.03)}]}}}, open(cas, "w"))
+    p, post, lg, d = _mock({"MOCK_KIND": "replay", "MOCK_KIND_CASSETTE": cas, "MOCK_PICK": "fixed", "MOCK_PICK_TOP_LOGPROBS": json.dumps([{"token": "B", "logprob": -0.01}])})
+    try:
+        r = post(body); assert r["message"]["content"] == "C" and r["logprobs"][0]["top_logprobs"][0]["token"] == "C", r      # kind -> kind cassette
+        pick = dict(body, messages=[dict(body["messages"][0], content="Which marked region is the pump? Answer with one letter.")])
+        assert post(pick)["message"]["content"] == "B"                                                                   # non-kind prompt -> pick settings
+        miss = dict(body, messages=[dict(body["messages"][0], images=[base64.b64encode(b"other").decode()])]); assert "logprobs" not in post(miss)
+        recs = [json.loads(x) for x in open(lg)]
+        kr = [r for r in recs if r.get("event") == "kind_reply"]; pr = [r for r in recs if r.get("event") == "pick_reply"]
+        assert [r["result"] for r in kr] == ["hit", "miss"] and len(pr) == 1, (kr, pr)
+        assert kr[0]["prompt_sha"] == hashlib.sha256(KIND_PROMPT_FAKE.encode()).hexdigest() and kr[0]["png_sha"] == hashlib.sha256(png).hexdigest()
+        assert all(KIND_PROMPT_FAKE not in json.dumps({k: v for k, v in r.items() if k != "prompt_tail"}) for r in kr)      # kind records: hashes only
+    finally: p.terminate(); p.wait()
+    p, post, lg, d = _mock({"MOCK_KIND_PROMPT_SHA256": "0" * 64})                       # exact-hash mode: the fake prompt is no longer a kind prompt
+    try: post(body); assert not any('"kind_reply"' in x for x in open(lg))
+    finally: p.terminate(); p.wait()
+    p, post, lg, d = _mock({"MOCK_KIND": "status:503"})
+    try:
+        import urllib.error
+        try: post(body); assert False, "expected HTTP 503"
+        except urllib.error.HTTPError as e: assert e.code == 503
+    finally: p.terminate(); p.wait()
+
+
+def test_ocr_stub_replay_miss_and_record():
+    import hashlib, json, subprocess, tempfile
+    d = tempfile.mkdtemp(prefix="se_ocr_t_"); png = os.path.join(d, "in.png"); open(png, "wb").write(b"\x89PNG table")
+    key = hashlib.sha256(b"\x89PNG table").hexdigest(); cas = os.path.join(d, "ocr.json"); lg = os.path.join(d, "ocr.jsonl")
+    out = {"lines": [{"rect": [1, 2, 30, 10], "text": "North 42 12"}], "tables": []}
+    json.dump({"header": {}, "entries": {key: {"out": out, "rc": 0}}}, open(cas, "w"))
+    stub = os.path.join(HERE, "ocr_stub"); env = dict(os.environ, OCR_STUB_MODE="replay", OCR_STUB_CASSETTE=cas, OCR_STUB_LOG=lg)
+    r = subprocess.run([stub, "ocr", png, os.path.join(d, "o.json")], env=env); assert r.returncode == 0 and json.load(open(os.path.join(d, "o.json"))) == out
+    open(png, "wb").write(b"\x89PNG other")
+    r = subprocess.run([stub, png, os.path.join(d, "o2.json")], env=env); assert r.returncode == 3 and not os.path.exists(os.path.join(d, "o2.json"))
+    real = os.path.join(d, "real.sh"); open(real, "w").write('#!/bin/sh\necho \'{"lines": [], "tables": []}\' > "$3"\n'); os.chmod(real, 0o755)
+    cas2 = os.path.join(d, "rec.json"); env2 = dict(env, OCR_STUB_MODE="record", OCR_STUB_CASSETTE=cas2, OCR_STUB_REAL=real)
+    r = subprocess.run([stub, "ocr", png, os.path.join(d, "o3.json")], env=env2); assert r.returncode == 0
+    rec = json.load(open(cas2)); assert rec["entries"][hashlib.sha256(b"\x89PNG other").hexdigest()] == {"out": {"lines": [], "tables": []}, "rc": 0}, rec
+    res = [json.loads(x)["result"] for x in open(lg)]; assert res == ["hit", "miss", "recorded"], res
+    assert all("North" not in x for x in open(lg))                                       # the log carries hashes, never OCR text
+
+
+def test_merge_preds_adds_vlm_rects_once():
+    sys.path.insert(0, HERE); import run_bench as RB
+    g = {1: [{"kind": "figure", "bbox": [0, 0, 100, 100], "kind_src": "classifier"}]}
+    m = RB.merge_preds(g, {1: [{"kind": "figure", "bbox": [0, 0, 100, 99], "kind_src": "vlm"}, {"kind": "table", "bbox": [200, 0, 300, 100], "kind_src": "vlm"}],
+                           2: [{"kind": "table", "bbox": [0, 0, 50, 50], "kind_src": "vlm"}]})
+    assert [b["kind_src"] for b in m[1]] == ["classifier", "vlm"] and len(m[2]) == 1 and len(g[1]) == 1, m
+
+
+def test_gap_validator_on_committed_public_fixtures():
+    import validate_fixtures as V
+    E, info = V.validate_gap_set("public", *V.set_paths("public", HERE, "/nonexistent", "gap"))
+    if E and any("pypdfium2 is needed" in e for e in E): return                          # validator needs the doc venv for the G3 text-layer check
+    assert not E, E[:5]
+    c = info["counts"]
+    assert c["kind_regions"] >= 40 and c["standard_caption"] <= 0.2 * c["kind_regions"] and c["decoys"] >= 12 and c["area_cases"] >= 2, c
+
+
 if __name__ == "__main__":
     fails = 0; tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

@@ -379,6 +379,164 @@ def layout_coverage_errors(set_name, lay):
     return [f"{set_name}: detector run but {h} of {lay['pages']} pages heuristic (reasons: {rs}) and {m} without pages[].layout"]
 
 
+# ---------------------------------------------------------------- kind (phase6-block-classifier.md 12.3)
+KIND_KINDS = ("figure", "table")
+KIND_IGNORE = ("equation", "other")          # out of scope (contract 15): a prediction on one is neither a hit nor a miss
+DECOY_KINDS = ("decoration", "text-image")
+TEXT_KINDS = ("paragraph", "caption", "heading", "header", "footer", "page_number")
+GAP_VALUES = ("uncaptioned", "lexicon", "no-text", "image-table", "standard")
+UNMATCHED = ("wrong_type", "on_decoy", "on_text", "on_nothing")
+KIND_GATE = {"score": 80.0, "precision": 90.0, "by_gap_min": 60.0, "by_gap_gated": ("uncaptioned", "lexicon", "no-text"), "wrong_type_max": 2}
+
+
+def _zero_kind():
+    return {"gt": 0, "hits": 0, "pred": 0, "matched": 0}
+
+
+def new_kind_acc():
+    return {"tot": _zero_kind(), "by_kind": {k: _zero_kind() for k in KIND_KINDS}, "by_gap": {}, "by_kind_src": {}, "by_anchor": {},
+            "wrong_type": {"figure_as_table": 0, "table_as_figure": 0}, "unmatched": {u: 0 for u in UNMATCHED}, "spurious_on_decoy": 0,
+            "ignored": 0, "prose_decoys": {"n": 0, "kept": 0}}
+
+
+def kind_page(gt_blocks, pred_blocks, acc, anchor="page", t=0.5):
+    """One kind-scored page (or area capture, anchor "area"). gt_blocks: GT blocks; pred_blocks: [{kind, bbox, kind_src?}] (any kinds;
+    only figure/table count). Greedy one-to-one match per kind at IoU >= t; unmatched predictions are classified as wrong_type (IoU >= t
+    with a GT region of the other kind), on_decoy, ignored (out-of-scope GT kind, left out of precision), on_text or on_nothing."""
+    an = acc["by_anchor"].setdefault(anchor, _zero_kind())
+    def near(bb, kinds, centre_too=False):
+        return any(iou(bb, d["bbox"]) >= t or (centre_too and inside(centre(bb), d["bbox"])) for d in gt_blocks if d.get("kind") in kinds and _is_rect(d.get("bbox")))
+    for k in KIND_KINDS:
+        g = [b for b in gt_blocks if b.get("kind") == k]
+        p = [b for b in pred_blocks if b.get("kind") == k and _is_rect(b.get("bbox"))]
+        m = match([(b["id"], b["bbox"]) for b in g], [b["bbox"] for b in p], t); hit_p = set(m.values()); ignored = 0
+        other = tuple(x for x in KIND_KINDS if x != k)
+        for gi, b in enumerate(g):
+            gp = acc["by_gap"].setdefault(b.get("gap") or "none", {"hits": 0, "n": 0}); gp["n"] += 1; gp["hits"] += gi in m
+        for pi, b in enumerate(p):
+            if pi in hit_p: why = None
+            elif near(b["bbox"], other): why = "wrong_type"; acc["wrong_type"]["figure_as_table" if k == "table" else "table_as_figure"] += 1
+            elif near(b["bbox"], DECOY_KINDS): why = "on_decoy"; acc["spurious_on_decoy"] += 1
+            elif near(b["bbox"], KIND_IGNORE): acc["ignored"] += 1; ignored += 1; continue
+            elif near(b["bbox"], TEXT_KINDS, centre_too=True): why = "on_text"
+            else: why = "on_nothing"
+            if why: acc["unmatched"][why] += 1
+            src = acc["by_kind_src"].setdefault(b.get("kind_src") if isinstance(b.get("kind_src"), str) else "none", {"pred": 0, "matched": 0})
+            src["pred"] += 1; src["matched"] += why is None
+        for c in (acc["tot"], acc["by_kind"][k], an):
+            c["gt"] += len(g); c["hits"] += len(m); c["pred"] += len(p) - ignored; c["matched"] += len(m)
+
+
+def prose_decoys_page(decoys, pred_blocks, acc):
+    """A prose decoy line (G2) stays prose unless a predicted caption block covers >= 50 % of it or a predicted figure/table holds
+    its centre."""
+    for r in decoys:
+        a = area(r); broken = False
+        for b in pred_blocks:
+            bb = b.get("bbox")
+            if not _is_rect(bb): continue
+            ov = max(0.0, min(r[2], bb[2]) - max(r[0], bb[0])) * max(0.0, min(r[3], bb[3]) - max(r[1], bb[1]))
+            if (b.get("kind") == "caption" and a > 0 and ov >= 0.5 * a) or (b.get("kind") in KIND_KINDS and inside(centre(r), bb)): broken = True; break
+        acc["prose_decoys"]["n"] += 1; acc["prose_decoys"]["kept"] += not broken
+
+
+def _kc(c):
+    return {"score": pct(c["hits"], c["gt"]), "hits": c["hits"], "gt": c["gt"], "precision": pct(c["matched"], c["pred"]), "matched": c["matched"], "pred": c["pred"]}
+
+
+def kind_summary(acc):
+    """sets.<set>.kind (or kind_vlm)."""
+    out = _kc(acc["tot"])
+    out["by_kind"] = {k: _kc(c) for k, c in acc["by_kind"].items()}
+    out["by_gap"] = {g: {"score": pct(v["hits"], v["n"]), "hits": v["hits"], "n": v["n"]} for g, v in sorted(acc["by_gap"].items())}
+    out["by_kind_src"] = {s: {"pred": v["pred"], "matched": v["matched"], "precision": pct(v["matched"], v["pred"])} for s, v in sorted(acc["by_kind_src"].items())}
+    out["by_anchor"] = {a: _kc(c) for a, c in sorted(acc["by_anchor"].items())}
+    out["wrong_type"] = dict(acc["wrong_type"], total=sum(acc["wrong_type"].values()))
+    out["spurious_on_decoy"] = acc["spurious_on_decoy"]; out["unmatched"] = dict(acc["unmatched"]); out["ignored"] = acc["ignored"]
+    pd = acc["prose_decoys"]; out["prose_decoys"] = {"n": pd["n"], "kept": pd["kept"], "broken": pd["n"] - pd["kept"]}
+    return out
+
+
+def score_kind(docs, preds, area_preds=None):
+    """docs: [(doc_id, gt)]; preds: {doc_id: {page_n: [blocks]}}; area_preds: {(doc_id, area_id): runs-record area_kinds or None}.
+    Area predictions are area_kinds {figure: [[rect]], table: [[rect]]} in capture pixels (contract 12.3)."""
+    acc = new_kind_acc()
+    for doc_id, gt in docs:
+        for pg in gt.get("pages") or []:
+            if not pg.get("kind_scored"): continue
+            pb = (preds.get(doc_id) or {}).get(pg["n"]) or []
+            kind_page(pg["blocks"], pb, acc, "page"); prose_decoys_page(pg.get("prose_decoys") or [], pb, acc)
+        for a in gt.get("areas") or []:
+            if area_preds is None or (doc_id, a["id"]) not in area_preds: continue
+            kind_page(a["blocks"], area_blocks(area_preds[(doc_id, a["id"])]), acc, "area")
+    return kind_summary(acc)
+
+
+def area_blocks(area_kinds):
+    """Runs-record area_kinds -> [{kind, bbox, kind_src}] (kind_src is not logged per rect there)."""
+    if not isinstance(area_kinds, dict): return []
+    return [{"kind": k, "bbox": list(r), "kind_src": "area"} for k in KIND_KINDS for r in (area_kinds.get(k) or []) if _is_rect(r)]
+
+
+# ---------------------------------------------------------------- image-table rows (12.3)
+ROW_REASONS = ("not_spoken", "no_show", "no_row_show", "wrong_page", "low_iou")
+
+
+def is_row_show(show):
+    d = show.get("doc") if isinstance(show, dict) else None
+    if not isinstance(d, dict): return False
+    return show.get("cue_kind") == "table_row" or d.get("kind") == "table_row" or "table-rows" in str(d.get("target_src") or "")
+
+
+def score_row_sentence(sent, shows, t=0.5):
+    """sent: GT table_row sentence (page, row_rect); shows: [show or None] one per chunk. Hit: some chunk's show is a table_row show
+    on the sentence's page whose doc.target has IoU >= t with the GT row rect."""
+    if not shows: return False, "not_spoken"
+    real = [s for s in shows if s is not None]
+    if not real: return False, "no_show"
+    rows = [s for s in real if is_row_show(s)]
+    if not rows: return False, "no_row_show"
+    on_page = [s for s in rows if s["doc"].get("page") == sent["page"]]
+    if not on_page: return False, "wrong_page"
+    if any(_target(s) is not None and iou(_target(s), sent["row_rect"]) >= t for s in on_page): return True, None
+    return False, "low_iou"
+
+
+def rows_summary(hits, n, reasons, stale=False, reason=None):
+    out = {"score": pct(hits, n), "hits": hits, "n": n, "miss_reasons": {r: reasons.get(r, 0) for r in ROW_REASONS}}
+    if reason: out["not_scored"] = reason
+    return out
+
+
+# ---------------------------------------------------------------- blockcls cost block (12.3, 14.4)
+def blockcls_summary(parses):
+    """sets.<set>.blockcls from the parse outputs (counts, enums and ms only). parses: parse-pdf JSON dicts."""
+    pages = 0; cand = 0; by_stage = {}; by_outcome = {}; ms_c = []; ms_p = []; status = {}; versions = set(); per_page = []
+    for d in parses:
+        top = d.get("blockcls") if isinstance(d.get("blockcls"), dict) else {}
+        status[str(top.get("status"))] = status.get(str(top.get("status")), 0) + 1
+        if isinstance(top.get("classifier_version"), str): versions.add(top["classifier_version"])
+        for pg in d.get("pages") or []:
+            k = pg.get("kinds") if isinstance(pg, dict) else None
+            if not isinstance(k, dict): continue
+            pages += 1; n = k.get("candidates") if isinstance(k.get("candidates"), int) else 0; cand += n; per_page.append(n)
+            if n and isinstance(k.get("ms"), (int, float)) and not isinstance(k.get("ms"), bool): ms_p.append(k["ms"])
+        for e in d.get("blockcls_events") or []:
+            if not isinstance(e, dict): continue
+            s = str(e.get("stage")); o = str(e.get("outcome")); by_stage[s] = by_stage.get(s, 0) + 1; by_outcome[o] = by_outcome.get(o, 0) + 1
+            if e.get("stage") == "classifier" and isinstance(e.get("ms"), (int, float)) and not isinstance(e.get("ms"), bool): ms_c.append(e["ms"])
+    return {"pages": pages, "candidates": cand, "by_stage": dict(sorted(by_stage.items())), "by_outcome": dict(sorted(by_outcome.items())),
+            "status": dict(sorted(status.items())), "classifier_version": sorted(versions) or None,
+            "candidates_per_page": {"p50": nearest_rank(per_page, 0.5), "max": max(per_page) if per_page else None},
+            "ms": {"p50": nearest_rank(ms_c, 0.5), "p95": nearest_rank(ms_c, 0.95), "n": len(ms_c)},
+            "ms_page": {"p50": nearest_rank(ms_p, 0.5), "p95": nearest_rank(ms_p, 0.95), "n": len(ms_p)}}
+
+
+def _no_ms(d):
+    if isinstance(d, dict): return {k: _no_ms(v) for k, v in d.items() if k not in ("ms", "ms_page")}
+    return d
+
+
 # ---------------------------------------------------------------- determinism (9)
 def determinism_view(bench):
     """The fields that must be identical across two runs. A pick bench (mode pick-*) leaves out parts and cases, which depend on
@@ -390,6 +548,8 @@ def determinism_view(bench):
         if "cases" in v and gated: d["cases"] = [{k: x for k, x in c.items() if k != "first_highlight_ms"} for c in v["cases"]]
         if isinstance(v.get("pick"), dict): d["pick"] = {k: x for k, x in v["pick"].items() if k != "ms"}
         if isinstance(v.get("layout"), dict): d["layout"] = {k: v["layout"].get(k) for k in ("pages", "src", "missing", "reasons")}
+        for k in ("kind", "kind_vlm", "image_table_rows", "blockcls"):                   # gap family (phase6-block-classifier.md 12.4)
+            if isinstance(v.get(k), dict): d[k] = _no_ms(v[k])
         out["sets"][s] = d
     return out
 
@@ -488,4 +648,63 @@ def gate(bench, baselines, public_only=False, budget=300, parts_min=None):
                        f"missing {lay.get('missing')} reasons {json.dumps(lay.get('reasons'), sort_keys=True)} ms p50 {(lay.get('ms') or {}).get('p50')} p95 {(lay.get('ms') or {}).get('p95')}")
     if raised: out.append("baseline can be raised (--record-baseline)")
     out.append("GATE PASS" if not fails else f"GATE FAIL ({fails} regressions)")
+    return (0 if not fails else 1), out
+
+
+# ---------------------------------------------------------------- gap-family baseline (B6-pre) + gate (phase6-block-classifier.md 12.1, 14.2)
+def baseline_metrics_gap(set_block):
+    k, sp = set_block["kind"], set_block["speed"]["first_highlight_ms"]
+    return {"kind": {"score": k["score"], "precision": k["precision"], "wrong_type": k["wrong_type"]["total"],
+                     "by_gap": {g: v["score"] for g, v in k["by_gap"].items()}, "prose_decoys_kept": k["prose_decoys"]["kept"]},
+            "speed": {"p50": sp["p50"], "p95": sp["p95"]}}
+
+
+def gap_gate(bench, baselines, public_only=False, budget=300):
+    """Gap family, gated mode, every set (contract 14.2): kind.score >= 80, kind.precision >= 90, by_gap uncaptioned / lexicon / no-text
+    >= 60 each, kind.wrong_type total <= 2, every G2 prose decoy kept, first highlight p50 / p95 < budget. The gain over B6-pre (the
+    set's gap baseline) is reported, never gated. Returns (exit_code, [output lines])."""
+    G = KIND_GATE; out = []
+    if not isinstance(bench, dict) or bench.get("schema") != "speakeasy-bench/1" or not isinstance(bench.get("sets"), dict) or not bench["sets"]:
+        return 2, ["gate: bench is malformed or has a different schema"]
+    if bench.get("family") != "gap": return 2, ["gate: not a gap-family bench (run_bench.py --family gap)"]
+    if bench.get("mode", "gated") != "gated": return 2, [f"gate: {bench.get('mode')} bench is never gated (run without --kind / --ocr / --pick)"]
+    if bench.get("complete") is not True: return 2, ["gate: bench is not complete (--cases used or a harness error); refusing to gate"]
+    for s, blk in bench["sets"].items():
+        try: blk["kind"]["score"]; blk["kind"]["by_gap"]; blk["kind"]["wrong_type"]["total"]; blk["kind"]["prose_decoys"]["n"]; blk["speed"]["first_highlight_ms"]["p50"]
+        except (KeyError, TypeError): return 2, [f"gate: bench set {s} is malformed (no kind block)"]
+        bl = baselines.get(s)
+        if not bl: return 2, [f"gate: no B6-pre baseline for {s}: record one on post-Phase-7 main with run_bench.py --family gap --record-baseline"]
+        if bl.get("config") != bench.get("config") or bl.get("manifest_sha256") != (bench.get("fixtures") or {}).get(s, {}).get("manifest_sha256"):
+            return 2, [f"baseline stale for {s}: re-record B6-pre with run_bench.py --family gap --record-baseline"]
+    fails = 0
+    if baselines.get("hidden-gap") and "hidden-gap" not in bench["sets"]:
+        if public_only: out.append("warning: hidden-gap set not run (--public-only)")
+        else: out.append("hidden-gap set not run  FAIL"); fails += 1
+    for s in sorted(bench["sets"]):
+        k = bench["sets"][s]["kind"]; base = (baselines[s].get("metrics") or {}).get("kind") or {}
+        def line(name, cur, ok, ref=None):
+            nonlocal fails
+            fails += not ok; gain = "" if ref is None or cur is None else f" (B6-pre {_fmt(ref)}, {cur - ref:+.2f})"
+            out.append(f"{s} {name} -> {_fmt(cur) if isinstance(cur, float) or cur is None else cur}{gain} {'PASS' if ok else 'FAIL'}")
+        line(f"kind.score min {G['score']:.2f}", k["score"], k["score"] is not None and k["score"] >= G["score"], base.get("score"))
+        line(f"kind.precision min {G['precision']:.2f}", k["precision"], k["precision"] is not None and k["precision"] >= G["precision"], base.get("precision"))
+        for g in G["by_gap_gated"]:
+            v = (k["by_gap"].get(g) or {}).get("score")
+            line(f"kind.by_gap.{g} min {G['by_gap_min']:.2f}", v, v is not None and v >= G["by_gap_min"], (base.get("by_gap") or {}).get(g))
+        wt = k["wrong_type"]["total"]; line(f"kind.wrong_type max {G['wrong_type_max']}", wt, wt <= G["wrong_type_max"])
+        pd = k["prose_decoys"]; line("kind.prose_decoys kept", f"{pd['kept']}/{pd['n']}", pd["kept"] == pd["n"])
+        sp = bench["sets"][s]["speed"]["first_highlight_ms"]
+        for q in ("p50", "p95"):
+            v = sp[q]; bad = v is None or v >= budget; fails += bad
+            out.append(f"{s} speed.first_highlight_ms.{q} budget<{budget} -> {v if v is not None else 'null'} {'FAIL' if bad else 'PASS'}")
+    out.append("-- informational")
+    for s in sorted(bench["sets"]):
+        k = bench["sets"][s]["kind"]
+        out.append(f"{s} kind by_gap " + " ".join(f"{g} {_fmt(v['score'])} ({v['hits']}/{v['n']})" for g, v in k["by_gap"].items()))
+        out.append(f"{s} kind by_kind_src " + " ".join(f"{x} {v['matched']}/{v['pred']}" for x, v in k["by_kind_src"].items()) +
+                   f" | unmatched {json.dumps(k['unmatched'], sort_keys=True)} spurious_on_decoy {k['spurious_on_decoy']} ignored {k['ignored']}")
+        bc = bench["sets"][s].get("blockcls") or {}
+        if bc: out.append(f"{s} blockcls pages {bc.get('pages')} candidates {bc.get('candidates')} by_outcome {json.dumps(bc.get('by_outcome'), sort_keys=True)} "
+                          f"ms p50 {(bc.get('ms') or {}).get('p50')} p95 {(bc.get('ms') or {}).get('p95')} page ms p95 {(bc.get('ms_page') or {}).get('p95')}")
+    out.append("GATE PASS" if not fails else f"GATE FAIL ({fails} checks)")
     return (0 if not fails else 1), out

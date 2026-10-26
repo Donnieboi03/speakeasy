@@ -1,0 +1,3 @@
+#!/bin/sh
+# SPEAKEASY_OCR_BIN target for run_bench.py --ocr replay|record (see ocr_stub.py)
+exec /usr/bin/env python3 "$(dirname "$0")/ocr_stub.py" "$@"

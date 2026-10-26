@@ -1,0 +1,237 @@
+{
+ "schema": "speakeasy-bench-gt/1",
+ "family": "gap",
+ "doc_id": "gap-slides-02",
+ "subset": "synthetic",
+ "gt_source": "generator",
+ "gt_method": "reportlab / Pillow drawing coordinates (gen/gap_synth.py); scanned pages: rotation applied to the drawn rects",
+ "reviewed_by_human": false,
+ "license": "synthetic",
+ "pages": [
+  {
+   "n": 1,
+   "w": 720.0,
+   "h": 405.0,
+   "blocks_scored": true,
+   "kind_scored": true,
+   "scan": false,
+   "lines": [
+    [
+     36.0,
+     22.0,
+     224.14,
+     42.0
+    ]
+   ],
+   "blocks": [
+    {
+     "id": "p1b1",
+     "kind": "heading",
+     "bbox": [
+      36.0,
+      22.0,
+      224.14,
+      42.0
+     ]
+    },
+    {
+     "id": "p1b2",
+     "kind": "figure",
+     "bbox": [
+      62.0,
+      80.0,
+      356.0,
+      356.0
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": false,
+     "body": "vector-chart"
+    },
+    {
+     "id": "p1b3",
+     "kind": "table",
+     "bbox": [
+      400.0,
+      84.0,
+      690.0,
+      168.75
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": false,
+     "table_style": "grid"
+    },
+    {
+     "id": "p1b4",
+     "kind": "text-image",
+     "bbox": [
+      400.0,
+      236.0,
+      690.0,
+      372.0
+     ],
+     "decoy": "text-image"
+    },
+    {
+     "id": "p1b5",
+     "kind": "decoration",
+     "bbox": [
+      597.0,
+      15.0,
+      689.34,
+      49.0
+     ],
+     "decoy": "logo"
+    }
+   ],
+   "prose_decoys": []
+  },
+  {
+   "n": 2,
+   "w": 720.0,
+   "h": 405.0,
+   "blocks_scored": true,
+   "kind_scored": true,
+   "scan": false,
+   "lines": [
+    [
+     36.0,
+     22.0,
+     243.29,
+     42.0
+    ],
+    [
+     370.0,
+     292.0,
+     596.65,
+     303.0
+    ],
+    [
+     370.0,
+     306.3,
+     562.73,
+     317.3
+    ],
+    [
+     370.0,
+     320.6,
+     417.88,
+     331.6
+    ]
+   ],
+   "blocks": [
+    {
+     "id": "p2b1",
+     "kind": "decoration",
+     "bbox": [
+      0.0,
+      0.0,
+      720.0,
+      405.0
+     ],
+     "decoy": "background"
+    },
+    {
+     "id": "p2b2",
+     "kind": "heading",
+     "bbox": [
+      36.0,
+      22.0,
+      243.29,
+      42.0
+     ]
+    },
+    {
+     "id": "p2b3",
+     "kind": "figure",
+     "bbox": [
+      42.0,
+      80.0,
+      326.0,
+      334.5
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": false,
+     "body": "vector-chart"
+    },
+    {
+     "id": "p2b4",
+     "kind": "figure",
+     "bbox": [
+      370.0,
+      76.0,
+      690.0,
+      270.0
+     ],
+     "gap": "uncaptioned",
+     "caption_style": "none",
+     "raster": true,
+     "body": "raster-photo"
+    },
+    {
+     "id": "p2b5",
+     "kind": "paragraph",
+     "bbox": [
+      370.0,
+      292.0,
+      596.65,
+      331.6
+     ]
+    },
+    {
+     "id": "p2b6",
+     "kind": "decoration",
+     "bbox": [
+      624.0,
+      316.0,
+      684.0,
+      376.0
+     ],
+     "decoy": "icon"
+    }
+   ],
+   "prose_decoys": []
+  }
+ ],
+ "areas": [],
+ "sentences": [
+  {
+   "id": "s1",
+   "page": 2,
+   "text_hash": "58503fac350f",
+   "score": "lines",
+   "line_rects": [
+    [
+     370.0,
+     292.0,
+     596.65,
+     303.0
+    ]
+   ]
+  },
+  {
+   "id": "s2",
+   "page": 2,
+   "text_hash": "1c8025fcf083",
+   "score": "lines",
+   "line_rects": [
+    [
+     370.0,
+     306.3,
+     562.73,
+     317.3
+    ],
+    [
+     370.0,
+     320.6,
+     417.88,
+     331.6
+    ]
+   ]
+  }
+ ],
+ "parts": [],
+ "features": {}
+}

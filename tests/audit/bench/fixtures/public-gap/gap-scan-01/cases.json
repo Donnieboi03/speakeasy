@@ -1,0 +1,108 @@
+[
+ {
+  "case_id": "gap-scan-01/a1",
+  "doc_id": "gap-scan-01",
+  "page": null,
+  "area": "a1",
+  "capture": "area-a1.png",
+  "capture_rect": [
+   160,
+   180,
+   500,
+   350
+  ],
+  "line_bounds": [
+   {
+    "loc": 0,
+    "abs": 0,
+    "len": 26,
+    "rect": [
+     180.0,
+     194.0,
+     190.67,
+     14.0
+    ]
+   },
+   {
+    "loc": 27,
+    "abs": 27,
+    "len": 50,
+    "rect": [
+     180.0,
+     220.0,
+     231.59,
+     9.0
+    ]
+   }
+  ],
+  "selection": [
+   {
+    "text": "Regional freight dashboard"
+   },
+   {
+    "text": "Weekly loads for the four regions are shown below."
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "Weekly loads for the four regions are shown below."
+   }
+  ]
+ },
+ {
+  "case_id": "gap-scan-01/a2",
+  "doc_id": "gap-scan-01",
+  "page": null,
+  "area": "a2",
+  "capture": "area-a2.png",
+  "capture_rect": [
+   200,
+   220,
+   460,
+   320
+  ],
+  "line_bounds": [
+   {
+    "loc": 0,
+    "abs": 0,
+    "len": 16,
+    "rect": [
+     218.0,
+     232.0,
+     96.07,
+     13.0
+    ]
+   },
+   {
+    "loc": 17,
+    "abs": 17,
+    "len": 71,
+    "rect": [
+     218.0,
+     470.0,
+     339.53,
+     9.0
+    ]
+   }
+  ],
+  "selection": [
+   {
+    "text": "Site visit notes"
+   },
+   {
+    "text": "The ramp opened in week two. Arrivals have grown every week since then."
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s2",
+    "text": "The ramp opened in week two."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "Arrivals have grown every week since then."
+   }
+  ]
+ }
+]

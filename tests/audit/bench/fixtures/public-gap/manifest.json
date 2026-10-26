@@ -1,0 +1,81 @@
+{
+ "schema": "speakeasy-bench-manifest/1",
+ "set": "public",
+ "docs": [
+  {
+   "doc_id": "gap-imgtable-01",
+   "subset": "synthetic",
+   "sha256": {
+    "doc.pdf": "6cafb66215a9668c42a32d6e962fb471b2d737f19ff2044aeb3149c609bcea6a",
+    "gt.json": "1912d9c36cdc108c99c414828e391184c445b19464da941c2a2ef9237f37b591",
+    "cases.json": "87a9a068318bbf803f3c4e7aa38ead642be101e4b234a9f70a8261c7128e38a7"
+   }
+  },
+  {
+   "doc_id": "gap-lexicon-01",
+   "subset": "synthetic",
+   "sha256": {
+    "doc.pdf": "9da52a4b679626659e2cdd0f2822102d77196d0e9586f6eb0fcdf5a2464d0fb7",
+    "gt.json": "37ba92d2a87903b8c67d7657752ff3af32c6c24d4c4b85b4f651f62277d36bae",
+    "cases.json": "d8ece24219a3bec5dc3cdc57afc560209f20c8f44c76e15516f452b739612f9e"
+   }
+  },
+  {
+   "doc_id": "gap-report-01",
+   "subset": "synthetic",
+   "sha256": {
+    "doc.pdf": "277869051af02e177530538e1e0c1f84d3765f545f1a26a2d907c7757e2174a8",
+    "gt.json": "e45c4b8001c86c9ab9e553e7704a3b4d1b1c54d09b8a557ef1a955e80a20c513",
+    "cases.json": "792b97c04346bf1a3bb873881595450ea13b524da619d95f43742bb6c10fb6f5"
+   }
+  },
+  {
+   "doc_id": "gap-scan-01",
+   "subset": "synthetic",
+   "sha256": {
+    "doc.pdf": "64235fc93bcbf8b295f57864223cefd1e8309e3136dbae5b6584a2d8a1e1c500",
+    "gt.json": "1eb0510271369b9549d2f30d64cea2fae8e4e0d1f5cec36f35d80bf76edefcdd",
+    "cases.json": "636b96f9717a2233d2e58c8551befa6ee0fd08cde1e37e354645c3771a379cb3",
+    "area-a1.png": "e822a1a250444b8db40381dca5fe597cbbe190d2b0dc08d2eb95926c9f541c53",
+    "area-a2.png": "4128b21534119562d07a5968f6a4d9e95791a0ecbfc4f1a79c197fd533bfcaf9"
+   }
+  },
+  {
+   "doc_id": "gap-slides-01",
+   "subset": "synthetic",
+   "sha256": {
+    "doc.pdf": "79b7990ad353794052e3af484aeebc53f2ca719067b6c12e93f277915f82ab0c",
+    "gt.json": "3fad6959705fb00081effb5fc314c0f375f84250f9a04d9df14814a4b858cac9",
+    "cases.json": "6fc29c2f041207ca71f8d8b299651317fe69e43f9edc8499a7fe13e41e0dfad9"
+   }
+  },
+  {
+   "doc_id": "gap-slides-02",
+   "subset": "synthetic",
+   "sha256": {
+    "doc.pdf": "1f3e347f3e930fb3be257f050832e01e2d42ef5662ce38cd9c476656d4994b34",
+    "gt.json": "8f16653860840c57fbdbdaaf7d5ced76e441d17c437e37419795cdde7663455c",
+    "cases.json": "1cf5f7b22068440038ed715d3307481a90e076f823ae77315981f3f884265561"
+   }
+  },
+  {
+   "doc_id": "gapx-2402.10153-p3",
+   "subset": "real",
+   "sha256": {
+    "doc.pdf": "280066866eadfae482d775b844635e2580037bc91f7a354f017e78dc76e14721",
+    "gt.json": "c77cc31856722521592ac1dc92ad893b82fd19ed67ac9b4251758a3e1dd34a0d",
+    "cases.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+   }
+  },
+  {
+   "doc_id": "gapx-2504.20049",
+   "subset": "real",
+   "sha256": {
+    "doc.pdf": "6e9ee0972e0932c99b3d26e2fb9a8618edfbf06b883c8c3c3f872aa76d43cb24",
+    "gt.json": "bef2923d769c165285a90dc680633f56d38c2c0f812f2b405dab6ca85883c6cd",
+    "cases.json": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570"
+   }
+  }
+ ],
+ "manifest_sha256": "ef7e3b5de988841e0bd93c54a2ff5b8e60dd559657b8919c6135f86e8161e20a"
+}
