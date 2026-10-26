@@ -1,9 +1,9 @@
 {
  "schema": "speakeasy-bench-baseline/1",
  "set": "public",
- "recorded_at": "2026-10-26T10:13:39+00:00",
- "commit": "890faa40963216cf3bdd919df8d06d3b0e9c1007",
- "dirty": true,
+ "recorded_at": "2026-10-26T12:11:46+00:00",
+ "commit": "36c01b78e0a190f60479e5a9931b097027261b0c",
+ "dirty": false,
  "config": {
   "box_iou_hit": 0.75,
   "box_iou_pr": 0.5,
@@ -25,43 +25,45 @@
  },
  "manifest_sha256": "b74c84a3fc5c4d237b2793220d14ebfd9bd8e4ef70d35d8ed480f9f1ec6cf783",
  "versions": {
-  "python": "3.15.0",
+  "python": "3.12.13",
   "pypdfium2": "5.14.0",
-  "reportlab": "5.1.0",
-  "pdfplumber": "0.11.10"
+  "reportlab": null,
+  "pdfplumber": null,
+  "onnxruntime": "1.31.0",
+  "layout_model": "pp-doclayout-s/33688dbee1c2"
  },
  "metrics": {
   "boxes": {
-   "score": 60.66,
-   "precision_50": 41.55,
-   "recall_50": 74.59
+   "score": 100.0,
+   "precision_50": 81.88,
+   "recall_50": 100.0
   },
   "lines": {
-   "score": 39.04
+   "score": 98.63
   },
   "parts": {
    "score": 63.08,
-   "precision": 66.13
+   "precision": 82.0
   },
   "speed": {
-   "p50": 37,
-   "p95": 52
+   "p50": 40,
+   "p95": 62
   }
  },
  "detail": {
   "boxes.by_kind": {
-   "paragraph": 54.41,
-   "caption": 92.59,
-   "figure": 68.75,
-   "table": 9.09
+   "paragraph": 100.0,
+   "caption": 100.0,
+   "figure": 100.0,
+   "table": 100.0
   },
   "boxes.by_subset": {
-   "real": 37.5,
-   "synthetic": 75.68
+   "real": 100.0,
+   "synthetic": 100.0
   },
   "lines.by_subset": {
-   "real": 31.91,
-   "synthetic": 42.42
+   "real": 95.74,
+   "synthetic": 100.0
   },
   "parts.by_subset": {
    "real": 34.78,
@@ -74,15 +76,15 @@
    "raster": 0.0
   },
   "boxes.by_doc": {
-   "arx-2402.10153": 16.67,
-   "arx-2405.08223": 44.44,
-   "arx-2406.06619": 44.44,
-   "syn-capnamed-01": 72.73,
-   "syn-fig5-01": 85.71,
-   "syn-fullwidth-01": 72.73,
-   "syn-panels-01": 72.73,
-   "syn-report-01": 82.35,
-   "syn-twocol-01": 60.0
+   "arx-2402.10153": 100.0,
+   "arx-2405.08223": 100.0,
+   "arx-2406.06619": 100.0,
+   "syn-capnamed-01": 100.0,
+   "syn-fig5-01": 100.0,
+   "syn-fullwidth-01": 100.0,
+   "syn-panels-01": 100.0,
+   "syn-report-01": 100.0,
+   "syn-twocol-01": 100.0
   }
  }
 }
