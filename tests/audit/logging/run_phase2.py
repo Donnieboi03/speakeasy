@@ -60,6 +60,30 @@ P2_MATCHER = {"overlap", "progress", "doc-line"}
 def p3_method(cur, base):
     """A Phase 2 matcher method replaced by a Phase 3 assignment method counts as unchanged."""
     return cur == base or (cur in ALIGN_METHODS and base in P2_MATCHER)
+# Phase 4 (docs/contracts/phase4-layout.md 4.7, 6): every block has src; layout / layout_events keys (numbers and enums only)
+CAP_SRC = {"regex", "regex+detector"}; PARA_SRC = {"detector", "lines"}
+LAYOUT_REASONS = {"disabled", "no-onnxruntime", "model-missing", "model-mismatch", "load-failed", "pdfkit-engine", "inference-failed"}
+DETECTOR_VERSION_RE = re.compile(r"^pp-doclayout-s/[0-9a-f]{12}$")
+P4_RUN = {"layout_events"}
+EXC_RE = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]{0,80}$")
+def layout_ok(v, version):
+    """pages[].layout (version=True) or doc_parse.layout (version=False)."""
+    if not isinstance(v, dict): return False
+    if v.get("src") == "heuristic": return set(v) == {"src", "reason"} and v.get("reason") in LAYOUT_REASONS
+    want = {"src", "ms", "blocks_by_kind"} | ({"detector_version"} if version else set())
+    bk = v.get("blocks_by_kind")
+    return (v.get("src") == "detector" and set(v) == want and isint(v.get("ms")) and v["ms"] >= 0 and isinstance(bk, dict) and set(bk) == BLOCK_KINDS
+            and all(isint(x) and x >= 0 for x in bk.values()) and (not version or bool(DETECTOR_VERSION_RE.match(str(v.get("detector_version"))))))
+def layout_event_ok(e):
+    if not isinstance(e, dict): return False
+    dv = e.get("detector_version")
+    if e.get("event") == "layout_page":
+        return set(e) == {"event", "page", "ms", "detector_version", "blocks_by_kind"} and isint(e.get("page")) and isint(e.get("ms")) and bool(DETECTOR_VERSION_RE.match(str(dv))) \
+            and isinstance(e.get("blocks_by_kind"), dict) and set(e["blocks_by_kind"]) == BLOCK_KINDS and all(isint(x) for x in e["blocks_by_kind"].values())
+    if e.get("event") == "layout_detector_unavailable":
+        return set(e) == {"event", "reason", "error", "detector_version", "page"} and e.get("reason") in LAYOUT_REASONS and (e.get("error") is None or bool(EXC_RE.match(str(e["error"])))) \
+            and (dv is None or bool(DETECTOR_VERSION_RE.match(str(dv)))) and (e.get("page") is None or isint(e.get("page")))
+    return False
 def target_src_ok(v):
     if not isinstance(v, str): return False
     if v in TARGET_SRC_FIXED: return True
@@ -114,14 +138,15 @@ def validate_parse(d, tag, expect_cols=None):
         for i, b in enumerate(blocks):
             if not isinstance(b, dict): schema_bad.append((n, i, "not-dict")); continue
             k = b.get("kind"); bb = b.get("bbox")
-            allowed = {"kind", "bbox"} | ({"lines"} if k in ("paragraph", "caption") else set()) | ({"label"} if k in ("caption", "figure", "table") else set()) | ({"src"} if k in ("figure", "table") else set())
+            allowed = {"kind", "bbox", "src"} | ({"lines"} if k in ("paragraph", "caption") else set()) | ({"label"} if k in ("caption", "figure", "table") else set())
             if k not in BLOCK_KINDS: schema_bad.append((n, i, "kind", k))
             if set(b) != allowed: schema_bad.append((n, i, k, "keys", sorted(set(b) ^ allowed)))
             if not (isinstance(bb, list) and len(bb) == 4 and all(isnum(v) for v in bb) and bb[0] < bb[2] and bb[1] < bb[3]): schema_bad.append((n, i, k, "bbox", bb)); continue
             if not all(r1(v) for v in bb): round_bad.append((n, i, bb))
             if "lines" in b and not (isinstance(b["lines"], list) and b["lines"] and all(isint(x) and 0 <= x < len(lines) for x in b["lines"])): lines_bad.append((n, i, k, b["lines"]))
             if "label" in b and not (isinstance(b["label"], str) and LABEL_RE.match(b["label"])): label_bad.append((n, i, b.get("label")))
-            if "src" in b and b["src"] not in (FIG_SRC if k == "figure" else TAB_SRC): src_bad.append((n, i, k, b.get("src")))
+            if b.get("src") not in {"figure": FIG_SRC, "table": TAB_SRC, "caption": CAP_SRC, "paragraph": PARA_SRC}.get(k, set()): src_bad.append((n, i, k, b.get("src")))
+            elif b.get("src") in ("detector", "regex+detector") and ((p.get("layout") or {}).get("src") != "detector" or ((d or {}).get("layout") or {}).get("status") == "unavailable"): src_bad.append((n, i, k, b.get("src"), "detector src on a heuristic page"))
         good = [b for b in blocks if isinstance(b, dict) and isinstance(b.get("bbox"), list) and len(b["bbox"]) == 4]
         ft = [b for b in good if b.get("kind") in ("figure", "table")]; caps = [b for b in good if b.get("kind") == "caption"]; paras = [b for b in good if b.get("kind") == "paragraph"]
         for f in figs:
@@ -172,6 +197,32 @@ def validate_parse(d, tag, expect_cols=None):
             ("block_label_Figure_or_Table_N", not label_bad, label_bad[:4]), ("block_src_enum", not src_bad, src_bad[:4]), ("block_bbox_rounded_0.1pt", not round_bad, round_bad[:3])]
     out += [(k, not v, v[:3]) for k, v in inv.items()]
     return out
+BOX_KEYS = {"bbox", "labels", "labels_src", "objects", "panels", "split_from"}
+def _within(a, b, t=0.15): return a[0] >= b[0] - t and a[1] >= b[1] - t and a[2] <= b[2] + t and a[3] <= b[3] + t
+def _clip(b, W, H): return [max(0.0, b[0]), max(0.0, b[1]), min(W, b[2]), min(H, b[3])]
+def _covered(box, olds, t=0.5):
+    """box lies inside the union of olds (checked on a 9x9 grid of interior points)."""
+    xs = [box[0] + (box[2] - box[0]) * (i + 0.5) / 9 for i in range(9)]; ys = [box[1] + (box[3] - box[1]) * (j + 0.5) / 9 for j in range(9)]
+    return all(any(o[0] - t <= x <= o[2] + t and o[1] - t <= y <= o[3] + t for o in olds) for x in xs for y in ys)
+def _vov(a, b): return 0.0 if min(a[2], b[2]) - max(a[0], b[0]) <= 0 else max(0.0, min(a[3], b[3]) - max(a[1], b[1]))
+def contract_box_change(x, y, bpage, n_caps):
+    """Baseline figure entry x vs current y on the same page. None: same box (every key must match). True: a box change
+    phase4-layout.md allows on the fallback path (4.4 caption exclusion, column rule, 4.5 two-way cut, section 5 graphics
+    reserved per caption, 4.7 inside the page): the new box lies inside the baseline box clipped to the page, or on a page
+    with two or more captions inside the extent the baseline boxes covered; a table excludes its caption (<= 2 pt); the
+    caption is unchanged; panels stay inside the box; split_from is a label. False: any other change."""
+    xb, yb = x.get("bbox"), y.get("bbox")
+    if xb == yb: return None
+    if not (isinstance(xb, list) and isinstance(yb, list) and len(yb) == 4 and yb[0] < yb[2] and yb[1] < yb[3]): return False
+    W, H = bpage.get("w") or 1e9, bpage.get("h") or 1e9
+    if x.get("caption_bbox") != y.get("caption_bbox") or x.get("kind") != y.get("kind") or x.get("label") != y.get("label"): return False
+    olds = [_clip(f["bbox"], W, H) for f in bpage.get("figures") or [] if isinstance(f.get("bbox"), list)]
+    if not (_within(yb, _clip(xb, W, H)) or (n_caps >= 2 and _covered(yb, olds))): return False
+    cb = y.get("caption_bbox")
+    if isinstance(cb, list) and _vov(yb, cb) > 2.0 + 1e-6: return False
+    if any(isinstance(pp.get("bbox"), list) and not _within(pp["bbox"], yb, 2.0) for pp in y.get("panels") or []): return False
+    if y.get("split_from") is not None and not LABEL_RE.match(str(y.get("split_from"))): return False
+    return True
 def report(tag, checks):
     for suf, ok, det in checks: add(f"{tag}_{suf}", ok, det)
 
@@ -328,7 +379,8 @@ def parse_output():
     pub = sorted(glob.glob(os.path.join(REPO, "tests", "audit", "bench", "fixtures", "public", "*", "doc.pdf")))
     for p in pub: docs["pub_" + os.path.basename(os.path.dirname(p))] = (p, None)
     if not pub: skip("D_public_bench_fixtures_invariants", "tests/audit/bench/fixtures/public/*/doc.pdf not present yet")
-    ALLOWED_NEW = {"page": {"columns", "blocks"}, "figure": {"bbox_src"}, "top": set(), "panel": set()}
+    # Phase 4 adds pages[].layout, layout, layout_events (shape-checked here) and figure split_from (4.5 two-way cut)
+    ALLOWED_NEW = {"page": {"columns", "blocks", "layout"}, "figure": {"bbox_src", "split_from"}, "top": {"layout", "layout_events"}, "panel": set()}
     for tag, (pdf, cols) in docs.items():
         rc, d, err = parse(pdf); add(f"D_{tag}_parse_pdf_exit0", rc == 0 and d is not None, err)
         if d is None: continue
@@ -336,24 +388,30 @@ def parse_output():
         # additive only: every baseline key keeps its value; only the contract's new keys appear
         brc, b, _ = parse(pdf, os.path.join(BASE, "src"))
         if b is None: skip(f"D_{tag}_additive_vs_baseline", "baseline parse failed"); continue
-        diffs, extras = [], set()
+        diffs, extras, boxdiffs = [], set(), []
         for k in b:
             if k != "pages" and b[k] != d.get(k): diffs.append(("top", k))
-        extras |= {("top", k) for k in set(d) - set(b)}
+        extras |= {("top", k) for k in set(d) - set(b) - ALLOWED_NEW["top"]}
+        L_ = d.get("layout")
+        if "layout" in d and not (isinstance(L_, dict) and L_.get("status") in ("ok", "unavailable") and (L_.get("status") == "ok" or L_.get("reason") in LAYOUT_REASONS)): extras.add(("top", "layout", "shape"))
+        if "layout_events" in d and not (isinstance(d["layout_events"], list) and all(layout_event_ok(e) for e in d["layout_events"])): extras.add(("top", "layout_events", "shape"))
         for bp, cp in zip(b.get("pages") or [], d.get("pages") or []):
             for k in bp:
                 if k != "figures" and bp[k] != cp.get(k): diffs.append((bp.get("n"), k))
             extras |= {("page", k) for k in set(cp) - set(bp) - ALLOWED_NEW["page"]}
+            if "layout" in cp and not layout_ok(cp["layout"], True): extras.add(("page", "layout", "shape"))
             bf, cf = bp.get("figures") or [], cp.get("figures") or []
             if len(bf) != len(cf): diffs.append((bp.get("n"), "n_figures", len(bf), len(cf)))
             for x, y in zip(bf, cf):
+                why = contract_box_change(x, y, bp, len(bf))
                 for k in x:
-                    if x[k] != y.get(k): diffs.append((bp.get("n"), x.get("label"), k))
+                    if x[k] != y.get(k) and not (why and k in BOX_KEYS): diffs.append((bp.get("n"), x.get("label"), k))
+                if why is False: boxdiffs.append((bp.get("n"), x.get("label"), x.get("kind"), x.get("bbox"), y.get("bbox")))
                 extras |= {("figure", k) for k in set(y) - set(x) - ALLOWED_NEW["figure"]}
         if len(b.get("pages") or []) != len(d.get("pages") or []): diffs.append(("n_pages",))
         add(f"D_{tag}_existing_keys_unchanged_vs_baseline", not diffs, diffs[:5])
-        boxes = lambda x: [[(f.get("label"), f.get("kind"), f.get("bbox"), f.get("caption_bbox"), [pp.get("bbox") for pp in f.get("panels") or []]) for f in pg.get("figures") or []] for pg in x.get("pages") or []]
-        add(f"D_{tag}_figures_boxes_unchanged_vs_baseline_{A.baseline_ref}", boxes(b) == boxes(d), next(((x, y) for x, y in zip(boxes(b), boxes(d)) if x != y), None))
+        # figure/table boxes: as at the baseline, or changed only as phase4-layout.md 4.4 / 4.5 / section 5 allow
+        add(f"D_{tag}_figures_boxes_unchanged_or_contract_change_vs_baseline_{A.baseline_ref}", not boxdiffs, boxdiffs[:2])
         cols = {pg.get("n"): pg.get("columns") for pg in d.get("pages") or [] if pg.get("figs_done")}
         PARSE_COLS.setdefault(os.path.basename(pdf), cols)
         add(f"D_{tag}_no_new_keys_beyond_contract", not extras, sorted(extras)[:6])
@@ -613,8 +671,9 @@ def check_run(o):
         if dp.get("figs_done") is False:
             if set(dp) != {"columns", "figs_done", "blocks"} or not isinstance(bl, dict) or set(bl) != {"paragraph"}: errs.append(("figs_false_keys", sorted(dp), sorted(bl or {})))
         else:
-            want = {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split"}
+            want = {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "layout"}   # layout: phase4-layout.md 6.3
             if set(dp) != want: errs.append(("keys", sorted(set(dp) ^ want)))
+            if "layout" in dp and not layout_ok(dp["layout"], False): errs.append(("layout", dp.get("layout")))
             if not (isinstance(bl, dict) and set(bl) == BLOCK_KINDS and all(isint(x) and x >= 0 for x in bl.values())): errs.append(("blocks", bl))
             bs = dp.get("bbox_src")
             if not (isinstance(bs, dict) and set(bs) <= ALL_SRC and all(isint(x) and x >= 0 for x in bs.values())): errs.append(("bbox_src", bs))
@@ -649,6 +708,8 @@ def check_run(o):
                 if dp["panels"] != {"labels": lb, "guessed": g}: x.append(("panels", dp["panels"], {"labels": lb, "guessed": g}))
                 sp = sum(1 for f in figs if f.get("split_from"))
                 if dp["split"] != sp: x.append(("split", dp["split"], sp))
+                pl = {k: v for k, v in (p.get("layout") or {}).items() if k != "detector_version"}
+                if dp.get("layout") != pl: x.append(("layout", dp.get("layout"), pl))
             v["doc_parse_matches_cache_page"] = x
     # ground_miss_reasons
     gm = raw.get("ground_miss_reasons"); fm = raw.get("focus_methods") or {}
@@ -680,11 +741,14 @@ def new_field_values(o):
         for k in ("target_src", "split_from"):
             if k in d: vals.append(("doc." + k, d[k]))
     for rec in o["recs"]:
-        for k in NEW_RUN_KEYS:
+        for k in NEW_RUN_KEYS | P4_RUN:
             if k in rec: vals.append(("runs." + k, rec[k]))
     return vals
 def textfree(k, val):
     """True when a new-field value holds only numbers / enums / booleans / Figure-Table labels."""
+    if k == "runs.layout_events": return isinstance(val, list) and all(layout_event_ok(e) for e in val)
+    if isinstance(val, dict) and k == "runs.doc_parse" and "layout" in val:
+        return layout_ok(val["layout"], False) and textfree(k, {kk: vv for kk, vv in val.items() if kk != "layout"})
     if isinstance(val, dict): return all(isinstance(kk, str) and (kk in BLOCK_KINDS | ALL_SRC | REASONS | {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "pdf", "ocr", "none", "labels", "guessed"}) and textfree(k, vv) for kk, vv in val.items())
     if isinstance(val, list): return all(textfree(k, x) for x in val)
     if isinstance(val, str): return (k == "doc.target_src" and target_src_ok(val)) or (k == "doc.split_from" and bool(LABEL_RE.match(val)))
@@ -992,7 +1056,7 @@ def additive():
         "fig5_cap": lambda b: bench_case("x_cap", f5, 1, [cap, cap + 1], "Figure 5 shows the drowsiness detector pipeline. In panel a, ear recordings are re-referenced and filtered. Panel b shows cross-validation.", bin_=b),
         "sentfig": lambda b: sentfig_case("x_sf", bin_=b, SPEAKEASY_GROUND="local"),
     }
-    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
+    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN | P4_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
     for nm, fn in pairs.items():
         b, c = fn(BIN_BASE), fn(CUR)
         def keys(runs_, st):
@@ -1010,7 +1074,17 @@ def additive():
         add(f"X_{nm}_runs_shared_key_types_unchanged", not tdiff, tdiff)
         # same targets for the same inputs (warm measured run)
         tg = lambda o, red: [(x["doc"].get("kind"), red(x["doc"].get("label")), x["doc"].get("target")) for x in docshows(o) if "(grounded)" not in str(x["doc"].get("label"))]
-        add(f"X_{nm}_same_doc_targets_as_baseline_labels_redacted", tg(b[-1], p2_redact) == tg(c[-1], lambda l: l) and tg(b[-1], p2_redact), (tg(b[-1], p2_redact)[:2], tg(c[-1], lambda l: l)[:2]))
+        tb_, tc_ = tg(b[-1], p2_redact), tg(c[-1], lambda l: l)
+        same = tb_ == tc_
+        if not same and nm == "fig5_t1" and tb_:
+            # phase4-layout.md 4.4: the table target loses its caption and stops at the gutter; reading is otherwise unchanged
+            # (same kinds, labels and order: table, then one table_row band per row). Row bands keep their y extent.
+            t1 = parse_fig(f5, 1, "Table 1") or {}
+            same = [(k, l) for k, l, _ in tb_] == [(k, l) for k, l, _ in tc_] and all(
+                (k == "table" and t == t1.get("bbox")) or (k == "table_row" and isinstance(t, list) and isinstance(bt, list) and abs(t[1] - bt[1]) <= 0.15 and abs(t[3] - bt[3]) <= 0.15
+                 and isinstance(t1.get("bbox"), list) and t[0] >= t1["bbox"][0] - 2 and t[2] <= t1["bbox"][2] + 2) or (k not in ("table", "table_row") and t == bt)
+                for (k, l, bt), (_, _, t) in zip(tb_, tc_))
+        add(f"X_{nm}_same_doc_targets_as_baseline_labels_redacted", same and bool(tb_), (tb_[:2], tc_[:2]))
         meth = lambda o: [x.get("method") for x in maps(o)]
         add(f"X_{nm}_same_map_methods_as_baseline", len(meth(b[-1])) == len(meth(c[-1])) and all(p3_method(y, x) for x, y in zip(meth(b[-1]), meth(c[-1]))), (meth(b[-1]), meth(c[-1])))
         stdout = lambda o: o["stdout"]
@@ -1096,8 +1170,8 @@ def tracker():
 def selftest():
     good = {"pages": [{"n": 1, "w": 600, "h": 800, "figs_done": True, "columns": 1, "lines": [[10, 10, 100, 20, "a"], [10, 30, 100, 40, "b"], [10, 300, 90, 310, "c"]],
                        "figures": [{"label": "Figure 1", "kind": "figure", "bbox": [10.0, 100.0, 200.0, 280.0], "caption_bbox": [10.0, 300.0, 90.0, 310.0], "bbox_src": "graphics", "panels": []}],
-                       "blocks": [{"kind": "paragraph", "bbox": [10.0, 10.0, 100.0, 40.0], "lines": [0, 1]}, {"kind": "figure", "bbox": [10.0, 100.0, 200.0, 280.0], "label": "Figure 1", "src": "graphics"},
-                                  {"kind": "caption", "bbox": [10.0, 300.0, 90.0, 310.0], "lines": [2], "label": "Figure 1"}]}]}
+                       "blocks": [{"kind": "paragraph", "bbox": [10.0, 10.0, 100.0, 40.0], "lines": [0, 1], "src": "lines"}, {"kind": "figure", "bbox": [10.0, 100.0, 200.0, 280.0], "label": "Figure 1", "src": "graphics"},
+                                  {"kind": "caption", "bbox": [10.0, 300.0, 90.0, 310.0], "lines": [2], "label": "Figure 1", "src": "regex"}]}]}
     fails = lambda d: {s for s, ok, _ in validate_parse(d, "t") if not ok}
     add("T_validate_parse_accepts_good", not fails(good), fails(good))
     def mut(fn):

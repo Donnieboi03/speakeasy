@@ -1,6 +1,6 @@
 """Pure scoring functions for the Phase 2 benchmark (stdlib only). Contract: docs/contracts/phase2-benchmark.md, sections 5.3, 6, 8.
 Rects are page-space [x0, y0, x1, y1] (PDF points, origin top-left)."""
-import hashlib, math, re
+import hashlib, json, math, re
 
 SCORED_KINDS = ("paragraph", "caption", "figure", "table")
 LINE_REASONS = ("not_spoken", "no_show", "no_doc_target", "wrong_cue", "wrong_page", "under_cover", "over_extend")
@@ -223,6 +223,31 @@ def speed_summary(first_hl, a2b, n_missing):
             "audio_to_box_ms": {"p50": nearest_rank(a2b, 0.5), "p95": nearest_rank(a2b, 0.95)}, "n_missing": n_missing}
 
 
+def layout_summary(page_layouts):
+    """sets.<set>.layout (phase4-layout.md section 7). page_layouts: pages[].layout of every figs_done page of the set's parses
+    (None when the parse wrote no layout field: pre-Phase-4 code). Counts only, never text."""
+    src = {"detector": 0, "heuristic": 0}; reasons = {}; ms = []; missing = 0
+    for pl in page_layouts:
+        s = pl.get("src") if isinstance(pl, dict) else None
+        if s not in src: missing += 1; continue
+        src[s] += 1
+        if s == "heuristic":
+            r = pl.get("reason") if isinstance(pl.get("reason"), str) else "none"
+            reasons[r] = reasons.get(r, 0) + 1
+        elif isinstance(pl.get("ms"), (int, float)) and not isinstance(pl.get("ms"), bool): ms.append(pl["ms"])
+    return {"pages": len(page_layouts), "src": src, "missing": missing, "reasons": dict(sorted(reasons.items())),
+            "ms": {"p50": nearest_rank(ms, 0.5), "p95": nearest_rank(ms, 0.95), "n": len(ms)}}
+
+
+def layout_coverage_errors(set_name, lay):
+    """A detector run must put every parsed page through the detector: [] when it did, else one message."""
+    if not lay: return [f"{set_name}: no layout summary"]
+    h, m = lay["src"]["heuristic"], lay["missing"]
+    if not h and not m and lay["pages"]: return []
+    rs = ", ".join(f"{k} {v}" for k, v in lay["reasons"].items()) or "none"
+    return [f"{set_name}: detector run but {h} of {lay['pages']} pages heuristic (reasons: {rs}) and {m} without pages[].layout"]
+
+
 # ---------------------------------------------------------------- determinism (9)
 def determinism_view(bench):
     """The fields that must be identical across two runs."""
@@ -230,6 +255,7 @@ def determinism_view(bench):
     for s, v in (bench.get("sets") or {}).items():
         d = {k: v.get(k) for k in ("boxes", "lines", "parts")}
         if "cases" in v: d["cases"] = [{k: x for k, x in c.items() if k != "first_highlight_ms"} for c in v["cases"]]
+        if isinstance(v.get("layout"), dict): d["layout"] = {k: v["layout"].get(k) for k in ("pages", "src", "missing", "reasons")}
         out["sets"][s] = d
     return out
 
@@ -289,8 +315,9 @@ def gate(bench, baselines, public_only=False, budget=300):
             return 2, [f"gate: no baseline for {s}: record one with run_bench.py --record-baseline"]
         if bl.get("config") != bench.get("config") or bl.get("manifest_sha256") != (bench.get("fixtures") or {}).get(s, {}).get("manifest_sha256"):
             return 2, [f"baseline stale for {s}: re-record with run_bench.py --record-baseline"]
-        bv = (bl.get("versions") or {}).get("pypdfium2"); cv = (bench.get("versions") or {}).get("pypdfium2")
-        if bv != cv: out.append(f"warning: pypdfium2 {bv} in the {s} baseline, {cv} now")
+        for vk in ("pypdfium2", "onnxruntime", "layout_model"):
+            bv = (bl.get("versions") or {}).get(vk); cv = (bench.get("versions") or {}).get(vk)
+            if bv != cv: out.append(f"warning: {vk} {bv} in the {s} baseline, {cv} now")
     fails = 0; raised = False
     if baselines.get("hidden") and "hidden" not in bench["sets"]:
         if public_only: out.append("warning: hidden set not run (--public-only)")
@@ -315,6 +342,10 @@ def gate(bench, baselines, public_only=False, budget=300):
                 b = (det.get(grp) or {}).get(k)
                 dd = "" if v is None or b is None else f" {v - b:+.2f}"
                 out.append(f"{s} {grp}.{k} {_fmt(b)} -> {_fmt(v)}{dd}")
+        lay = bench["sets"][s].get("layout")
+        if isinstance(lay, dict):
+            out.append(f"{s} layout pages {lay.get('pages')} detector {(lay.get('src') or {}).get('detector')} heuristic {(lay.get('src') or {}).get('heuristic')} "
+                       f"missing {lay.get('missing')} reasons {json.dumps(lay.get('reasons'), sort_keys=True)} ms p50 {(lay.get('ms') or {}).get('p50')} p95 {(lay.get('ms') or {}).get('p95')}")
     if raised: out.append("baseline can be raised (--record-baseline)")
     out.append("GATE PASS" if not fails else f"GATE FAIL ({fails} regressions)")
     return (0 if not fails else 1), out

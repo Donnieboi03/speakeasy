@@ -20,6 +20,7 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 | `grounding.py` | Vision-model grounding of a named figure part on the figure crop (`ground_prompt`, `parse_ground_box`) |
 | `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv) |
 | `pdfpage.py` | pypdfium2 page text and rendering, imported by sibling path from doc-venv subprocesses |
+| `layoutdet.py` | PDF layout detector (PP-DocLayout-S on onnxruntime, inside the doc-venv parse only): model lookup and sha256 check, caption pairing, snapping, detector paragraphs, `layout_*` events; `layoutdet.py fetch` is the installers' model download |
 | `provider.py` | Which endpoint a purpose (`llm`, `ground`) uses: local or OpenRouter; Keychain key lookup |
 | `selog.py` | Paths, config loading, the run log (`runs.jsonl`), log rotation, the pill state file |
 | `observe.py` | Capture cropping / keeping, memory and Ollama status, `speakeasy last` / `stats` output |

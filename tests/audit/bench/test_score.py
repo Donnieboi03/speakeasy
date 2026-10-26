@@ -220,6 +220,38 @@ def test_determinism_view_ignores_speed():
     assert S.diff_paths(S.determinism_view(b), S.determinism_view(b2)) == ["$.sets.public.cases[0].lines.hits"]
 
 
+# ---------------------------------------------------------------- layout detector (phase4-layout.md section 7)
+def test_layout_summary_and_coverage():
+    det = {"src": "detector", "ms": 30, "detector_version": "v", "blocks_by_kind": {}}
+    pls = [det, dict(det, ms=10), {"src": "heuristic", "reason": "inference-failed"}, None]
+    lay = S.layout_summary(pls)
+    assert lay["pages"] == 4 and lay["src"] == {"detector": 2, "heuristic": 1} and lay["missing"] == 1, lay
+    assert lay["reasons"] == {"inference-failed": 1} and lay["ms"] == {"p50": 10, "p95": 30, "n": 2}, lay
+    assert S.layout_coverage_errors("public", S.layout_summary([det, det])) == []
+    assert "1 of 4 pages heuristic" in S.layout_coverage_errors("public", lay)[0]
+    assert S.layout_coverage_errors("public", S.layout_summary([None]))           # pre-Phase-4 output in a detector run
+    assert S.layout_coverage_errors("public", S.layout_summary([]))
+
+
+def test_determinism_view_covers_layout_src_not_ms():
+    b, _ = bench_and_baseline(); b["sets"]["public"]["layout"] = S.layout_summary([{"src": "detector", "ms": 5}])
+    b2 = copy.deepcopy(b); b2["sets"]["public"]["layout"]["ms"]["p50"] = 99
+    assert S.diff_paths(S.determinism_view(b), S.determinism_view(b2)) == []
+    b2["sets"]["public"]["layout"]["src"]["heuristic"] = 1
+    assert S.diff_paths(S.determinism_view(b), S.determinism_view(b2)) == ["$.sets.public.layout.src.heuristic"]
+
+
+def test_gate_warns_on_layout_versions():
+    b, bl = bench_and_baseline()
+    x = copy.deepcopy(b); x["versions"].update(onnxruntime="1.31.0", layout_model="pp-doclayout-s/33688dbee1c2")
+    code, out = S.gate(x, {"public": bl})
+    assert code == 0 and "warning: onnxruntime None in the public baseline, 1.31.0 now" in out, out
+    assert "warning: layout_model None in the public baseline, pp-doclayout-s/33688dbee1c2 now" in out, out
+    x["sets"]["public"]["layout"] = S.layout_summary([{"src": "heuristic", "reason": "model-missing"}])
+    code, out = S.gate(x, {"public": bl})
+    assert code == 0 and any(l.startswith("public layout pages 1 detector 0 heuristic 1") for l in out), out
+
+
 if __name__ == "__main__":
     fails = 0; tests = [(n, f) for n, f in sorted(globals().items()) if n.startswith("test_") and callable(f)]
     for n, f in tests:

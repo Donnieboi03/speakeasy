@@ -13,7 +13,14 @@ uv python install "$PYV" --install-dir "$TMP/py" >/dev/null
 SRCPY="$(dirname "$(dirname "$(ls "$TMP"/py/*/bin/python3 | head -1)")")"
 rm -rf "$RES/python"; cp -R "$SRCPY" "$RES/python"
 PY="$RES/python/bin/python3"
-uv pip install --python "$PY" --break-system-packages -q pypdfium2 pillow
+uv pip install --python "$PY" --break-system-packages -q pypdfium2 pillow onnxruntime numpy
+# PDF layout model: verified into the shared download cache, then shipped in Resources/models (never built without it)
+MODELS_CACHE="${SPEAKEASY_HOME:-$HOME/.speakeasy}/models"
+"$PY" ../src/layoutdet.py fetch "$MODELS_CACHE" || { echo "ERROR: bundle needs a verified layout model; not building $APP"; exit 1; }
+rm -rf "$RES/models"; mkdir -p "$RES/models"
+cp "$MODELS_CACHE/pp_doclayout_s.onnx" "$RES/models/"
+"$PY" -c 'import sys; sys.path.insert(0, "../src"); import layoutdet; sys.exit(not layoutdet.model_verified(sys.argv[1]))' "$RES/models/pp_doclayout_s.onnx" \
+  || { echo "ERROR: layout model copy in $RES/models failed verification"; exit 1; }
 [ "$WITH_TTS" = "--with-tts" ] && uv pip install --python "$PY" --break-system-packages -q "mlx-audio[server]" "misaki[en]" webrtcvad-wheels uvicorn fastapi python-multipart num2words
 rm -rf "$RES/backend"; mkdir -p "$RES/backend"
 cp ../src/*.py "$RES/backend/"

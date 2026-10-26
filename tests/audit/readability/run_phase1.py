@@ -255,7 +255,11 @@ exit 0
     brepo = os.path.join(TMPROOT, "brepo"); bs = _copy_src(brepo); os.makedirs(os.path.join(brepo, "app"))
     shutil.copy(os.path.join(REPO, "app", "bundle_python.sh"), os.path.join(brepo, "app", "bundle_python.sh")); open(os.path.join(brepo, "app", "decoy_app.py"), "w").write("Y=1\n")
     app = os.path.join(TMPROOT, "Speakeasy.app"); res = os.path.join(app, "Contents", "Resources"); os.makedirs(res)
-    eb = dict(os.environ, PATH=st2 + ":/usr/bin:/bin:/usr/sbin:/sbin:" + os.path.dirname(PY3)); eb.pop("SPEAKEASY_PYTHON_VERSION", None)
+    # the bundle caches the PDF layout model under $SPEAKEASY_HOME/models (Phase 4): keep it in a temp home, never ~/.speakeasy,
+    # seeded with a verified copy when one is at hand so the run needs no network
+    bhome = mkhome("bundle_home"); seed = os.environ.get("SPEAKEASY_LAYOUT_MODEL") or "/tmp/pp_doclayout_s.onnx"
+    if os.path.isfile(seed): os.makedirs(os.path.join(bhome, "models"), exist_ok=True); shutil.copy(seed, os.path.join(bhome, "models", "pp_doclayout_s.onnx"))
+    eb = dict(os.environ, PATH=st2 + ":/usr/bin:/bin:/usr/sbin:/sbin:" + os.path.dirname(PY3), SPEAKEASY_HOME=bhome); eb.pop("SPEAKEASY_PYTHON_VERSION", None)
     p = subprocess.run(["bash", os.path.join(brepo, "app", "bundle_python.sh"), app], capture_output=True, text=True, env=eb, timeout=300)
     add("A_bundle_exit0", p.returncode == 0, (p.returncode, p.stdout[-150:], p.stderr[-250:]))
     be = os.path.join(res, "backend"); bl = set(os.listdir(be)) if os.path.isdir(be) else set(); want = {os.path.basename(f) for f in glob.glob(os.path.join(bs, "*.py"))}

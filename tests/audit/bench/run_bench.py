@@ -8,7 +8,15 @@ SPEAKEASY_DOC_PYTHON):
 
     python3 tests/audit/bench/run_bench.py [--set public|hidden|all] [--holdout DIR] [--out FILE] [--cases GLOB]
                                            [--record-baseline] [--check-determinism] [--keep-temp]
+                                           [--layout-model PATH] [--doc-python PATH]
+                                           [--public-baseline-out FILE] [--hidden-baseline-out FILE] [--last-cases-out FILE]
     python3 tests/audit/bench/bench_gate.py tests/audit/reports/bench.json [--public-only]
+
+Layout detector (docs/contracts/phase4-layout.md section 7): --layout-model PATH (or the caller's SPEAKEASY_LAYOUT_MODEL) is
+passed to the app as SPEAKEASY_LAYOUT_MODEL; without either it stays unset and the temp home has no model, so the run measures
+the heuristic fallback. --doc-python picks the interpreter for parse-pdf and SPEAKEASY_DOC_PYTHON (default: this one); a
+detector run needs onnxruntime and numpy in it. sets.<set>.layout reports pages by layout.src, fallback reasons and detector
+ms/page; a detector run with any heuristic page (or a page without pages[].layout) fails with exit 5.
 
 Scores
   boxes   docmap parse-pdf `pages[].blocks` vs GT blocks (paragraph, caption, figure, table). Hit = greedy one-to-one match at
@@ -30,7 +38,8 @@ Output: bench.json (ids, numbers, enums and hashes only); the hidden set carries
 goes to <holdout>/last_cases.json. Baselines are written only by --record-baseline.
 
 Exit codes: 0 bench written; 2 preflight/usage/fixture error (nothing run); 3 harness error (bench.json written with
-complete: false), including app output that lacks the logging-contract fields; 4 determinism mismatch."""
+complete: false), including app output that lacks the logging-contract fields; 4 determinism mismatch; 5 layout coverage
+failure (detector run with heuristic pages; bench.json written with complete: false)."""
 import argparse, datetime, fnmatch, json, os, shutil, signal, subprocess, sys, tempfile, time, urllib.request
 
 HERE = os.path.dirname(os.path.abspath(__file__)); AUD = os.path.dirname(HERE); REPO = os.path.dirname(os.path.dirname(AUD))
@@ -73,13 +82,25 @@ def atomic_json(path, obj):
     os.replace(tmp, path)
 
 
-def versions():
-    out = {"python": sys.version.split()[0]}
-    from importlib import metadata
-    for m in ("pypdfium2", "reportlab", "pdfplumber"):
-        try: out[m] = metadata.version(m)
-        except metadata.PackageNotFoundError: out[m] = None
-    return out
+VERSION_PKGS = ("pypdfium2", "reportlab", "pdfplumber", "onnxruntime")
+PROBE = ("import json, sys\nfrom importlib import metadata\nout = {'python': sys.version.split()[0]}\n"
+         "for m in %r:\n    try: out[m] = metadata.version(m)\n    except metadata.PackageNotFoundError: out[m] = None\n"
+         "for m in ('pypdfium2', 'onnxruntime', 'numpy'):\n"
+         "    try: __import__(m); out['import_' + m] = True\n    except Exception: out['import_' + m] = False\n"
+         "print(json.dumps(out))") % (VERSION_PKGS,)
+
+
+def probe(interp):
+    """Versions and importability in the doc interpreter (the one that parses)."""
+    try:
+        p = subprocess.run([interp, "-c", PROBE], capture_output=True, text=True, timeout=60)
+        return json.loads(p.stdout.strip().splitlines()[-1])
+    except Exception:
+        return None
+
+
+def versions(pr):
+    return {k: pr.get(k) for k in ("python",) + VERSION_PKGS}
 
 
 def git_state():
@@ -98,8 +119,8 @@ def config():
 
 # ------------------------------------------------------------------ environment
 class Env:
-    def __init__(self, root, port, interp):
-        self.root, self.port, self.interp, self.n = root, port, interp, 0
+    def __init__(self, root, port, interp, layout_model=None):
+        self.root, self.port, self.interp, self.layout_model, self.n = root, port, interp, layout_model, 0
 
     def home(self, tag):
         self.n += 1; d = os.path.join(self.root, "runs", f"{self.n:04d}-{tag}"); h = os.path.join(d, "home"); t = os.path.join(d, "tmp")
@@ -117,6 +138,7 @@ class Env:
                  SPEAKEASY_FOCUS_TAGS="off", SPEAKEASY_STREAM="1", SPEAKEASY_CAPTURE_FIT="off", SPEAKEASY_TEXT_HIGHLIGHT="on",
                  SPEAKEASY_FIGURE_CUES="on", SPEAKEASY_KEEP_CAPTURE="0", SPEAKEASY_LOG_TEXT="1", STUB_PLAY_SEC=str(STUB_PLAY),
                  PATH=":".join(STUBS + [os.environ.get("PATH", "/usr/bin:/bin")]))
+        if self.layout_model: e["SPEAKEASY_LAYOUT_MODEL"] = self.layout_model
         return e
 
 
@@ -162,13 +184,15 @@ def parse_doc(env, doc_id, pdf):
     data = json.load(open(out))
     pages = data.get("pages") or []
     if isinstance(pages, dict): pages = list(pages.values())
-    preds, figs_done, with_blocks = {}, 0, 0
+    preds, figs_done, with_blocks, layouts = {}, 0, 0, []
     for pg in pages:
         figs_done += bool(pg.get("figs_done")); with_blocks += isinstance(pg.get("blocks"), list)
         preds[pg.get("n")] = [{"kind": b.get("kind"), "bbox": b.get("bbox")} for b in (pg.get("blocks") or []) if isinstance(b.get("bbox"), list)]
+        if pg.get("figs_done"): layouts.append(pg.get("layout") if isinstance(pg.get("layout"), dict) else None)
     if figs_done and not with_blocks:
         raise FieldsMissing("contract_fields_missing", f"parse output has no pages[].blocks on figs_done pages ({doc_id}): logging contract D not implemented")
-    return preds
+    top = data.get("layout") if isinstance(data.get("layout"), dict) else {}
+    return preds, layouts, top.get("detector_version") if isinstance(top.get("detector_version"), str) else None
 
 
 # ------------------------------------------------------------------ case runs (5.2)
@@ -280,11 +304,15 @@ def load_set(set_name, holdout):
     return docs, m["manifest_sha256"]
 
 
-def run_set(set_name, docs, env, mock, glob, errors, counter):
-    preds = {}
+def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions):
+    preds = {}; layouts = []
     for d in docs:
         log(f"bench: {set_name} parse {d['doc_id'] if set_name == 'public' else '#'}")
-        preds[d["doc_id"]] = parse_doc(env, d["doc_id"], d["pdf"])
+        preds[d["doc_id"]], pl, dv = parse_doc(env, d["doc_id"], d["pdf"]); layouts += pl
+        if dv: det_versions.add(dv)
+    lay = S.layout_summary(layouts)
+    log(f"bench: {set_name} layout pages {lay['pages']} detector {lay['src']['detector']} heuristic {lay['src']['heuristic']} missing {lay['missing']} "
+        f"reasons {lay['reasons']} ms p50 {lay['ms']['p50']} p95 {lay['ms']['p95']}")
     acc = new_acc(); cases_out = []
     for d in docs:
         gt = d["gt"]; pw = {p["n"]: p["w"] for p in gt["pages"]}
@@ -308,28 +336,34 @@ def run_set(set_name, docs, env, mock, glob, errors, counter):
     L, P, V = acc["lines"], acc["parts"], acc["speed"]
     blk = {"boxes": boxes, "lines": S.lines_summary(L["hits"], L["n"], L["reasons"], L["by_subset"]),
            "parts": S.parts_summary(P["hits"], P["n"], P["good"], P["ovals"], P["reasons"], P["by_style"], P["by_subset"]),
-           "speed": S.speed_summary(V["fh"], V["a2b"], V["missing"])}
+           "speed": S.speed_summary(V["fh"], V["a2b"], V["missing"]), "layout": lay}
     for sec in ("boxes", "lines", "parts"):
         if "real" in blk[sec]["by_subset"]: blk[sec]["by_subset"]["real"].update(gt_source="agent", reviewed_by_human=reviewed)
     if set_name == "public": blk["cases"] = cases_out
     return blk, cases_out, boxes.get("by_doc")
 
 
-def run_once(sets, holdout, glob, interp, keep):
+def run_once(sets, holdout, glob, interp, keep, layout_model, pr, last_cases):
     t0 = time.time(); root = os.path.realpath(tempfile.mkdtemp(prefix="se_bench_"))
-    sha, dirty = git_state(); errors = []; out_sets = {}; fixtures = {}; hidden_detail = None; mock = None
+    sha, dirty = git_state(); errors = []; out_sets = {}; fixtures = {}; hidden_detail = None; mock = None; det_versions = set()
+    vers = versions(pr)
     bench = {"schema": "speakeasy-bench/1", "complete": False, "generated_at": None, "duration_s": None, "commit": sha, "dirty": dirty,
-             "versions": versions(), "config": config(), "fixtures": fixtures, "sets": out_sets, "errors": errors}
-    code = 0
+             "versions": vers, "config": config(), "fixtures": fixtures, "sets": out_sets, "errors": errors}
+    code = 0; coverage = []
     try:
-        mock = Mock(root); env = Env(root, mock.port, interp); counter = [0]
+        mock = Mock(root); env = Env(root, mock.port, interp, layout_model); counter = [0]
         for s in sets:
             docs, msha = load_set(s, holdout)
             fixtures[s] = {"manifest_sha256": msha, "docs": len(docs), "cases": sum(len(d["cases"]) for d in docs)}
-            blk, cases_out, by_doc = run_set(s, docs, env, mock, glob, errors, counter)
+            blk, cases_out, by_doc = run_set(s, docs, env, mock, glob, errors, counter, det_versions)
             out_sets[s] = blk
             if s == "hidden": hidden_detail = {"generated_at": None, "cases": cases_out, "by_doc": by_doc}
-        if errors: code = 3
+            if layout_model: coverage += S.layout_coverage_errors(s, blk["layout"])
+            elif blk["layout"]["src"]["detector"]: log(f"bench: WARNING {s}: {blk['layout']['src']['detector']} detector pages without --layout-model (a model outside the temp home?)")
+        vers["layout_model"] = sorted(det_versions)[0] if len(det_versions) == 1 else (sorted(det_versions) or None)
+        for m in coverage:
+            errors.append({"case_id": None, "code": "layout_coverage", "message": m}); log(f"bench: LAYOUT COVERAGE FAIL {m}")
+        if errors: code = 5 if coverage and len(errors) == len(coverage) else 3
     except FieldsMissing as ex:
         errors.append({"case_id": None, "code": ex.code, "message": ex.message}); code = 3
         log(f"bench: {ex.message}; refusing to score (the scores would be 0, not a measurement)")
@@ -342,9 +376,10 @@ def run_once(sets, holdout, glob, interp, keep):
         else: shutil.rmtree(root, ignore_errors=True)
     bench["complete"] = code == 0 and not glob and set(out_sets) == set(sets)
     bench["generated_at"] = datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"); bench["duration_s"] = round(time.time() - t0, 1)
+    if "layout_model" not in vers: vers["layout_model"] = None
     if hidden_detail is not None:
         hidden_detail["generated_at"] = bench["generated_at"]
-        atomic_json(os.path.join(holdout, "last_cases.json"), hidden_detail)
+        atomic_json(last_cases or os.path.join(holdout, "last_cases.json"), hidden_detail)
     return bench, code
 
 
@@ -354,15 +389,18 @@ def summary(bench):
         print(f"{s}: boxes {bx['score']} (P50 {bx['precision_50']} R50 {bx['recall_50']}) | lines {ln['score']} ({ln['hits']}/{ln['n']}) | "
               f"parts {pt['score']} ({pt['hits']}/{pt['n']}) precision {pt['precision']} ({pt['good_ovals']}/{pt['ovals']}) | "
               f"first_highlight_ms p50 {sp['p50']} p95 {sp['p95']} (n {sp['n']})")
+        lay = b.get("layout")
+        if lay: print(f"{s}: layout pages {lay['pages']} detector {lay['src']['detector']} heuristic {lay['src']['heuristic']} missing {lay['missing']} "
+                      f"reasons {json.dumps(lay['reasons'], sort_keys=True)} detector ms/page p50 {lay['ms']['p50']} p95 {lay['ms']['p95']}")
 
 
-def record_baselines(bench, holdout):
+def record_baselines(bench, holdout, public_out=None, hidden_out=None):
     for s, blk in bench["sets"].items():
         bl = {"schema": "speakeasy-bench-baseline/1", "set": s, "recorded_at": bench["generated_at"], "commit": bench["commit"], "dirty": bench["dirty"],
               "config": bench["config"], "manifest_sha256": bench["fixtures"][s]["manifest_sha256"], "versions": bench["versions"],
               "metrics": S.baseline_metrics(blk), "detail": S.baseline_detail(blk, s == "public")}
-        p = os.path.join(HERE, "baseline.json") if s == "public" else os.path.join(holdout, "baseline.json")
-        atomic_json(p, bl); log(f"bench: baseline recorded for {s}: {p if s == 'public' else '<holdout>/baseline.json'}")
+        p = (public_out or os.path.join(HERE, "baseline.json")) if s == "public" else (hidden_out or os.path.join(holdout, "baseline.json"))
+        atomic_json(p, bl); log(f"bench: baseline recorded for {s}: {p if s == 'public' or hidden_out else '<holdout>/baseline.json'}")
 
 
 def main():
@@ -371,11 +409,25 @@ def main():
     ap.add_argument("--out", default=os.path.join(AUD, "reports", "bench.json")); ap.add_argument("--cases")
     ap.add_argument("--record-baseline", action="store_true"); ap.add_argument("--check-determinism", action="store_true")
     ap.add_argument("--keep-temp", action="store_true")
+    ap.add_argument("--layout-model", help="verified pp_doclayout_s.onnx, passed as SPEAKEASY_LAYOUT_MODEL (default: the caller's SPEAKEASY_LAYOUT_MODEL)")
+    ap.add_argument("--doc-python", help="interpreter for parse-pdf and SPEAKEASY_DOC_PYTHON (default: this one)")
+    ap.add_argument("--public-baseline-out"); ap.add_argument("--hidden-baseline-out")
+    ap.add_argument("--last-cases-out", help="hidden per-case detail (default <holdout>/last_cases.json)")
     a = ap.parse_args()
-    interp = sys.executable
-    import importlib.util
-    if importlib.util.find_spec("pypdfium2") is None:
+    interp = os.path.abspath(a.doc_python) if a.doc_python else sys.executable
+    pr = probe(interp)
+    if not pr: log(f"bench: cannot run {interp}"); sys.exit(2)
+    if not pr.get("import_pypdfium2"):
         log(f"bench: pypdfium2 not importable in {interp}; use the doc venv"); sys.exit(2)
+    layout_model = a.layout_model or os.environ.get("SPEAKEASY_LAYOUT_MODEL") or None
+    if layout_model:
+        layout_model = os.path.abspath(os.path.expanduser(layout_model))
+        if not os.path.isfile(layout_model): log(f"bench: layout model not found: {layout_model}"); sys.exit(2)
+        if not (pr.get("import_onnxruntime") and pr.get("import_numpy")):
+            log(f"bench: --layout-model needs onnxruntime and numpy in {interp} (the run would silently measure the fallback)"); sys.exit(2)
+        log(f"bench: layout model {layout_model} (onnxruntime {pr.get('onnxruntime')})")
+    else:
+        log("bench: no layout model: this run measures the heuristic fallback")
     holdout = os.path.abspath(os.path.expanduser(a.holdout or os.environ.get("SPEAKEASY_HOLDOUT") or "~/speakeasy-holdout/bench"))
     has_hidden = os.path.exists(os.path.join(holdout, "manifest.json"))
     if a.set is None:
@@ -399,12 +451,13 @@ def main():
             sys.exit(2)
     for sig in (signal.SIGTERM, signal.SIGHUP):
         signal.signal(sig, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
-    bench, code = run_once(sets, holdout, a.cases, interp, a.keep_temp)
+    lc = os.path.abspath(os.path.expanduser(a.last_cases_out)) if a.last_cases_out else None
+    bench, code = run_once(sets, holdout, a.cases, interp, a.keep_temp, layout_model, pr, lc)
     atomic_json(a.out, bench); summary(bench)
     if code: sys.exit(code)
     if a.check_determinism:
         log("bench: determinism run 2")
-        b2, code2 = run_once(sets, holdout, a.cases, interp, a.keep_temp)
+        b2, code2 = run_once(sets, holdout, a.cases, interp, a.keep_temp, layout_model, pr, lc)
         if code2: atomic_json(a.out, b2); sys.exit(code2)
         diffs = S.diff_paths(S.determinism_view(bench), S.determinism_view(b2))
         if diffs:
@@ -413,7 +466,8 @@ def main():
         log("bench: determinism ok (two runs identical)")
     if a.record_baseline:
         if not bench["complete"]: log("bench: --record-baseline needs a complete run"); sys.exit(3)
-        record_baselines(bench, holdout)
+        po, ho = (os.path.abspath(os.path.expanduser(x)) if x else None for x in (a.public_baseline_out, a.hidden_baseline_out))
+        record_baselines(bench, holdout, po, ho)
 
 
 if __name__ == "__main__":

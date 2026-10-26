@@ -3,6 +3,10 @@ Speakeasy.app
 - Package layout, the status-bar controller pattern and the permission helpers (Permissions.swift) are adapted from
   open-wispr by human37, https://github.com/human37/open-wispr, MIT License, Copyright (c) 2026 human37.
 - Global hotkey: KeyboardShortcuts by Sindre Sorhus, https://github.com/sindresorhus/KeyboardShortcuts, MIT License.
+- PDF layout model (Contents/Resources/models/pp_doclayout_s.onnx): PP-DocLayout-S by PaddlePaddle
+  (https://github.com/PaddlePaddle/PaddleOCR), Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0),
+  unmodified ONNX export from https://huggingface.co/stefanj0/PP-DocLayout-S-ONNX (revision 7e851b9e5ad6).
+  Run with ONNX Runtime by Microsoft, https://github.com/microsoft/onnxruntime, MIT License.
 
 MIT License (open-wispr)
 

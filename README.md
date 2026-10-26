@@ -70,6 +70,10 @@ box targets the exact line, figure or panel; the live tracker maps page coordina
 - PDF parsing uses [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (PDFium; Apache-2.0/BSD), installed into the Kokoro venv by `install.sh`
   (and bundled into the app). Markdown parsing is stdlib only. PyMuPDF (**AGPL-3.0**) is only a test dependency
   (box-accuracy ground truth and doc fixtures in `tests/requirements.txt`); the app never ships or imports it.
+- PDF page layout (paragraph, caption, figure and table regions) uses the PP-DocLayout-S model (PaddlePaddle,
+  **Apache-2.0**; ONNX export [stefanj0/PP-DocLayout-S-ONNX](https://huggingface.co/stefanj0/PP-DocLayout-S-ONNX)) on
+  [onnxruntime](https://github.com/microsoft/onnxruntime) (MIT). `install.sh` fetches the pinned file into
+  `~/.speakeasy/models/` and checks its sha256; without it, or with `SPEAKEASY_LAYOUT=off`, the parse uses its heuristics.
 
 ### Figures: panels and sub-objects (phase 3)
 
@@ -126,7 +130,7 @@ For PDFs and pages where selecting text is awkward: press Control-Option-A (or "
 ## Credits
 
 - [open-wispr](https://github.com/human37/open-wispr) (MIT): the menu-bar app's package layout, status-bar controller and recording-pill pattern. See `app/NOTICE`.
-- [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT), [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0/BSD), [Kokoro](https://github.com/hexgrad/kokoro) via [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Ollama](https://ollama.com), [python-build-standalone](https://github.com/astral-sh/python-build-standalone).
+- [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT), [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0/BSD), [PP-DocLayout-S](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0) via [onnxruntime](https://github.com/microsoft/onnxruntime) (MIT), [Kokoro](https://github.com/hexgrad/kokoro) via [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Ollama](https://ollama.com), [python-build-standalone](https://github.com/astral-sh/python-build-standalone).
 
 ## Optional cloud (OpenRouter)
 

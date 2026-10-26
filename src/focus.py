@@ -456,7 +456,7 @@ class Focus:
         if not st: return None
         for f in d.get("figures") or []:
             if f.get("kind") != "table" or f.get("page") != d["page"]["n"]: continue
-            b = f["bbox"]
+            b = docmap._union([f["bbox"], f.get("caption_bbox") or f["bbox"]])   # the table box no longer holds its caption
             inside = [l for l in d["page"]["lines"] if docmap._inside(l[:4], b, 2) and set(docmap._toks(l[4])) & st]
             cov = len(st & set(t for l in inside for t in docmap._toks(l[4]))) / len(st)
             if inside and cov >= 0.6: self._tb = f; break
@@ -468,10 +468,10 @@ class Focus:
         ix = self._doc_lines(1, len(self.lines)) if self.lines else []
         if ix:
             ls = [d["page"]["lines"][i] for i in ix]
-            # keep the dominant block: lines from another column that happen to share words must not widen it
+            # keep the dominant block's column: lines from another column that happen to share words must not widen it
             ys = sorted(l[1] for l in ls); med = ys[len(ys) // 2]
-            xs = sorted(l[0] for l in ls); mx = xs[len(xs) // 2]
-            ls = [l for l in ls if abs(l[0] - mx) < 60] or ls
+            blk = docmap.paragraph_region(d["page"], [sorted(ix, key=lambda i: d["page"]["lines"][i][0])[len(ix) // 2]])
+            if blk: ls = [l for l in ls if blk[0] - 4 <= (l[0] + l[2]) / 2 <= blk[2] + 4] or ls
             ls.sort(key=lambda l: l[1]); i0 = min(range(len(ls)), key=lambda i: abs(ls[i][1] - med))
             a = b = i0                                                  # the contiguous run of lines around the median
             while a > 0 and ls[a][1] - ls[a - 1][3] < 25: a -= 1
