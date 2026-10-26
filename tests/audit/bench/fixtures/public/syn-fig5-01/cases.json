@@ -1,0 +1,413 @@
+[
+ {
+  "case_id": "syn-fig5-01/c01",
+  "doc_id": "syn-fig5-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "We recorded ear signals from twenty volunteers during a",
+    "rect": [
+     42.0,
+     76.7,
+     267.59,
+     85.03
+    ]
+   },
+   {
+    "text": "ninety minute simulated drive. Each volunteer wore a soft",
+    "rect": [
+     42.0,
+     88.2,
+     270.1,
+     96.53
+    ]
+   },
+   {
+    "text": "earpiece with four dry electrodes and a reference behind the",
+    "rect": [
+     42.0,
+     99.7,
+     282.12,
+     108.03
+    ]
+   },
+   {
+    "text": "ear. The drive was monotonous on purpose, with long straight",
+    "rect": [
+     42.0,
+     111.2,
+     288.11,
+     119.53
+    ]
+   },
+   {
+    "text": "roads and very little traffic. Drowsiness was rated by two",
+    "rect": [
+     42.0,
+     122.7,
+     266.07,
+     131.03
+    ]
+   },
+   {
+    "text": "observers who watched the face camera without seeing the",
+    "rect": [
+     42.0,
+     134.2,
+     278.61,
+     142.52
+    ]
+   },
+   {
+    "text": "signals.",
+    "rect": [
+     42.0,
+     145.7,
+     72.51,
+     154.02
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "We recorded ear signals from twenty volunteers during a ninety minute simulated drive."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "Each volunteer wore a soft earpiece with four dry electrodes and a reference behind the ear."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "The drive was monotonous on purpose, with long straight roads and very little traffic."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "Drowsiness was rated by two observers who watched the face camera without seeing the signals."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fig5-01/c02",
+  "doc_id": "syn-fig5-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The observers agreed on the drowsiness rating in most of the",
+    "rect": [
+     42.0,
+     383.7,
+     286.61,
+     392.02
+    ]
+   },
+   {
+    "text": "one minute windows. Where they disagreed, the difference",
+    "rect": [
+     42.0,
+     395.2,
+     276.11,
+     403.52
+    ]
+   },
+   {
+    "text": "was almost always a single step on the rating scale. We used",
+    "rect": [
+     42.0,
+     406.7,
+     286.6,
+     415.02
+    ]
+   },
+   {
+    "text": "the mean of the two ratings as the training target for the",
+    "rect": [
+     42.0,
+     418.2,
+     263.12,
+     426.52
+    ]
+   },
+   {
+    "text": "detector.",
+    "rect": [
+     42.0,
+     429.7,
+     77.02,
+     438.02
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s10",
+    "text": "The observers agreed on the drowsiness rating in most of the one minute windows."
+   },
+   {
+    "sentence_id": "s11",
+    "text": "Where they disagreed, the difference was almost always a single step on the rating scale."
+   },
+   {
+    "sentence_id": "s12",
+    "text": "We used the mean of the two ratings as the training target for the detector."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fig5-01/c03",
+  "doc_id": "syn-fig5-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "The detector was trained on one minute windows from",
+    "rect": [
+     42.0,
+     433.5,
+     258.09,
+     441.82
+    ]
+   },
+   {
+    "text": "sixteen volunteers. Each window was filtered, cut into short",
+    "rect": [
+     42.0,
+     445.0,
+     277.1,
+     453.32
+    ]
+   },
+   {
+    "text": "epochs and summarised by a small set of spectral features. A",
+    "rect": [
+     42.0,
+     456.5,
+     287.6,
+     464.82
+    ]
+   },
+   {
+    "text": "gradient boosted classifier then predicted the mean observer",
+    "rect": [
+     42.0,
+     468.0,
+     283.61,
+     476.32
+    ]
+   },
+   {
+    "text": "rating for the window.",
+    "rect": [
+     42.0,
+     479.5,
+     127.54,
+     487.82
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s20",
+    "text": "The detector was trained on one minute windows from sixteen volunteers."
+   },
+   {
+    "sentence_id": "s21",
+    "text": "Each window was filtered, cut into short epochs and summarised by a small set of spectral features."
+   },
+   {
+    "sentence_id": "s22",
+    "text": "A gradient boosted classifier then predicted the mean observer rating for the window."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fig5-01/c04",
+  "doc_id": "syn-fig5-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Validation used the four remaining volunteers, whose drives",
+    "rect": [
+     42.0,
+     496.0,
+     280.1,
+     504.32
+    ]
+   },
+   {
+    "text": "were never seen during training. The predicted ratings agreed",
+    "rect": [
+     42.0,
+     507.5,
+     288.11,
+     515.83
+    ]
+   },
+   {
+    "text": "with the observers about as well as the observers agreed with",
+    "rect": [
+     42.0,
+     519.0,
+     288.11,
+     527.33
+    ]
+   },
+   {
+    "text": "each other. The largest errors occurred in the first minutes of",
+    "rect": [
+     42.0,
+     530.5,
+     283.6,
+     538.83
+    ]
+   },
+   {
+    "text": "each drive, when ratings were low and noisy.",
+    "rect": [
+     42.0,
+     542.0,
+     221.07,
+     550.33
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s23",
+    "text": "Validation used the four remaining volunteers, whose drives were never seen during training."
+   },
+   {
+    "sentence_id": "s24",
+    "text": "The predicted ratings agreed with the observers about as well as the observers agreed with each other."
+   },
+   {
+    "sentence_id": "s25",
+    "text": "The largest errors occurred in the first minutes of each drive, when ratings were low and noisy."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fig5-01/c05",
+  "doc_id": "syn-fig5-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Fig. 5: Drowsiness detector training and validation diagram. The upper panel shows training and the lower panel shows validation on",
+    "rect": [
+     42.0,
+     400.5,
+     539.47,
+     408.36
+    ]
+   },
+   {
+    "text": "held-out drives.",
+    "rect": [
+     42.0,
+     411.0,
+     100.11,
+     418.86
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s26",
+    "text": "Fig. 5 shows how the detector is trained and validated."
+   },
+   {
+    "sentence_id": "s27",
+    "text": "In panel a, the Recordings come from sixteen volunteers."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "The Filtering step removes drift and line noise."
+   },
+   {
+    "sentence_id": "s29",
+    "text": "The Features step computes band power in each epoch."
+   },
+   {
+    "sentence_id": "s30",
+    "text": "In panel b, the Held-out drive is cut into windows."
+   },
+   {
+    "sentence_id": "s31",
+    "text": "The Scoring step compares the prediction with the observers."
+   },
+   {
+    "sentence_id": "s32",
+    "text": "Agreement is reported per volunteer."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fig5-01/c06",
+  "doc_id": "syn-fig5-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Fig. 5: Drowsiness detector training and validation diagram. The upper panel shows training and the lower panel shows validation on",
+    "rect": [
+     42.0,
+     400.5,
+     539.47,
+     408.36
+    ]
+   },
+   {
+    "text": "held-out drives.",
+    "rect": [
+     42.0,
+     411.0,
+     100.11,
+     418.86
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s18",
+    "text": "Fig. 5: Drowsiness detector training and validation diagram."
+   },
+   {
+    "sentence_id": "s19",
+    "text": "The upper panel shows training and the lower panel shows validation on held-out drives."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fig5-01/c07",
+  "doc_id": "syn-fig5-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Fig. 4: Drowsiness ratings over time. Ratings rise steadily after",
+    "rect": [
+     42.0,
+     350.7,
+     277.24,
+     358.56
+    ]
+   },
+   {
+    "text": "the first half hour of driving.",
+    "rect": [
+     42.0,
+     361.2,
+     144.52,
+     369.06
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s8",
+    "text": "Fig. 4: Drowsiness ratings over time."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "Ratings rise steadily after the first half hour of driving."
+   }
+  ]
+ }
+]

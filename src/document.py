@@ -11,9 +11,9 @@ class DocJob(threading.Thread):
     _ctx = None
     path = None
     img_given = False
-    def __init__(self, hint_path, sel_text, rec):
+    def __init__(self, hint_path, sel_text, rec, run_t0):
         super().__init__(daemon=True)
-        self.hint_path, self.sel, self.rec, self.t0 = hint_path, sel_text or "", rec, time.time()
+        self.hint_path, self.sel, self.rec, self.t0, self.run_t0 = hint_path, sel_text or "", rec, time.time(), run_t0
         self.out = None
         self.done = threading.Event()
         self._fill(doc_source=None, doc_path_hash=None, page=None, figures_found=None, doc_map_method=None, doc_ms=None, doc_cache=None, doc_note=None)
@@ -24,7 +24,7 @@ class DocJob(threading.Thread):
         except Exception as e:
             self._fill(doc_note=f"{type(e).__name__}: {e}"[:160])
         finally:
-            self._fill(doc_ms=int((time.time() - self.t0) * 1000)); self.done.set()
+            self._fill(doc_ms=int((time.time() - self.t0) * 1000), doc_ready_ms=int((time.time() - self.run_t0) * 1000)); self.done.set()
     def _run(self):
         mode = os.environ.get("SPEAKEASY_DOC_READ", "local").lower()
         if mode not in ("local", "all"): self._fill(doc_note="SPEAKEASY_DOC_READ=off"); return
@@ -63,7 +63,7 @@ class DocJob(threading.Thread):
                     k = re.sub(r"\s+", " ", l[4].strip().lower())
                     if len(k) >= 14 and k not in seen: seen.add(k); anc.append(l)
                 out["anchors"] = [[round(v, 1) for v in a[:4]] + [a[4][:80]] for a in anc][:48]
-                self._fill(page=pg["n"])
+                self._fill(page=pg["n"], doc_parse=docmap.parse_summary(pg))
         else:
             lines = doc["lines"]; first = next((l.strip() for l in self.sel.splitlines() if l.strip()), "")
             at = None

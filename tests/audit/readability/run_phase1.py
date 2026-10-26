@@ -43,6 +43,17 @@ SENT_ANSWER = ("Mirevolt has 42 quintessa units. Plumbrine has 77 quintessa unit
                "entry in this deliberately long comparison sentence that keeps going past the cut. Grelquist and dunmarrow are not in the table.")
 FIG_ANSWER = "In Figure 2, the tallest bar marks the zorblax peak. The leftmost bar is the smallest one."
 GROUND_BOX = '{"bbox_2d": [100, 200, 300, 600], "label": "bar"}'
+# Phase 2 (docs/contracts/phase2-logging.md, Acceptance "Key-set pins"): exactly these new keys are allowed; any other new key still fails.
+P2_RUN = {"first_focus_ms", "doc_ready_ms", "doc_parse", "ground_miss_reasons"}
+P2_MAP = {"sent", "score", "runner_up"}          # always present on map records
+P2_SHOW = {"sent"}                                # always present on show records (and hold clears)
+P2_DOC = {"target_src", "split_from"}             # inside show doc
+P2_LABEL_RE = re.compile(r"^(Figure|Table) \d+[a-h]?( row \d+)?( \(grounded\))?$")
+def p2_redact(label):
+    """Phase 2 F: the default-mode form of a label (part text after ': ' dropped; null when it cannot be put in the allowed form)."""
+    if label is None or (isinstance(label, str) and P2_LABEL_RE.match(label)): return label
+    m = re.match(r"^((?:Figure|Table) \d+[a-h]?(?: row \d+)?)(?::.*?)?( \(grounded\))?$", str(label), re.S)
+    return (m.group(1) + (m.group(2) or "")) if m and P2_LABEL_RE.match(m.group(1) + (m.group(2) or "")) else None
 
 def hint_for(home):
     p = os.path.join(os.path.dirname(home), "hint.json")
@@ -132,7 +143,7 @@ def global_checks():
             (b, c) = out; tag = f"G_same_{cname}_{iname}"
             add(f"{tag}_stdout_stderr_rc", b[:3] == c[:3], "" if b[:3] == c[:3] else f"base={b[:3]!r:.200} cur={c[:3]!r:.200}")
             extra = set(c[3]) - set(b[3]); missing = set(b[3]) - set(c[3])
-            add(f"{tag}_runs_keyset", not missing and not (extra - {"ground_mode_note", "ground_provider", "ground_box_convention"}) and not (extra & {"ground_provider", "ground_box_convention"}),
+            add(f"{tag}_runs_keyset", not missing and not (extra - {"ground_mode_note", "ground_provider", "ground_box_convention"} - P2_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
                 {"missing": sorted(missing), "extra": sorted(extra)})
             diff = {k: (b[4][k], c[4][k]) for k in STABLE if b[4][k] != c[4][k]}
             add(f"{tag}_runs_stable_values", not diff, diff)
@@ -523,9 +534,9 @@ def privacy():
         TOL = {"hold", "late_fit"}
         bs, bm = keys(O["base"]["F"], "show"), keys(O["base"]["F"], "map")
         for nm, drop, addk in (("off", {"expires", "border", "ref_src", "text", "src"}, {"text_len", "text_hash", "src_n", "src_hash"}), ("on", {"expires", "border", "ref_src"}, {"text_len", "text_hash", "src_n", "src_hash"})):
-            ws = (bs - drop) | addk; cs = keys(O[nm]["F"], "show")
+            ws = (bs - drop) | addk | P2_SHOW; cs = keys(O[nm]["F"], "show")
             add(f"E_{nm}_show_keyset_vs_baseline", (ws ^ cs) <= TOL, {"missing": sorted(ws - cs), "extra": sorted(cs - ws)})
-            wm = (bm - ({"text"} if nm == "off" else set())) | {"text_len", "text_hash"}; cm = keys(O[nm]["F"], "map")
+            wm = (bm - ({"text"} if nm == "off" else set())) | {"text_len", "text_hash"} | P2_MAP; cm = keys(O[nm]["F"], "map")
             add(f"E_{nm}_map_keyset_vs_baseline", wm == cm, {"missing": sorted(wm - cm), "extra": sorted(cm - wm)})
             cnt = lambda F: {k: len(v) for k, v in by_state(F, lambda x: 1).items()}
             add(f"E_{nm}_same_event_counts_as_baseline", cnt(O[nm]["F"]) == cnt(O["base"]["F"]), (cnt(O[nm]["F"]), cnt(O["base"]["F"])))
@@ -546,16 +557,22 @@ def privacy():
         hits = {f: sentinel_hits(t) for f, t in L.all_text_under(os.path.join(P["off"]["home"], "logs")).items() if sentinel_hits(t)}
         add("E_pdf_default_no_caption_or_src_text_in_logs", not hits, hits)
         labs = lambda F: [x["doc"].get("label") for x in F if x.get("state") == "show" and isinstance(x.get("doc"), dict)]
-        add("E_pdf_doc_label_unchanged", labs(P["off"]["focus"]) == labs(P["base"]["focus"]) and labs(P["off"]["focus"]), (labs(P["off"]["focus"]), labs(P["base"]["focus"])))
+        # Phase 2 F: default-mode labels are the redacted form of the baseline label; with SPEAKEASY_LOG_TEXT=1 they are unchanged
+        add("E_pdf_doc_label_default_is_redacted_baseline", labs(P["off"]["focus"]) == [p2_redact(l) for l in labs(P["base"]["focus"])] and labs(P["off"]["focus"]), (labs(P["off"]["focus"]), labs(P["base"]["focus"])))
+        add("E_pdf_doc_label_default_matches_F_pattern", all(l is None or (isinstance(l, str) and P2_LABEL_RE.match(l)) for l in labs(P["off"]["focus"]) + [((s.get("doc") or {}).get("label")) for s in P["off"]["live"] if s.get("state") == "show"]), labs(P["off"]["focus"])[:4])
+        add("E_pdf_doc_label_logtext_unchanged", labs(P["on"]["focus"]) == labs(P["base"]["focus"]) and labs(P["on"]["focus"]), (labs(P["on"]["focus"]), labs(P["base"]["focus"])))
         livesh = [s for s in P["off"]["live"] if s.get("state") == "show"]
         add("E_pdf_live_file_has_src_and_full_anchors", livesh and all(s.get("src") for s in livesh) and all(len(a) == 5 and isinstance(a[4], str) for s in livesh for a in (s.get("doc") or {}).get("anchors") or []) and any((s.get("doc") or {}).get("anchors") for s in livesh), [s.get("doc", {}).get("anchors", [])[:1] for s in livesh][:1])
         add("E_pdf_live_file_no_text_either_mode", not any("text" in s for s in P["off"]["live"] + P["on"]["live"]), "")
         add("E_F_pdf_background_doc_visible_to_focus", any(isinstance(x.get("doc"), dict) and x["doc"].get("target") for x in P["off"]["focus"] if x.get("state") == "show"), "")
         bk = set().union(*[set(x) for x in P["base"]["focus"] if x.get("state") == "show"] or [set()]); ck = set().union(*[set(x) for x in P["off"]["focus"] if x.get("state") == "show"] or [set()])
         ws = (bk - {"expires", "border", "ref_src", "text", "src"}) | {"text_len", "text_hash", "src_n", "src_hash"}
+        ws |= P2_SHOW
         add("E_pdf_show_keyset_vs_baseline", (ws ^ ck) <= {"hold", "late_fit"}, {"missing": sorted(ws - ck), "extra": sorted(ck - ws)})
+        dk = lambda o: set().union(*[set(x["doc"]) for x in o["focus"] if x.get("state") == "show" and isinstance(x.get("doc"), dict)] or [set()])
+        add("E_pdf_show_doc_keyset_vs_baseline", not (dk(P["base"]) - dk(P["off"])) and not (dk(P["off"]) - dk(P["base"]) - P2_DOC), {"missing": sorted(dk(P["base"]) - dk(P["off"])), "extra": sorted(dk(P["off"]) - dk(P["base"]) - P2_DOC)})
         rk = lambda o: set(o["runs"][-1]) if o["runs"] else set()
-        add("E_pdf_runs_keyset_vs_baseline", rk(P["base"]) == rk(P["off"]), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]))})
+        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN)})
     finally: m.stop()
     # dry-run: never writes the live focus file
     m = Mock(MOCK_TEXT=SENT_ANSWER)

@@ -7,3 +7,5 @@ reportlab
 pypdfium2
 pymupdf
 pyflakes
+# pdfplumber (MIT): test-only, real-PDF ground truth for the Phase 2 benchmark (tests/audit/bench/gen/snap_gt.py)
+pdfplumber

@@ -1,0 +1,80 @@
+{
+ "doc_id": "syn-panels-01",
+ "page": [612, 792], "margins": [60, 60, 60, 60], "columns": 1,
+ "font": "Times-Roman", "bold": "Times-Bold", "size": 11, "leading": 14, "para_gap": 6,
+ "footer": "Synthetic panels benchmark", "page_numbers": true,
+ "flow": [
+  {"heading": "A two-stage water treatment pilot"},
+  {"para": "p1", "s": [
+   "The pilot plant treats river water in two stages before it reaches the storage tank.",
+   "The first stage removes sand and large particles, and the second stage removes fine particles and germs.",
+   "Both stages were built from standard parts so that the plant can be copied by small towns.",
+   "The rest of this note explains the layout of each stage and the sensors that watch it."]},
+  {"figure": "F1", "label": "Figure 1", "h": 190, "shape": "round",
+   "panels": [
+    {"label": "a", "label_style": "a)", "cols": 2, "parts": [
+     {"name": "Intake", "style": "inside"}, {"name": "Screen", "style": "inside"}, {"name": "Settler", "style": "adjacent"}, {"name": "Sand filter", "style": "adjacent"}]},
+    {"label": "b", "label_style": "a)", "cols": 3, "parts": [
+     {"name": "Dosing", "style": "inside"}, {"name": "Membrane", "style": "inside"}, {"name": "callout", "style": "callout", "n": 1},
+     {"name": "UV lamp", "style": "adjacent"}, {"name": "Storage", "style": "adjacent"}, {"name": "callout", "style": "callout", "n": 2}]}],
+   "caption": ["Figure 1: The two treatment stages.", "Stage one is shown on the left and stage two on the right."]},
+  {"para": "p2", "s": [
+   "Water is pumped from the river through a coarse intake and a rotating screen.",
+   "The settler gives heavy particles about forty minutes to sink before the water moves on.",
+   "A slow sand filter then removes most of the remaining turbidity.",
+   "The second stage adds a small dose of coagulant, which helps the membrane catch fine particles."]},
+  {"para": "p3", "s": [
+   "An ultraviolet lamp treats the water just before it enters the storage tank.",
+   "Two unnamed vessels in the second stage hold backwash water and are marked by numbered callouts.",
+   "Operators drain these vessels once a day and log the volume they remove."]},
+  {"break": "page"},
+  {"heading": "Sensor positions"},
+  {"para": "p4", "s": [
+   "Four sensors watch the plant, and each one is marked with a numbered callout in the sensor drawing.",
+   "The turbidity probe sits after the sand filter and is the most important single reading.",
+   "A pressure gauge across the membrane shows when the membrane needs cleaning.",
+   "The other two sensors measure the lamp intensity and the level of the storage tank."]},
+  {"figure": "F2", "label": "Figure 2", "h": 150, "shape": "rect",
+   "panels": [{"label_style": "none", "cols": 4, "parts": [
+     {"name": "callout", "style": "callout", "n": 3}, {"name": "callout", "style": "callout", "n": 4},
+     {"name": "callout", "style": "callout", "n": 5}, {"name": "callout", "style": "callout", "n": 6}]}],
+   "caption": ["Figure 2: Sensor drawing.", "Numbers mark the four sensors described in the text."]},
+  {"table": "T1", "label": "Table 1",
+   "caption": ["Table 1: Alarm limits used during the pilot."],
+   "rows": [["Sensor", "Low", "High", "Action"], ["Turbidity", "none", "1.0 NTU", "stop outflow"], ["Membrane pressure", "0.2 bar", "1.5 bar", "clean"],
+            ["Lamp intensity", "60 %", "none", "replace lamp"], ["Tank level", "10 %", "95 %", "adjust pump"]]},
+  {"para": "p5", "s": [
+   "Alarm limits were set conservatively for the first season and will be relaxed once more data is available.",
+   "Every alarm sends a text message to the operator on duty and is written to the plant log.",
+   "During the pilot the turbidity alarm fired six times, always after heavy rain upstream."]}
+ ],
+ "cases": [
+  {"id": "c01", "select": "p1"},
+  {"id": "c02", "select": "p2"},
+  {"id": "c03", "select": "F1:caption", "script": [
+   {"text": "Figure 1 shows both stages side by side.", "score": "none"},
+   {"text": "In panel a, river water first passes the Intake.", "part": "a:Intake"},
+   {"text": "The rotating Screen catches leaves and plastic.", "part": "a:Screen"},
+   {"text": "Heavy particles sink in the Settler.", "part": "a:Settler"},
+   {"text": "The Sand filter removes most of the remaining turbidity.", "part": "a:Sand filter"}]},
+  {"id": "c04", "select": "F1:caption", "script": [
+   {"text": "Panel b shows the second stage.", "score": "none"},
+   {"text": "The Dosing unit adds a small amount of coagulant.", "part": "b:Dosing"},
+   {"text": "The Membrane catches the fine particles.", "part": "b:Membrane"},
+   {"text": "The UV lamp treats the water before storage.", "part": "b:UV lamp"},
+   {"text": "Clean water waits in the Storage tank.", "part": "b:Storage"},
+   {"text": "Callout 1 marks the first backwash vessel.", "part": "b:callout 1"},
+   {"text": "Callout 2 marks the second backwash vessel.", "part": "b:callout 2"}]},
+  {"id": "c05", "select": "F2:caption", "script": [
+   {"text": "Figure 2 places the four sensors.", "score": "none"},
+   {"text": "Callout 3 is the turbidity probe after the sand filter.", "part": "callout 3"},
+   {"text": "Callout 4 is the pressure gauge across the membrane.", "part": "callout 4"},
+   {"text": "Callout 5 measures the lamp intensity.", "part": "callout 5"},
+   {"text": "Callout 6 reads the level of the storage tank.", "part": "callout 6"}]},
+  {"id": "c06", "select": "p4"},
+  {"id": "c07", "select": "p5"},
+  {"id": "c08", "select": "T1:caption", "script": [
+   {"text": "Table 1 lists the alarm limits.", "score": "none"},
+   {"text": "Turbidity has a high limit of one unit.", "score": "none"}]}
+ ]
+}

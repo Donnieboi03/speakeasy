@@ -1,0 +1,88 @@
+{
+ "schema": "speakeasy-bench-baseline/1",
+ "set": "public",
+ "recorded_at": "2026-10-26T08:58:24+00:00",
+ "commit": "7004d6ee712a968da5355d4e587077d896ec0efb",
+ "dirty": true,
+ "config": {
+  "box_iou_hit": 0.75,
+  "box_iou_pr": 0.5,
+  "line_cover_frac": 0.75,
+  "line_axis_overlap": 0.5,
+  "line_extra_max": 1,
+  "speed_budget_ms": 300,
+  "mock_first_delay_s": 0.5,
+  "mock_token_delay_s": 0.002,
+  "stub_play_s": 0.05,
+  "geometry": {
+   "zoom": 1.25,
+   "backing": 2,
+   "display": [
+    0,
+    33
+   ]
+  }
+ },
+ "manifest_sha256": "b74c84a3fc5c4d237b2793220d14ebfd9bd8e4ef70d35d8ed480f9f1ec6cf783",
+ "versions": {
+  "python": "3.15.0",
+  "pypdfium2": "5.14.0",
+  "reportlab": "5.1.0",
+  "pdfplumber": "0.11.10"
+ },
+ "metrics": {
+  "boxes": {
+   "score": 60.66,
+   "precision_50": 41.55,
+   "recall_50": 74.59
+  },
+  "lines": {
+   "score": 38.36
+  },
+  "parts": {
+   "score": 63.08,
+   "precision": 66.13
+  },
+  "speed": {
+   "p50": 31,
+   "p95": 48
+  }
+ },
+ "detail": {
+  "boxes.by_kind": {
+   "paragraph": 54.41,
+   "caption": 92.59,
+   "figure": 68.75,
+   "table": 9.09
+  },
+  "boxes.by_subset": {
+   "real": 37.5,
+   "synthetic": 75.68
+  },
+  "lines.by_subset": {
+   "real": 31.91,
+   "synthetic": 41.41
+  },
+  "parts.by_subset": {
+   "real": 34.78,
+   "synthetic": 78.57
+  },
+  "parts.by_style": {
+   "inside": 74.42,
+   "adjacent": 69.23,
+   "callout": 0.0,
+   "raster": 0.0
+  },
+  "boxes.by_doc": {
+   "arx-2402.10153": 16.67,
+   "arx-2405.08223": 44.44,
+   "arx-2406.06619": 44.44,
+   "syn-capnamed-01": 72.73,
+   "syn-fig5-01": 85.71,
+   "syn-fullwidth-01": 72.73,
+   "syn-panels-01": 72.73,
+   "syn-report-01": 82.35,
+   "syn-twocol-01": 60.0
+  }
+ }
+}

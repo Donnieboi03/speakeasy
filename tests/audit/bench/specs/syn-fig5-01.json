@@ -1,0 +1,68 @@
+{
+ "doc_id": "syn-fig5-01",
+ "page": [595.3, 790.9], "margins": [42, 56, 42, 56], "columns": 2, "gutter": 18,
+ "font": "Helvetica", "bold": "Helvetica-Bold", "size": 9, "leading": 11.5, "para_gap": 5, "heading_size": 10.5,
+ "caption_size": 8.5, "caption_leading": 10.5,
+ "header": "Synthetic Communications | Article", "footer": "Synthetic Communications (2026) 4:12", "page_numbers": true,
+ "flow": [
+  {"heading": "Results"},
+  {"para": "p1", "s": [
+   "We recorded ear signals from twenty volunteers during a ninety minute simulated drive.",
+   "Each volunteer wore a soft earpiece with four dry electrodes and a reference behind the ear.",
+   "The drive was monotonous on purpose, with long straight roads and very little traffic.",
+   "Drowsiness was rated by two observers who watched the face camera without seeing the signals."]},
+  {"para": "p2", "s": [
+   "Signal quality was good for most of the session and degraded mainly when volunteers touched the earpiece.",
+   "We removed segments with large movement artefacts before any further analysis.",
+   "On average this removed six percent of each recording."]},
+  {"figure": "F4", "label": "Figure 4", "h": 120, "frame": false,
+   "panels": [{"label_style": "none", "bars": [3, 5, 6, 8, 7, 9]}],
+   "caption": ["Fig. 4: Drowsiness ratings over time.", "Ratings rise steadily after the first half hour of driving."]},
+  {"para": "p3", "s": [
+   "The observers agreed on the drowsiness rating in most of the one minute windows.",
+   "Where they disagreed, the difference was almost always a single step on the rating scale.",
+   "We used the mean of the two ratings as the training target for the detector."]},
+  {"table": "T2", "label": "Table 2",
+   "caption": ["Table 2 | Volunteer summary."],
+   "rows": [["Group", "Count", "Age", "Hours"], ["Novice drivers", "8", "22", "12"], ["Regular drivers", "9", "34", "13.5"], ["Professional", "3", "45", "4.5"]]},
+  {"para": "p4", "s": [
+   "Novice drivers became drowsy earlier than regular drivers in almost every session.",
+   "Professional drivers stayed alert the longest, although the group was small.",
+   "These differences are consistent with earlier studies of simulated driving."]},
+  {"break": "page"},
+  {"table": "T1", "label": "Table 1", "span": "full", "w_frac": 0.55,
+   "caption": ["Table 1 | Relevant system and recorder specifications."],
+   "rows": [["Specification", "Value"], ["Maximum recording channels", "64"], ["Recording channels used", "11"], ["ADC resolution", "15 bits"], ["Wireless data rate", "2 Mbps"], ["Battery life", "44 h"]]},
+  {"figure": "F5", "label": "Figure 5", "span": "full", "h": 230, "panel_dir": "col", "shape": "rect",
+   "panels": [
+    {"label": "a", "label_style": "a)", "cols": 4, "parts": [
+     {"name": "Recordings"}, {"name": "Filtering"}, {"name": "Features"}, {"name": "Classifier"}]},
+    {"label": "b", "label_style": "a)", "cols": 4, "parts": [
+     {"name": "Held-out drive"}, {"name": "Windowing"}, {"name": "Scoring"}, {"name": "Agreement"}]}],
+   "caption": ["Fig. 5: Drowsiness detector training and validation diagram.", "The upper panel shows training and the lower panel shows validation on held-out drives."]},
+  {"para": "p5", "s": [
+   "The detector was trained on one minute windows from sixteen volunteers.",
+   "Each window was filtered, cut into short epochs and summarised by a small set of spectral features.",
+   "A gradient boosted classifier then predicted the mean observer rating for the window."]},
+  {"para": "p6", "s": [
+   "Validation used the four remaining volunteers, whose drives were never seen during training.",
+   "The predicted ratings agreed with the observers about as well as the observers agreed with each other.",
+   "The largest errors occurred in the first minutes of each drive, when ratings were low and noisy."]}
+ ],
+ "cases": [
+  {"id": "c01", "select": "p1"},
+  {"id": "c02", "select": "p3"},
+  {"id": "c03", "select": "p5"},
+  {"id": "c04", "select": "p6"},
+  {"id": "c05", "select": "F5:caption", "script": [
+   {"text": "Fig. 5 shows how the detector is trained and validated.", "score": "none"},
+   {"text": "In panel a, the Recordings come from sixteen volunteers.", "part": "a:Recordings"},
+   {"text": "The Filtering step removes drift and line noise.", "part": "a:Filtering"},
+   {"text": "The Features step computes band power in each epoch.", "part": "a:Features"},
+   {"text": "In panel b, the Held-out drive is cut into windows.", "part": "b:Held-out drive"},
+   {"text": "The Scoring step compares the prediction with the observers.", "part": "b:Scoring"},
+   {"text": "Agreement is reported per volunteer.", "part": "b:Agreement"}]},
+  {"id": "c06", "select": "F5:caption"},
+  {"id": "c07", "select": "F4:caption"}
+ ]
+}

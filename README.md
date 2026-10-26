@@ -86,7 +86,10 @@ request per sentence, local by default) and the box moves when it answers. `SPEA
 `~/.speakeasy/logs/tracker.jsonl`, one JSON object per line, written as each event happens:
 
 - `start` {ts, tracker_pid, pid, window_id, accessibility, screen_recording, fps, run_id, build, overlay}
-- `draw` {ts, tracker_pid, seq, rect (panel), text_rect, src: ax|ocr|doc|scroll-delta|event, overlay: swift-panel}
+- `draw` {ts, tracker_pid, seq, rect (panel), text_rect, src: ax|ocr|doc|scroll-delta|event, overlay: swift-panel, page_rect, page_fit}:
+  `page_rect` is `text_rect` mapped back to page points through the tracker's current fit, `page_fit` its source
+  (`anchors`: the tracker's own anchor fit carried by scroll deltas; `event-transform`: the event's `doc_transform` minus the
+  scroll offset); both null when the box has no page-space fit
 - `transition` {seq, old [w,h], new [w,h], nlines, held}: a new sentence box; `held:true` = oversized provisional box not drawn (previous box kept until OCR/AX finds the tight one). `ref-outline` {seq, rect, ms}: faint dashed outline on earlier lines for a sentence that refers back (the main box only moves forward). `focus.jsonl` map records carry `decision` forward|ref-back and `ref_lines`; runs.jsonl `focus_map` counts them.
 - `scroll-rejected` {reason: horizontal|no-content-move|overscroll, counts}: scroll deltas not applied (at most one record per 0.5 s). `scroll-stuck` {dir, pred, actual}: OCR showed the content did not move under accepted deltas (document edge). `correction` {dx, dy, from, to, after_ms}: OCR/AX snapped the box back. `hscroll-confirmed`, `box-out-of-window`. Exit record: `scroll_rejected`, `corrections`.
 - `draw-failed` {ts, tracker_pid, seq, why, after_ms: 300}: the panel should be showing but has not drawn 300 ms after the sentence started; the tracker also prints `NATIVE PANEL FAILED TO DRAW` to stderr. There is no fallback box.

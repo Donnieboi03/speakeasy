@@ -1,0 +1,83 @@
+{
+ "doc_id": "syn-report-01",
+ "page": [595.3, 841.9], "margins": [64, 72, 64, 72], "columns": 1,
+ "font": "Helvetica", "bold": "Helvetica-Bold", "size": 10.5, "leading": 14, "para_gap": 7,
+ "header": "Technical Report TR-17 | Coastal Sensor Network", "footer": "Synthetic benchmark document, not a real report", "page_numbers": true,
+ "flow": [
+  {"heading": "1 Overview"},
+  {"para": "p1", "s": [
+   "The coastal sensor network measures water temperature, salinity and wave height along a forty kilometre shoreline.",
+   "Each station reports a compact summary every ten minutes and keeps the raw samples for a full week.",
+   "The network was installed in three phases between early spring and late autumn.",
+   "Most stations run on solar power and a small battery that lasts about four cloudy days."]},
+  {"para": "p2", "s": [
+   "This report describes the hardware, the data path from the water to the archive, and the checks that run every night.",
+   "It also lists the faults we saw during the first winter and the changes we made in response.",
+   "Readers who only need the data format can skip ahead to the archive section."]},
+  {"heading": "2 Hardware"},
+  {"para": "p3", "s": [
+   "A station consists of a moored buoy, a short radio link and a relay mast on the nearest pier.",
+   "The buoy carries a temperature probe, a conductivity cell and a pressure sensor for waves.",
+   "Probes are cleaned by a small wiper that runs once an hour to slow the growth of algae.",
+   "The relay mast forwards the packets to a gateway in the harbour office over a licensed band."]},
+  {"figure": "F1", "label": "Figure 1", "h": 150, "shape": "round",
+   "panels": [{"label_style": "none", "cols": 4, "parts": [
+     {"name": "Buoy"}, {"name": "Relay mast"}, {"name": "Gateway"}, {"name": "Archive"}]}],
+   "caption": ["Figure 1: Data path of one station.", "Packets travel from the water to the archive in four hops."]},
+  {"para": "p4", "s": [
+   "The gateway buffers packets for up to two days when the uplink to the archive is down.",
+   "During the storm in November the buffer filled twice and the oldest summaries were dropped.",
+   "We have since doubled the buffer and added an alarm when it passes eighty percent."]},
+  {"break": "page"},
+  {"heading": "3 Measurements"},
+  {"para": "p5", "s": [
+   "Temperature readings are calibrated against a reference thermometer before every deployment.",
+   "Salinity is derived from conductivity and temperature using the standard practical scale.",
+   "Wave height is estimated from the pressure record over a twenty minute window.",
+   "All three values are stored with a quality flag that marks suspect or missing samples."]},
+  {"table": "T1", "label": "Table 1", "grid": true, "w_frac": 0.8,
+   "caption": ["Table 1: Sensor specifications for a standard station."],
+   "rows": [["Sensor", "Range", "Accuracy", "Rate"], ["Temperature", "-2 to 35 C", "0.05 C", "1 Hz"], ["Conductivity", "0 to 70 mS/cm", "0.1 mS/cm", "1 Hz"],
+            ["Pressure", "0 to 20 dbar", "0.02 dbar", "4 Hz"], ["Battery", "10 to 14 V", "0.1 V", "0.1 Hz"]]},
+  {"para": "p6", "s": [
+   "The quality flags are set by simple range checks and by a spike detector that compares each sample with its neighbours.",
+   "A sample that jumps by more than five standard deviations is marked as suspect but never deleted.",
+   "Analysts can override any flag, and every override is written to an audit log with a short reason."]},
+  {"heading": "4 Nightly checks"},
+  {"para": "p7", "s": [
+   "Every night a batch job compares each station with its two nearest neighbours.",
+   "Large and lasting differences usually point to fouling or a loose cable rather than a real event.",
+   "The job sends a short summary to the field team before seven in the morning."]},
+  {"figure": "F2", "label": "Figure 2", "h": 130, "frame": false,
+   "panels": [{"label": "a", "label_style": "(a)", "bars": [4, 7, 3, 6, 5]}, {"label": "b", "label_style": "(b)", "bars": [2, 3, 6, 4, 8]}],
+   "caption": ["Figure 2: Faults per week during the first winter.", "Panel a counts fouling events and panel b counts link outages."]},
+  {"break": "page"},
+  {"heading": "5 Archive"},
+  {"para": "p8", "s": [
+   "The archive keeps every summary and every raw sample in daily files, one file per station.",
+   "Files are compressed after thirty days and copied to a second site once a week.",
+   "A small web page lists the latest summary of each station and the time it arrived.",
+   "Researchers can request the raw files through a form that checks their affiliation."]},
+  {"table": "T2", "label": "Table 2",
+   "caption": ["Table 2: Storage used by the archive after the first year."],
+   "rows": [["Data", "Files", "Size"], ["Summaries", "8760", "1.2 GB"], ["Raw samples", "8760", "96 GB"], ["Audit log", "365", "40 MB"]]},
+  {"para": "p9", "s": [
+   "The second phase of the project will add dissolved oxygen sensors to six of the stations.",
+   "We also plan to replace the oldest batteries before the next winter season starts.",
+   "Comments on this report are welcome and should be sent to the network coordinator."]}
+ ],
+ "cases": [
+  {"id": "c01", "select": "p1"},
+  {"id": "c02", "select": "p3"},
+  {"id": "c03", "select": "p6"},
+  {"id": "c04", "select": "p8", "sentences": [0, 2]},
+  {"id": "c05", "select": "F1:caption"},
+  {"id": "c06", "select": "F1:caption", "script": [
+   {"text": "Figure 1 follows one packet from the sea to the office.", "score": "none"},
+   {"text": "It starts at the Buoy, which samples the water every second.", "part": "Buoy"},
+   {"text": "The Relay mast on the pier forwards each packet over the radio link.", "part": "Relay mast"},
+   {"text": "Next the Gateway in the harbour office buffers the packets.", "part": "Gateway"},
+   {"text": "Finally the Archive stores the summaries and the raw samples.", "part": "Archive"}]},
+  {"id": "c07", "select": "F2:caption"}
+ ]
+}

@@ -1,0 +1,51 @@
+{
+ "doc_id": "arx-2405.08223", "source": "arxiv", "arxiv": "2405.08223v1",
+ "title": "An information-theoretic model of shallow and deep language comprehension",
+ "authors": "Jiaxuan Li, Richard Futrell",
+ "license": "CC-BY-4.0", "license_url": "https://creativecommons.org/licenses/by/4.0/",
+ "url": "https://arxiv.org/pdf/2405.08223v1", "pdf_sha256": "4f511b933831c8365a4d62c0ff1952f91a5c1c4da3ec1178a093b2662d7653ea",
+ "features": {"columns": 2, "multi_panel": true},
+ "pages": [{"n": 5, "blocks": [
+   {"kind": "paragraph", "lines": [0, 5]},
+   {"kind": "figure", "region": [53, 155, 308, 461], "label": "Figure 5"},
+   {"kind": "caption", "lines": [121, 123], "label": "Figure 5"},
+   {"kind": "heading", "lines": [124, 124]},
+   {"kind": "paragraph", "lines": [125, 140]},
+   {"kind": "table", "region": [314, 70, 558, 233], "label": "Table 2"},
+   {"kind": "caption", "lines": [159, 162], "label": "Table 2"},
+   {"kind": "figure", "region": [314, 305, 559, 551], "label": "Figure 6"},
+   {"kind": "caption", "lines": [216, 222], "label": "Figure 6"},
+   {"kind": "paragraph", "lines": [223, 228]}]}],
+ "parts": [
+  {"name": "Human Effect Size", "figure": "Figure 6", "panel": "a", "page": 5, "region": [345, 326, 430, 412], "style": "adjacent"},
+  {"name": "Simulated Effect Size", "figure": "Figure 6", "panel": "b", "page": 5, "region": [462, 326, 547, 412], "style": "adjacent"},
+  {"name": "Surprisal Difference", "figure": "Figure 6", "panel": "c", "page": 5, "region": [345, 445, 430, 530], "style": "adjacent"},
+  {"name": "Edit Distance", "figure": "Figure 6", "panel": "d", "page": 5, "region": [462, 445, 547, 530], "style": "adjacent"}],
+ "cases": [
+  {"id": "c01", "page": 5, "lines": [0, 5], "script": [
+   {"text": "The different probability shift rate results in the increase of instantaneous effort to appear early or delayed."}]},
+  {"id": "c02", "page": 5, "lines": [125, 134], "script": [
+   {"text": "Dataset We used a set of three classic garden path constructions from large-scale syntactic ambiguity processing benchmark, consisting of self-paced reading time data from 2000 participants (Huang et al., 2023)."},
+   {"text": "The constructions include: Main verb/ reduced relative clause garden path (MV/RR), Direct object/ sentential complement garden path (NP/S), Transitive/ intransitive garden path (NP/Z) (see Table 2).", "score": "none"},
+   {"text": "There are 24 lexically matched item sets for each construction."},
+   {"text": "Each set has an experimental sentence with a tempory syntactic ambiguity and an unambiguous control sentence."}]},
+  {"id": "c03", "page": 5, "lines": [159, 162], "script": [
+   {"text": "Table 2: A list of garden path constructions and example sentences.", "score": "none"},
+   {"text": "Critical words are marked in bold."},
+   {"text": "The critical words in garden path sentences are underlined, and the control counterparts are italic."}]},
+  {"id": "c04", "page": 5, "lines": [216, 222], "script": [
+   {"text": "Figure 6: (a) Average effect size (RT difference to unambiguous control) at critical region estimated from human experiment.", "score": "none"},
+   {"text": "(b) Average effect size estimated from model simulation."},
+   {"text": "(c) Average surprisal difference between experimental and control sentences."},
+   {"text": "(d) Average edit distance between presented sentence and closest alternative."},
+   {"text": "Error bars show standard errors."}]},
+  {"id": "c05", "page": 5, "lines": [223, 227], "script": [
+   {"text": "Implementation We consider interpretations w ranging over the entire sentence, rather than only the critical word, with a set of alternatives consisting of all sentences in a lexically matched set across different constructions as possible interpretations given a single sentence."}]},
+  {"id": "c06", "page": 5, "lines": [216, 222], "figure": "Figure 6", "script": [
+   {"text": "Figure 6 compares the three constructions in four bar charts.", "score": "none"},
+   {"text": "In panel a, the Human Effect Size chart shows the largest effect for NP/Z.", "part": "a:Human Effect Size"},
+   {"text": "In panel b, the Simulated Effect Size chart follows the same order.", "part": "b:Simulated Effect Size"},
+   {"text": "In panel c, the Surprisal Difference chart is highest for MV/RR.", "part": "c:Surprisal Difference"},
+   {"text": "In panel d, the Edit Distance chart drops sharply for NP/Z.", "part": "d:Edit Distance"}]}
+ ]
+}

@@ -1,0 +1,61 @@
+{
+ "doc_id": "syn-twocol-01",
+ "page": [595.3, 841.9], "margins": [50, 60, 50, 60], "columns": 2, "gutter": 16,
+ "font": "DejaVuSans", "bold": "DejaVuSans", "size": 9, "leading": 12, "para_gap": 6, "heading_size": 10.5,
+ "hyphenate": true, "ligatures": true,
+ "footer": "Synthetic two-column benchmark page", "page_numbers": true,
+ "flow": [
+  {"heading": "Flow fields in microfluidic chips"},
+  {"para": "p1", "s": [
+   "Microfluidic chips move tiny volumes of fluid through channels that are narrower than a human hair.",
+   "Efficient mixing is difficult in such channels because the flow is laminar and diffusion is slow.",
+   "Engineers therefore add herringbone grooves or serpentine sections that fold the fluid onto itself.",
+   "The resulting flow field is complicated, and characterization usually requires fluorescence microscopy."]},
+  {"para": "p2", "s": [
+   "In this note we describe an offline workflow that reconstructs the flow field from short video clips.",
+   "The workflow first identifies fluorescent particles, then links them into trajectories across frames.",
+   "A final step fits a smooth velocity profile to the trajectories with a regularized interpolation."]},
+  {"figure": "F1", "label": "Figure 1", "h": 170, "shape": "rect",
+   "panels": [{"label_style": "none", "cols": 2, "parts": [
+     {"name": "Inlet", "style": "inside"}, {"name": "Mixer", "style": "inside"}, {"name": "Detector", "style": "adjacent"}, {"name": "Outlet", "style": "adjacent"}]}],
+   "caption": ["Figure 1: Layout of the test chip.", "Fluid enters at the inlet, passes the mixer and the detector, and leaves through the outlet."]},
+  {"para": "p3", "s": [
+   "Particle identification uses a difference of Gaussians filter followed by a local maximum search.",
+   "We found that a fixed threshold suffices for most clips, but flickering illumination needs an adaptive threshold.",
+   "Trajectory linking is the most fragile step, since particles leave the focal plane and reappear later.",
+   "Our linker tolerates gaps of up to three frames and rejects links that imply unphysical accelerations.",
+   "The interpolation step uses a thin plate spline with a stiffness coefficient chosen by cross validation.",
+   "On synthetic benchmarks the reconstructed velocity field differs from the reference by less than four percent.",
+   "The largest differences appear close to the channel walls, where few particles are observed.",
+   "Increasing the particle density reduces this effect but also increases the number of ambiguous links.",
+   "A practical compromise is a density of roughly one particle per fifty square micrometres.",
+   "Finally, all intermediate files are stored so that every reconstruction can be audited and reproduced."]},
+  {"para": "p4", "s": [
+   "We tested the workflow on three chip designs with different groove configurations.",
+   "Each design was filmed at five flow rates, giving fifteen clips of twenty seconds each.",
+   "Processing one clip takes about four minutes on an ordinary office laptop.",
+   "The differential pressure across the chip was recorded independently as a consistency check."]},
+  {"table": "T1", "label": "Table 1",
+   "caption": ["Table 1: Reconstruction error for each chip design."],
+   "rows": [["Design", "Grooves", "Error", "Links"], ["Straight", "none", "2.1 %", "4120"], ["Herringbone", "staggered", "3.8 %", "5310"], ["Serpentine", "folded", "3.2 %", "4870"]]},
+  {"para": "p5", "s": [
+   "The herringbone design produced the most complicated field and the largest reconstruction error.",
+   "Its staggered grooves create counter-rotating vortices that particles cross only briefly.",
+   "Nevertheless, the main recirculation zones were identified correctly in every clip.",
+   "We conclude that offline reconstruction is sufficient for routine quality control of fabricated chips."]}
+ ],
+ "cases": [
+  {"id": "c01", "select": "p1"},
+  {"id": "c02", "select": "p3", "sentences": [0, 3]},
+  {"id": "c03", "select": "p3", "sentences": [6, 9], "page": 1},
+  {"id": "c04", "select": "p4"},
+  {"id": "c05", "select": "p5"},
+  {"id": "c06", "select": "F1:caption", "script": [
+   {"text": "Figure 1 shows the test chip from above.", "score": "none"},
+   {"text": "Fluid enters through the Inlet on the left.", "part": "Inlet"},
+   {"text": "The Mixer folds the stream with its grooves.", "part": "Mixer"},
+   {"text": "The Detector records the fluorescent particles.", "part": "Detector"},
+   {"text": "The fluid then leaves through the Outlet.", "part": "Outlet"}]},
+  {"id": "c07", "select": "F1:caption"}
+ ]
+}

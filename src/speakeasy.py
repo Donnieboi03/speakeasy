@@ -1477,7 +1477,7 @@ def main(argv=None):
     t0 = time.time()
     if args.cmd in ("speak", "selection"): set_state("thinking")
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": args.cmd, "verbatim_blocks": [], "area_text": getattr(args, "area_text", None),
-           "doc_source": None, "doc_path_hash": None, "page": None, "figures_found": None, "doc_map_method": None}
+           "doc_source": None, "doc_path_hash": None, "page": None, "figures_found": None, "doc_map_method": None, "doc_ready_ms": None}
     timing = {"copy_ms": None, "capture_ms": args.capture_ms, "vision_ms": None, "llm_ms": None,
               "tts_first_audio_ms": None, "speak_ms": None}
     if args.cmd == "selection":
@@ -1508,7 +1508,7 @@ def main(argv=None):
     state.DOC = None
     if docmap is not None and args.cmd in ("speak", "selection", "rewrite") and os.environ.get("SPEAKEASY_DOC_READ", "local").lower() in ("local", "all") \
             and (args.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT")):
-        state.DOC = DocJob(args.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT"), text, rec); state.DOC.img_given = bool(args.image); state.DOC.start()
+        state.DOC = DocJob(args.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT"), text, rec, t0); state.DOC.img_given = bool(args.image); state.DOC.start()
     if getattr(args, "capture_method", None) == "area" and getattr(args, "area_text", None) == "ocr" and state.DOC is not None and args.line_bounds and args.capture_rect:
         text = area_pdf_text(text, args, rec) or text
     img = args.image
@@ -1528,7 +1528,7 @@ def main(argv=None):
         prewarm_tts(args)
     state.FOCUS = None
     if args.cmd in ("speak", "selection"):
-        rec.update(focus_events=0, focus_tag_hit_rate=None, focus_fallback=None,
+        rec.update(focus_events=0, focus_tag_hit_rate=None, focus_fallback=None, first_focus_ms=None,
                    focus_tags=os.environ.get("SPEAKEASY_FOCUS_TAGS", "off").lower() in ("on", "1", "true", "yes")
                    and os.environ.get("SPEAKEASY_FOCUS", "on").lower() not in ("off", "0", "false", "no"))
         if os.environ.get("SPEAKEASY_FOCUS", "on").lower() in ("off", "0", "false", "no"):

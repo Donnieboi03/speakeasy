@@ -1,0 +1,348 @@
+[
+ {
+  "case_id": "syn-capnamed-01/c01",
+  "doc_id": "syn-capnamed-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "A bakery oven releases a large amount of warm air through its chimney. We fitted a small heat exchanger",
+    "rect": [
+     72.0,
+     88.8,
+     538.86,
+     98.05
+    ]
+   },
+   {
+    "text": "that captures part of this heat for the wash water. The exchanger has a primary circuit on the chimney",
+    "rect": [
+     72.0,
+     102.3,
+     521.09,
+     111.55
+    ]
+   },
+   {
+    "text": "side and a secondary circuit on the water side. This note documents the layout and the first month of",
+    "rect": [
+     72.0,
+     115.8,
+     516.11,
+     125.05
+    ]
+   },
+   {
+    "text": "measurements.",
+    "rect": [
+     72.0,
+     129.3,
+     140.91,
+     138.55
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "A bakery oven releases a large amount of warm air through its chimney."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "We fitted a small heat exchanger that captures part of this heat for the wash water."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "The exchanger has a primary circuit on the chimney side and a secondary circuit on the water side."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "This note documents the layout and the first month of measurements."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c02",
+  "doc_id": "syn-capnamed-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Hot air leaves the oven and passes a coil before it reaches the chimney. A fan keeps the air moving when",
+    "rect": [
+     72.0,
+     348.8,
+     538.89,
+     358.05
+    ]
+   },
+   {
+    "text": "the oven door is open and the natural draught is weak. On the water side, a pump circulates the wash",
+    "rect": [
+     72.0,
+     362.3,
+     521.12,
+     371.55
+    ]
+   },
+   {
+    "text": "water between the coil and an insulated tank. A small controller switches the pump on when the coil is",
+    "rect": [
+     72.0,
+     375.8,
+     522.2,
+     385.05
+    ]
+   },
+   {
+    "text": "warmer than the tank.",
+    "rect": [
+     72.0,
+     389.3,
+     168.71,
+     398.55
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s7",
+    "text": "Hot air leaves the oven and passes a coil before it reaches the chimney."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "A fan keeps the air moving when the oven door is open and the natural draught is weak."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "On the water side, a pump circulates the wash water between the coil and an insulated tank."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "A small controller switches the pump on when the coil is warmer than the tank."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c03",
+  "doc_id": "syn-capnamed-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Over the first month the exchanger heated the wash water by about eighteen degrees on average. Gas",
+    "rect": [
+     72.0,
+     88.8,
+     527.25,
+     98.05
+    ]
+   },
+   {
+    "text": "use for water heating fell by roughly a third compared with the same month last year. The bakers reported",
+    "rect": [
+     72.0,
+     102.3,
+     538.87,
+     111.55
+    ]
+   },
+   {
+    "text": "no change in oven behaviour and no extra cleaning work.",
+    "rect": [
+     72.0,
+     115.8,
+     325.47,
+     125.05
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s13",
+    "text": "Over the first month the exchanger heated the wash water by about eighteen degrees on average."
+   },
+   {
+    "sentence_id": "s14",
+    "text": "Gas use for water heating fell by roughly a third compared with the same month last year."
+   },
+   {
+    "sentence_id": "s15",
+    "text": "The bakers reported no change in oven behaviour and no extra cleaning work."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c04",
+  "doc_id": "syn-capnamed-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Savings grew in the second week after we cleaned soot from the coil. We expect a small drop in summer,",
+    "rect": [
+     72.0,
+     382.3,
+     537.74,
+     391.55
+    ]
+   },
+   {
+    "text": "when the incoming water is already warmer. A full year of data will tell whether the exchanger pays for",
+    "rect": [
+     72.0,
+     395.8,
+     522.73,
+     405.05
+    ]
+   },
+   {
+    "text": "itself within three years.",
+    "rect": [
+     72.0,
+     409.3,
+     176.48,
+     418.55
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s19",
+    "text": "Savings grew in the second week after we cleaned soot from the coil."
+   },
+   {
+    "sentence_id": "s20",
+    "text": "We expect a small drop in summer, when the incoming water is already warmer."
+   },
+   {
+    "sentence_id": "s21",
+    "text": "A full year of data will tell whether the exchanger pays for itself within three years."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c05",
+  "doc_id": "syn-capnamed-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Heat exchanger layout. The left half shows the primary circuit and the right half shows the secondary circuit.",
+    "rect": [
+     72.0,
+     325.8,
+     538.7,
+     334.12
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s22",
+    "text": "Figure 1 shows the two circuits of the exchanger."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "On the left, warm air rises through the Chimney."
+   },
+   {
+    "sentence_id": "s24",
+    "text": "The Coil takes heat from the air."
+   },
+   {
+    "sentence_id": "s25",
+    "text": "A Fan keeps the air moving."
+   },
+   {
+    "sentence_id": "s26",
+    "text": "The Damper closes when the oven is cold."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c06",
+  "doc_id": "syn-capnamed-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Heat exchanger layout. The left half shows the primary circuit and the right half shows the secondary circuit.",
+    "rect": [
+     72.0,
+     325.8,
+     538.7,
+     334.12
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s27",
+    "text": "The right half shows the water side."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "The Pump circulates the wash water."
+   },
+   {
+    "sentence_id": "s29",
+    "text": "The insulated Tank stores the warm water."
+   },
+   {
+    "sentence_id": "s30",
+    "text": "A Valve lets the bakers drain the tank."
+   },
+   {
+    "sentence_id": "s31",
+    "text": "The Controller switches the pump on and off."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c07",
+  "doc_id": "syn-capnamed-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Figure 2: Weekly results. Panel a shows gas savings and panel b shows the water temperature rise.",
+    "rect": [
+     72.0,
+     359.3,
+     469.67,
+     367.62
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s17",
+    "text": "Figure 2: Weekly results."
+   },
+   {
+    "sentence_id": "s18",
+    "text": "Panel a shows gas savings and panel b shows the water temperature rise."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-capnamed-01/c08",
+  "doc_id": "syn-capnamed-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Table 1: Weekly averages during the first month.",
+    "rect": [
+     72.0,
+     136.3,
+     265.58,
+     144.62
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s32",
+    "text": "Table 1 lists weekly averages."
+   },
+   {
+    "sentence_id": "s33",
+    "text": "Gas savings stayed above a quarter in every week."
+   }
+  ]
+ }
+]

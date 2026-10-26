@@ -1,0 +1,637 @@
+[
+ {
+  "case_id": "arx-2406.06619/c01",
+  "doc_id": "arx-2406.06619",
+  "page": 2,
+  "selection": [
+   {
+    "text": "In this paper, we mainly focus on tackling two challenges in",
+    "rect": [
+     57.6,
+     416.63,
+     284.37,
+     425.59
+    ]
+   },
+   {
+    "text": "multilingual ASR: one is language interference and the other",
+    "rect": [
+     57.6,
+     427.04,
+     284.37,
+     436.0
+    ]
+   },
+   {
+    "text": "is new language incorporation. Section 3.1 briefly outlines the",
+    "rect": [
+     57.6,
+     437.45,
+     284.37,
+     446.42
+    ]
+   },
+   {
+    "text": "main issues to be addressed in this paper. Section 3.2 and Sec-",
+    "rect": [
+     57.6,
+     447.86,
+     284.37,
+     456.83
+    ]
+   },
+   {
+    "text": "tion 3.3 introduce the methods used in multilingual ASR and",
+    "rect": [
+     57.6,
+     458.27,
+     284.37,
+     467.24
+    ]
+   },
+   {
+    "text": "language expansion in detail.",
+    "rect": [
+     57.6,
+     468.68,
+     162.06,
+     477.65
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "In this paper, we mainly focus on tackling two challenges in multilingual ASR: one is language interference and the other is new language incorporation."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "Section 3.1 briefly outlines the main issues to be addressed in this paper."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "Section 3.2 and Section 3.3 introduce the methods used in multilingual ASR and language expansion in detail."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c02",
+  "doc_id": "arx-2406.06619",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Applying LoRA in multilingual ASR is an effective approach to",
+    "rect": [
+     57.6,
+     659.54,
+     284.37,
+     668.5
+    ]
+   },
+   {
+    "text": "mitigate language interference as shown in Figure 1. For each",
+    "rect": [
+     57.6,
+     669.95,
+     284.37,
+     678.91
+    ]
+   },
+   {
+    "text": "language, a language-specific LoRA matrix is appended to the",
+    "rect": [
+     57.6,
+     680.36,
+     284.37,
+     689.32
+    ]
+   },
+   {
+    "text": "encoder and decoder of Whisper. When the input is a piece of",
+    "rect": [
+     57.6,
+     690.77,
+     284.37,
+     699.74
+    ]
+   },
+   {
+    "text": "speech of k-th language, it will activate k-th LoRA module and",
+    "rect": [
+     57.6,
+     700.98,
+     284.38,
+     710.15
+    ]
+   },
+   {
+    "text": "pass through Whisper and the corresponding LoRA module in",
+    "rect": [
+     57.6,
+     711.59,
+     284.37,
+     720.56
+    ]
+   },
+   {
+    "text": "the forward pass.",
+    "rect": [
+     57.6,
+     722.0,
+     119.01,
+     730.97
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s4",
+    "text": "Applying LoRA in multilingual ASR is an effective approach to mitigate language interference as shown in Figure 1."
+   },
+   {
+    "sentence_id": "s5",
+    "text": "For each language, a language-specific LoRA matrix is appended to the encoder and decoder of Whisper."
+   },
+   {
+    "sentence_id": "s6",
+    "text": "When the input is a piece of speech of k-th language, it will activate k-th LoRA module and pass through Whisper and the corresponding LoRA module in the forward pass."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c03",
+  "doc_id": "arx-2406.06619",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Apart from mitigating language interference, LoRA can also",
+    "rect": [
+     312.72,
+     355.33,
+     539.49,
+     364.3
+    ]
+   },
+   {
+    "text": "be naturally extended for language expansion, preventing catas-",
+    "rect": [
+     312.72,
+     365.74,
+     539.49,
+     374.71
+    ]
+   },
+   {
+    "text": "trophic forgetting. Moreover, harnessing the similarities across",
+    "rect": [
+     312.72,
+     376.15,
+     539.49,
+     385.12
+    ]
+   },
+   {
+    "text": "languages can facilitate more effective training for new lan-",
+    "rect": [
+     312.72,
+     386.57,
+     539.49,
+     395.53
+    ]
+   },
+   {
+    "text": "guages. Consequently, we introduce two effective methods for",
+    "rect": [
+     312.72,
+     396.98,
+     539.49,
+     405.94
+    ]
+   },
+   {
+    "text": "language expansion, namely LoRA warm start and LoRA MoE",
+    "rect": [
+     312.72,
+     407.39,
+     539.49,
+     416.35
+    ]
+   },
+   {
+    "text": "as depicted in Figure 2. These methods involve two steps.",
+    "rect": [
+     312.72,
+     417.8,
+     519.95,
+     426.76
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s7",
+    "text": "Apart from mitigating language interference, LoRA can also be naturally extended for language expansion, preventing catastrophic forgetting."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "Moreover, harnessing the similarities across languages can facilitate more effective training for new languages."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "Consequently, we introduce two effective methods for language expansion, namely LoRA warm start and LoRA MoE as depicted in Figure 2."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "These methods involve two steps."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c04",
+  "doc_id": "arx-2406.06619",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Step 2: Continual training on new languages After find-",
+    "rect": [
+     327.66,
+     628.44,
+     539.49,
+     637.47
+    ]
+   },
+   {
+    "text": "ing the most similar one, we can leverage the information from",
+    "rect": [
+     312.72,
+     638.91,
+     539.49,
+     647.88
+    ]
+   },
+   {
+    "text": "base languages to facilitate the training of the new language. In",
+    "rect": [
+     312.72,
+     649.32,
+     539.49,
+     658.29
+    ]
+   },
+   {
+    "text": "LoRA warm start, the new LoRA matrix is initialized from the",
+    "rect": [
+     312.72,
+     659.73,
+     539.49,
+     668.7
+    ]
+   },
+   {
+    "text": "LoRA matrix of its most similar language. In LoRA MoE, two",
+    "rect": [
+     312.72,
+     670.15,
+     539.49,
+     679.11
+    ]
+   },
+   {
+    "text": "LoRA modules are selected in the forward pass to assit in the",
+    "rect": [
+     312.72,
+     680.56,
+     539.49,
+     689.52
+    ]
+   },
+   {
+    "text": "training of the new language.",
+    "rect": [
+     312.72,
+     690.97,
+     417.33,
+     699.93
+    ]
+   },
+   {
+    "text": "In general, aside from avoiding the issue of catastrophic",
+    "rect": [
+     327.66,
+     701.87,
+     539.49,
+     710.84
+    ]
+   },
+   {
+    "text": "forgetting, LoRA-Whisper enables the exploitation of similari-",
+    "rect": [
+     312.72,
+     712.28,
+     539.49,
+     721.25
+    ]
+   },
+   {
+    "text": "ties between new language and base languages, leading to better",
+    "rect": [
+     312.72,
+     722.69,
+     539.49,
+     731.66
+    ]
+   },
+   {
+    "text": "performance on the new language.",
+    "rect": [
+     312.72,
+     733.11,
+     436.24,
+     742.07
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s11",
+    "text": "Step 2: Continual training on new languages After finding the most similar one, we can leverage the information from base languages to facilitate the training of the new language."
+   },
+   {
+    "sentence_id": "s12",
+    "text": "In LoRA warm start, the new LoRA matrix is initialized from the LoRA matrix of its most similar language."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "In LoRA MoE, two LoRA modules are selected in the forward pass to assit in the training of the new language."
+   },
+   {
+    "sentence_id": "s14",
+    "text": "In general, aside from avoiding the issue of catastrophic forgetting, LoRA-Whisper enables the exploitation of similarities between new language and base languages, leading to better performance on the new language."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c05",
+  "doc_id": "arx-2406.06619",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Figure 1: Architecture of LoRA-Whisper in multilingual ASR",
+    "rect": [
+     317.52,
+     241.89,
+     534.69,
+     251.06
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s15",
+    "text": "Figure 1 shows LoRA-Whisper for multilingual recognition."
+   },
+   {
+    "sentence_id": "s16",
+    "text": "The shared Whisper model sits on the left."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "Polish speech goes through the 1st LoRA module."
+   },
+   {
+    "sentence_id": "s18",
+    "text": "Portuguese speech uses the 2nd LoRA module."
+   },
+   {
+    "sentence_id": "s19",
+    "text": "Speech of the k-th language activates the k-th LoRA module."
+   },
+   {
+    "sentence_id": "s20",
+    "text": "The last language has its own n-th LoRA module."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c06",
+  "doc_id": "arx-2406.06619",
+  "page": 3,
+  "selection": [
+   {
+    "text": "Our experiments are conducted on MLS dataset [6] and",
+    "rect": [
+     57.6,
+     423.34,
+     284.37,
+     432.31
+    ]
+   },
+   {
+    "text": "FLEURS [7] dataset as shown in Table 1. Due to limited",
+    "rect": [
+     57.6,
+     433.75,
+     284.37,
+     442.72
+    ]
+   },
+   {
+    "text": "resources, we only focus on Polish, Portuguese and Italian",
+    "rect": [
+     57.6,
+     444.16,
+     284.37,
+     453.13
+    ]
+   },
+   {
+    "text": "in MLS dataset. Similarly, five languages are selected from",
+    "rect": [
+     57.6,
+     454.57,
+     284.37,
+     463.54
+    ]
+   },
+   {
+    "text": "FLEURS dataset, namely Chinese, Danish, Greek, Welsh and",
+    "rect": [
+     57.6,
+     464.98,
+     284.37,
+     473.95
+    ]
+   },
+   {
+    "text": "Japanese. Four languages are employed in the multilingual ASR",
+    "rect": [
+     57.6,
+     475.39,
+     284.37,
+     484.36
+    ]
+   },
+   {
+    "text": "experiment and the remaining four languages are used as new",
+    "rect": [
+     57.6,
+     485.81,
+     284.37,
+     494.77
+    ]
+   },
+   {
+    "text": "languages in the language expansion experiment.",
+    "rect": [
+     57.6,
+     496.22,
+     233.64,
+     505.18
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s21",
+    "text": "Our experiments are conducted on MLS dataset and FLEURS dataset as shown in Table 1."
+   },
+   {
+    "sentence_id": "s22",
+    "text": "Due to limited resources, we only focus on Polish, Portuguese and Italian in MLS dataset."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "Similarly, five languages are selected from FLEURS dataset, namely Chinese, Danish, Greek, Welsh and Japanese."
+   },
+   {
+    "sentence_id": "s24",
+    "text": "Four languages are employed in the multilingual ASR experiment and the remaining four languages are used as new languages in the language expansion experiment."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c07",
+  "doc_id": "arx-2406.06619",
+  "page": 3,
+  "selection": [
+   {
+    "text": "Figure 2: Architecture of LoRA-Whisper in language expansion. Left: LoRA warm start, Right: LoRA MoE",
+    "rect": [
+     106.77,
+     358.73,
+     490.32,
+     367.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s25",
+    "text": "Figure 2 shows two ways to add a new language."
+   },
+   {
+    "sentence_id": "s26",
+    "text": "In panel a, the frozen Whisper model is shared by all languages."
+   },
+   {
+    "sentence_id": "s27",
+    "text": "The k-th LoRA module of the most similar language starts the warm start."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "Its weights initialize the new LoRA module on the right of panel a."
+   },
+   {
+    "sentence_id": "s29",
+    "text": "In panel b, the Whisper model again stays frozen."
+   },
+   {
+    "sentence_id": "s30",
+    "text": "The n-th LoRA module is one of the existing language modules."
+   },
+   {
+    "sentence_id": "s31",
+    "text": "The new LoRA module in panel b is trained together with its most similar module."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2406.06619/c08",
+  "doc_id": "arx-2406.06619",
+  "page": 3,
+  "selection": [
+   {
+    "text": "In the training stage, we fix all the parameters of Whis-",
+    "rect": [
+     327.66,
+     498.25,
+     539.49,
+     507.21
+    ]
+   },
+   {
+    "text": "per and optimize the language-specific LoRA modules with",
+    "rect": [
+     312.72,
+     508.66,
+     539.49,
+     517.63
+    ]
+   },
+   {
+    "text": "AdamW [37] with a peak learning rate of 1e-4. The number",
+    "rect": [
+     312.72,
+     519.07,
+     539.49,
+     528.04
+    ]
+   },
+   {
+    "text": "of training epochs is set to 10. All models are trained with 2",
+    "rect": [
+     312.72,
+     529.48,
+     539.49,
+     538.45
+    ]
+   },
+   {
+    "text": "NVIDIA RTX 3090 24GB GPUs. In the testing stage, beam",
+    "rect": [
+     312.72,
+     539.89,
+     539.49,
+     548.86
+    ]
+   },
+   {
+    "text": "search with beamsize = 5 is employed to decode the test set.",
+    "rect": [
+     312.72,
+     550.11,
+     535.51,
+     559.27
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s32",
+    "text": "In the training stage, we fix all the parameters of Whisper and optimize the language-specific LoRA modules with AdamW with a peak learning rate of 1e-4."
+   },
+   {
+    "sentence_id": "s33",
+    "text": "The number of training epochs is set to 10."
+   },
+   {
+    "sentence_id": "s34",
+    "text": "All models are trained with 2 NVIDIA RTX 3090 24GB GPUs."
+   },
+   {
+    "sentence_id": "s35",
+    "text": "In the testing stage, beam search with beamsize = 5 is employed to decode the test set."
+   }
+  ]
+ }
+]

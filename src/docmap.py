@@ -9,6 +9,7 @@ Two halves:
 Paths are never logged; only a short hash.
 """
 import hashlib, json, os, re, subprocess, sys, tempfile, time, urllib.parse, urllib.request
+from collections import Counter
 
 # captions need a separator after the number ("Figure 3:", "Fig. 3.", "Table 2 |"), so prose like "Table 2 summarizes" is not one
 CAP_RE = re.compile(r"^\s*(?:fig(?:ure)?s?\.?)\s*(\d+)\s*(?:[.:|\u2013\u2014]|\s-\s|$)\s*(.*)$", re.I)
@@ -26,7 +27,7 @@ def cache_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
-PARSE_VERSION = 4          # bump when parse_pdf output changes, so cached parses are rebuilt
+PARSE_VERSION = 5          # bump when parse_pdf output changes, so cached parses are rebuilt
 
 def _key(path):
     st = os.stat(path)
@@ -155,8 +156,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
             lines, _ = _text_lines(page)
             pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": [], "figs_done": False}); continue
         lines, blocks = _text_lines(page)
-        half = [l for l in lines if 0.25 * W < l[2] - l[0] < 0.52 * W]
-        two_col = sum(1 for l in half if l[2] <= W / 2 + 10) >= 8 and sum(1 for l in half if l[0] >= W / 2 - 10) >= 8
+        columns = page_columns(lines, W); two_col = columns == 2
         gfx = []
         try:
             for r in page.images():
@@ -166,7 +166,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
             for r in page.cluster_drawings():
                 if r.width > 20 and r.height > 20 and not (r.width > 0.9 * W and r.height > 0.9 * H): gfx.append([r.x0, r.y0, r.x1, r.y1])
         except Exception: pass
-        figs = []
+        figs, caption_line_groups = [], []
         for bl in blocks:
             first = lines[bl[0]]
             m = CAP_RE.match(first[4]); kind = "figure"
@@ -192,6 +192,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
                     if gap < 60: body = list(g)
                 elif (body[1] - g[3] < 40) if kind == "figure" else (g[1] - body[3] < 40):
                     body = _union([body, g])
+            bbox_src = "graphics" if body else "caption-only"
             if kind == "table":
                 # the body is the grid / text block right below the caption (until a big gap, the next caption or the page end)
                 below = sorted([l for l in lines if l[1] >= cap[3] - 1 and l[0] >= col[0] and l[2] <= col[1]], key=lambda l: l[1])
@@ -202,12 +203,14 @@ def parse_pdf(path, fig_pages=None, prev=None):
                     if CAP_RE.match(l[4]) or TAB_RE.match(l[4]): break
                     rows.append(l); y = max(y, l[3])
                 tbody = _union([r[:4] for r in rows]) if rows else None
-                if tbody and (body is None or tbody[3] > body[3]): body = _union([body, tbody]) if body else tbody
+                if tbody and (body is None or tbody[3] > body[3]):
+                    bbox_src = "graphics+text-rows" if body else "text-rows"
+                    body = _union([body, tbody]) if body else tbody
                 if body: body = _union([body, cap])
             if body is None and kind == "figure":            # no vector/image found: the text-free gap above the caption
                 above = [l for l in lines if l[3] <= cap[1] - 2 and l[0] < cap[2] and l[2] > cap[0]]
                 top = max([l[3] for l in above if cap[1] - l[3] > 30] or [None]) if above else None
-                if top is not None and cap[1] - top > 40: body = [cap[0], top + 2, cap[2], cap[1] - 2]
+                if top is not None and cap[1] - top > 40: body = [cap[0], top + 2, cap[2], cap[1] - 2]; bbox_src = "whitespace"
             fb = [round(v, 1) for v in (body or cap)]
             labels = [] if kind == "table" else [{"l": (PANEL_RE.match(l[4]).group(1) or PANEL_RE.match(l[4]).group(2) or PANEL_RE.match(l[4]).group(3)).lower(), "r": l[:4]}
                       for l in lines if PANEL_RE.match(l[4]) and len(l[4]) <= 40 and body
@@ -222,9 +225,73 @@ def parse_pdf(path, fig_pages=None, prev=None):
             figs.append({"label": f"{'Figure' if kind == 'figure' else 'Table'} {m.group(1)}", "kind": kind, "n": int(m.group(1)),
                          "page": pno + 1, "bbox": fb, "caption_bbox": cap, "caption": text[:300],
                          "panels": _panels(fb, labels) or (_guess_panels(fb, text) if body and kind == "figure" else []), "labels": tl[:200], "labels_src": src_l,
-                         "objects": _objects(page, fb) if body and kind == "figure" else []})
-        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": _split_overlaps(figs), "figs_done": True})
+                         "objects": _objects(page, fb) if body and kind == "figure" else [], "bbox_src": bbox_src})
+            caption_line_groups.append(bl)
+        figs = _split_overlaps(figs)
+        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs, "figs_done": True,
+                      "columns": columns, "blocks": page_blocks(lines, blocks, figs, caption_line_groups, W, columns)})
     return {"kind": "pdf", "pages": pages, "n_pages": len(pages)}
+
+def page_columns(lines, W):
+    """2 when at least 8 half-width lines sit in each half of the page (the figure/table column logic), else 1."""
+    half = [l for l in lines if 0.25 * W < l[2] - l[0] < 0.52 * W]
+    return 2 if sum(1 for l in half if l[2] <= W / 2 + 10) >= 8 and sum(1 for l in half if l[0] >= W / 2 - 10) >= 8 else 1
+
+def line_groups(lines):
+    """pdfpage.text_lines' block rule on page lines: consecutive lines that follow closely below and overlap horizontally."""
+    groups, cur = [], []
+    for k, l in enumerate(lines):
+        if cur:
+            prev = lines[cur[-1]]; hgt = max(1.0, prev[3] - prev[1])
+            if not (0 <= l[1] - prev[3] < 0.8 * hgt and l[0] < prev[2] and prev[0] < l[2]): groups.append(cur); cur = []
+        cur.append(k)
+    if cur: groups.append(cur)
+    return groups
+
+def page_blocks(lines, groups, figs, caption_line_groups, W, columns):
+    """The page's blocks in reading order: a figure/table block and a caption block per figures[] entry; paragraphs are
+    the remaining runs of each line group, without caption lines and lines inside a figure or table box.
+    A caption block holds its own line group plus every line inside its caption box (inline-math fragments that the
+    text layer puts in groups of their own)."""
+    out, caption_lines = [], set().union(*caption_line_groups)
+    for f, cl in zip(figs, caption_line_groups):
+        own = sorted(set(cl) | {i for i, l in enumerate(lines) if i not in caption_lines and _inside(l[:4], f["caption_bbox"])})
+        out.append({"kind": f["kind"], "bbox": list(f["bbox"]), "label": f["label"], "src": f["bbox_src"]})
+        out.append({"kind": "caption", "bbox": list(f["caption_bbox"]), "lines": own, "label": f["label"]})
+        caption_lines.update(own)
+    for g in groups:
+        run = []
+        for i in list(g) + [None]:
+            if i is not None and i not in caption_lines and not any(_inside(lines[i][:4], f["bbox"]) for f in figs):
+                run.append(i); continue
+            if run: out.append({"kind": "paragraph", "bbox": _union([lines[j][:4] for j in run]), "lines": run}); run = []
+    return reading_order(out, W, columns)
+
+def reading_order(blocks, W, columns):
+    """Column by column, top to bottom. On a two-column page a block spanning both columns ends the band above it."""
+    top_left = lambda b: (b["bbox"][1], b["bbox"][0])
+    if columns == 1: return sorted(blocks, key=top_left)
+    def column(b):
+        x0, _, x1, _ = b["bbox"]
+        return None if x0 < W / 2 - 10 and x1 > W / 2 + 10 else 0 if x0 + x1 < W else 1
+    out, rest = [], [b for b in blocks if column(b) is not None]
+    for span in sorted([b for b in blocks if column(b) is None], key=top_left) + [None]:
+        cut = span["bbox"][1] if span else float("inf")
+        out += sorted([b for b in rest if b["bbox"][1] < cut], key=lambda b: (column(b), *top_left(b)))
+        rest = [b for b in rest if b["bbox"][1] >= cut]
+        if span: out.append(span)
+    return out
+
+def parse_summary(pg):
+    """Counts-only summary of a parsed page for the runs log (never text)."""
+    if not pg.get("figs_done"):
+        return {"columns": page_columns(pg["lines"], pg["w"]), "figs_done": False, "blocks": {"paragraph": len(line_groups(pg["lines"]))}}
+    figs = pg["figures"]; kinds = [b["kind"] for b in pg["blocks"]]
+    panels = [p for f in figs for p in f.get("panels") or []]
+    return {"columns": pg["columns"], "figs_done": True, "blocks": {k: kinds.count(k) for k in ("paragraph", "caption", "figure", "table")},
+            "bbox_src": dict(Counter(f["bbox_src"] for f in figs)), "labels_src": {k: sum(f.get("labels_src") == k for f in figs) for k in ("pdf", "ocr", "none")},
+            "panels": {"labels": sum(not p.get("guessed") for p in panels), "guessed": sum(bool(p.get("guessed")) for p in panels)},
+            "split": sum(1 for f in figs if f.get("split_from"))}
 
 # ---------------- Markdown (stdlib) ----------------
 def parse_md(path):
@@ -298,6 +365,9 @@ def load(path, timeout=30, sel_text=""):
             except Exception as e:
                 return None, f"pdfkit-failed: {type(e).__name__}"
             if not doc.get("pages"): return None, "pdfkit-failed"
+            for pg in doc["pages"]:                       # no figure parse: paragraph blocks only
+                pg["columns"] = page_columns(pg["lines"], pg["w"])
+                pg["blocks"] = page_blocks(pg["lines"], line_groups(pg["lines"]), [], [], pg["w"], pg["columns"])
             json.dump(doc, open(c, "w"))
             return doc, "miss-pdfkit"
         tmp = c + f".{os.getpid()}.tmp"

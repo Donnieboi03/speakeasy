@@ -1,0 +1,578 @@
+[
+ {
+  "case_id": "syn-twocol-01/c01",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Micro\ufb02uidic chips move tiny volumes of \ufb02uid through",
+    "rect": [
+     50.0,
+     80.7,
+     289.08,
+     89.7
+    ]
+   },
+   {
+    "text": "channels that are narrower than a human hair. E\ufb03c-",
+    "rect": [
+     50.0,
+     92.7,
+     287.17,
+     101.7
+    ]
+   },
+   {
+    "text": "ient mixing is di\ufb03cult in such channels because the",
+    "rect": [
+     50.0,
+     104.7,
+     283.42,
+     113.7
+    ]
+   },
+   {
+    "text": "\ufb02ow is laminar and di\ufb00usion is slow. Engineers ther-",
+    "rect": [
+     50.0,
+     116.7,
+     284.86,
+     125.7
+    ]
+   },
+   {
+    "text": "efore add herringbone grooves or serpentine secti-",
+    "rect": [
+     50.0,
+     128.7,
+     280.36,
+     137.7
+    ]
+   },
+   {
+    "text": "ons that fold the \ufb02uid onto itself. The resulting \ufb02ow",
+    "rect": [
+     50.0,
+     140.7,
+     281.05,
+     149.7
+    ]
+   },
+   {
+    "text": "\ufb01eld is complicated, and characterization usually",
+    "rect": [
+     50.0,
+     152.7,
+     270.9,
+     161.7
+    ]
+   },
+   {
+    "text": "requires \ufb02uorescence microscopy.",
+    "rect": [
+     50.0,
+     164.7,
+     204.75,
+     173.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "Microfluidic chips move tiny volumes of fluid through channels that are narrower than a human hair."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "Efficient mixing is difficult in such channels because the flow is laminar and diffusion is slow."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "Engineers therefore add herringbone grooves or serpentine sections that fold the fluid onto itself."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "The resulting flow field is complicated, and characterization usually requires fluorescence microscopy."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-twocol-01/c02",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Particle identi\ufb01cation uses a di\ufb00erence of Gaussians",
+    "rect": [
+     50.0,
+     481.7,
+     285.85,
+     490.7
+    ]
+   },
+   {
+    "text": "\ufb01lter followed by a local maximum search. We found",
+    "rect": [
+     50.0,
+     493.7,
+     287.67,
+     502.7
+    ]
+   },
+   {
+    "text": "that a \ufb01xed threshold su\ufb03ces for most clips, but \ufb02ic-",
+    "rect": [
+     50.0,
+     505.7,
+     288.03,
+     514.7
+    ]
+   },
+   {
+    "text": "kering illumination needs an adaptive threshold. Tra-",
+    "rect": [
+     50.0,
+     517.7,
+     289.62,
+     526.7
+    ]
+   },
+   {
+    "text": "jectory linking is the most fragile step, since partic-",
+    "rect": [
+     50.0,
+     529.7,
+     281.71,
+     538.7
+    ]
+   },
+   {
+    "text": "les leave the focal plane and reappear later. Our",
+    "rect": [
+     50.0,
+     541.7,
+     269.4,
+     550.7
+    ]
+   },
+   {
+    "text": "linker tolerates gaps of up to three frames and reje-",
+    "rect": [
+     50.0,
+     553.7,
+     284.54,
+     562.7
+    ]
+   },
+   {
+    "text": "cts links that imply unphysical accelerations. The",
+    "rect": [
+     50.0,
+     565.7,
+     272.06,
+     574.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s10",
+    "text": "Particle identification uses a difference of Gaussians filter followed by a local maximum search."
+   },
+   {
+    "sentence_id": "s11",
+    "text": "We found that a fixed threshold suffices for most clips, but flickering illumination needs an adaptive threshold."
+   },
+   {
+    "sentence_id": "s12",
+    "text": "Trajectory linking is the most fragile step, since particles leave the focal plane and reappear later."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "Our linker tolerates gaps of up to three frames and rejects links that imply unphysical accelerations."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-twocol-01/c03",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The largest di\ufb00erences appear close to the channel",
+    "rect": [
+     50.0,
+     625.7,
+     282.31,
+     634.7
+    ]
+   },
+   {
+    "text": "walls, where few particles are observed. Increasing",
+    "rect": [
+     50.0,
+     637.7,
+     281.13,
+     646.7
+    ]
+   },
+   {
+    "text": "the particle density reduces this e\ufb00ect but also incr-",
+    "rect": [
+     50.0,
+     649.7,
+     285.86,
+     658.7
+    ]
+   },
+   {
+    "text": "eases the number of ambiguous links. A practical",
+    "rect": [
+     50.0,
+     661.7,
+     272.87,
+     670.7
+    ]
+   },
+   {
+    "text": "compromise is a density of roughly one particle per",
+    "rect": [
+     50.0,
+     673.7,
+     282.69,
+     682.7
+    ]
+   },
+   {
+    "text": "\ufb01fty square micrometres. Finally, all intermediate",
+    "rect": [
+     50.0,
+     685.7,
+     273.57,
+     694.7
+    ]
+   },
+   {
+    "text": "\ufb01les are stored so that every reconstruction can be",
+    "rect": [
+     50.0,
+     697.7,
+     281.23,
+     706.7
+    ]
+   },
+   {
+    "text": "audited and reproduced.",
+    "rect": [
+     50.0,
+     709.7,
+     161.5,
+     718.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s16",
+    "text": "The largest differences appear close to the channel walls, where few particles are observed."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "Increasing the particle density reduces this effect but also increases the number of ambiguous links."
+   },
+   {
+    "sentence_id": "s18",
+    "text": "A practical compromise is a density of roughly one particle per fifty square micrometres."
+   },
+   {
+    "sentence_id": "s19",
+    "text": "Finally, all intermediate files are stored so that every reconstruction can be audited and reproduced."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-twocol-01/c04",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "We tested the work\ufb02ow on three chip designs with",
+    "rect": [
+     50.0,
+     727.7,
+     278.67,
+     736.7
+    ]
+   },
+   {
+    "text": "di\ufb00erent groove con\ufb01gurations. Each design was",
+    "rect": [
+     50.0,
+     739.7,
+     270.54,
+     748.7
+    ]
+   },
+   {
+    "text": "\ufb01lmed at \ufb01ve \ufb02ow rates, giving \ufb01fteen clips of",
+    "rect": [
+     50.0,
+     751.7,
+     256.64,
+     760.7
+    ]
+   },
+   {
+    "text": "twenty seconds each. Processing one clip takes",
+    "rect": [
+     50.0,
+     763.7,
+     264.81,
+     772.7
+    ]
+   },
+   {
+    "text": "about four minutes on an ordinary o\ufb03ce laptop. The",
+    "rect": [
+     305.65,
+     60.0,
+     541.88,
+     69.0
+    ]
+   },
+   {
+    "text": "di\ufb00erential pressure across the chip was recorded",
+    "rect": [
+     305.65,
+     72.0,
+     531.63,
+     81.0
+    ]
+   },
+   {
+    "text": "independently as a consistency check.",
+    "rect": [
+     305.65,
+     84.0,
+     479.82,
+     93.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s20",
+    "text": "We tested the workflow on three chip designs with different groove configurations."
+   },
+   {
+    "sentence_id": "s21",
+    "text": "Each design was filmed at five flow rates, giving fifteen clips of twenty seconds each."
+   },
+   {
+    "sentence_id": "s22",
+    "text": "Processing one clip takes about four minutes on an ordinary office laptop."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "The differential pressure across the chip was recorded independently as a consistency check."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-twocol-01/c05",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The herringbone design produced the most complic-",
+    "rect": [
+     305.65,
+     187.0,
+     542.36,
+     196.0
+    ]
+   },
+   {
+    "text": "ated \ufb01eld and the largest reconstruction error. Its",
+    "rect": [
+     305.65,
+     199.0,
+     529.36,
+     208.0
+    ]
+   },
+   {
+    "text": "staggered grooves create counter-rotating vortices",
+    "rect": [
+     305.65,
+     211.0,
+     536.79,
+     220.0
+    ]
+   },
+   {
+    "text": "that particles cross only brie\ufb02y. Nevertheless, the",
+    "rect": [
+     305.65,
+     223.0,
+     530.25,
+     232.0
+    ]
+   },
+   {
+    "text": "main recirculation zones were identi\ufb01ed correctly in",
+    "rect": [
+     305.65,
+     235.0,
+     540.19,
+     244.0
+    ]
+   },
+   {
+    "text": "every clip. We conclude that o\ufb04ine reconstruction is",
+    "rect": [
+     305.65,
+     247.0,
+     543.24,
+     256.0
+    ]
+   },
+   {
+    "text": "su\ufb03cient for routine quality control of fabricated",
+    "rect": [
+     305.65,
+     259.0,
+     525.38,
+     268.0
+    ]
+   },
+   {
+    "text": "chips.",
+    "rect": [
+     305.65,
+     271.0,
+     332.07,
+     280.0
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s25",
+    "text": "The herringbone design produced the most complicated field and the largest reconstruction error."
+   },
+   {
+    "sentence_id": "s26",
+    "text": "Its staggered grooves create counter-rotating vortices that particles cross only briefly."
+   },
+   {
+    "sentence_id": "s27",
+    "text": "Nevertheless, the main recirculation zones were identified correctly in every clip."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "We conclude that offline reconstruction is sufficient for routine quality control of fabricated chips."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-twocol-01/c06",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Layout of the test chip. Fluid enters at the",
+    "rect": [
+     50.0,
+     436.7,
+     282.85,
+     445.7
+    ]
+   },
+   {
+    "text": "inlet, passes the mixer and the detector, and leaves",
+    "rect": [
+     50.0,
+     447.7,
+     285.55,
+     456.7
+    ]
+   },
+   {
+    "text": "through the outlet.",
+    "rect": [
+     50.0,
+     458.7,
+     135.22,
+     467.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s29",
+    "text": "Figure 1 shows the test chip from above."
+   },
+   {
+    "sentence_id": "s30",
+    "text": "Fluid enters through the Inlet on the left."
+   },
+   {
+    "sentence_id": "s31",
+    "text": "The Mixer folds the stream with its grooves."
+   },
+   {
+    "sentence_id": "s32",
+    "text": "The Detector records the fluorescent particles."
+   },
+   {
+    "sentence_id": "s33",
+    "text": "The fluid then leaves through the Outlet."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-twocol-01/c07",
+  "doc_id": "syn-twocol-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Layout of the test chip. Fluid enters at the",
+    "rect": [
+     50.0,
+     436.7,
+     282.85,
+     445.7
+    ]
+   },
+   {
+    "text": "inlet, passes the mixer and the detector, and leaves",
+    "rect": [
+     50.0,
+     447.7,
+     285.55,
+     456.7
+    ]
+   },
+   {
+    "text": "through the outlet.",
+    "rect": [
+     50.0,
+     458.7,
+     135.22,
+     467.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s8",
+    "text": "Figure 1: Layout of the test chip."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "Fluid enters at the inlet, passes the mixer and the detector, and leaves through the outlet."
+   }
+  ]
+ }
+]

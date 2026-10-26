@@ -1,0 +1,483 @@
+[
+ {
+  "case_id": "arx-2405.08223/c01",
+  "doc_id": "arx-2405.08223",
+  "page": 5,
+  "selection": [
+   {
+    "text": "anomalous conditions with a large N400 effect tend to have",
+    "rect": [
+     54.0,
+     74.15,
+     297.0,
+     84.11
+    ]
+   },
+   {
+    "text": "the fastest probability update, and anomalous conditions with",
+    "rect": [
+     54.0,
+     86.11,
+     297.0,
+     96.07
+    ]
+   },
+   {
+    "text": "a large P600 effect (e.g. Syntactic condition in Ryskin-21;",
+    "rect": [
+     54.0,
+     97.83,
+     297.0,
+     108.02
+    ]
+   },
+   {
+    "text": "FormRelated condition in Ito-16) has the lowest probability",
+    "rect": [
+     54.0,
+     109.79,
+     297.0,
+     119.98
+    ]
+   },
+   {
+    "text": "update rate. The different probability shift rate results in the",
+    "rect": [
+     54.0,
+     121.97,
+     297.0,
+     131.93
+    ]
+   },
+   {
+    "text": "increase of instantaneous effort to appear early or delayed.",
+    "rect": [
+     54.0,
+     133.93,
+     286.97,
+     143.89
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "The different probability shift rate results in the increase of instantaneous effort to appear early or delayed."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2405.08223/c02",
+  "doc_id": "arx-2405.08223",
+  "page": 5,
+  "selection": [
+   {
+    "text": "Dataset We used a set of three classic garden path construc-",
+    "rect": [
+     54.0,
+     550.79,
+     297.0,
+     560.82
+    ]
+   },
+   {
+    "text": "tions from large-scale syntactic ambiguity processing bench-",
+    "rect": [
+     54.0,
+     562.82,
+     297.0,
+     572.78
+    ]
+   },
+   {
+    "text": "mark, consisting of self-paced reading time data from 2000",
+    "rect": [
+     54.0,
+     574.77,
+     297.0,
+     584.73
+    ]
+   },
+   {
+    "text": "participants (Huang et al., 2023). The constructions include:",
+    "rect": [
+     54.0,
+     586.73,
+     297.0,
+     596.69
+    ]
+   },
+   {
+    "text": "Main verb/ reduced relative clause garden path (MV/RR), Di-",
+    "rect": [
+     54.0,
+     598.68,
+     297.0,
+     608.64
+    ]
+   },
+   {
+    "text": "rect object/ sentential complement garden path (NP/S), Tran-",
+    "rect": [
+     54.0,
+     610.64,
+     297.0,
+     620.6
+    ]
+   },
+   {
+    "text": "sitive/ intransitive garden path (NP/Z) (see Table 2). There are",
+    "rect": [
+     54.0,
+     622.59,
+     297.0,
+     632.56
+    ]
+   },
+   {
+    "text": "24 lexically matched item sets for each construction. Each set",
+    "rect": [
+     54.0,
+     634.55,
+     297.0,
+     644.51
+    ]
+   },
+   {
+    "text": "has an experimental sentence with a tempory syntactic am-",
+    "rect": [
+     54.0,
+     646.5,
+     297.0,
+     656.47
+    ]
+   },
+   {
+    "text": "biguity and an unambiguous control sentence. These con-",
+    "rect": [
+     54.0,
+     658.46,
+     297.0,
+     668.42
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s2",
+    "text": "Dataset We used a set of three classic garden path constructions from large-scale syntactic ambiguity processing benchmark, consisting of self-paced reading time data from 2000 participants (Huang et al., 2023)."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "The constructions include: Main verb/ reduced relative clause garden path (MV/RR), Direct object/ sentential complement garden path (NP/S), Transitive/ intransitive garden path (NP/Z) (see Table 2)."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "There are 24 lexically matched item sets for each construction."
+   },
+   {
+    "sentence_id": "s5",
+    "text": "Each set has an experimental sentence with a tempory syntactic ambiguity and an unambiguous control sentence."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2405.08223/c03",
+  "doc_id": "arx-2405.08223",
+  "page": 5,
+  "selection": [
+   {
+    "text": "Table 2: A list of garden path constructions and example sen-",
+    "rect": [
+     315.0,
+     242.48,
+     558.0,
+     252.44
+    ]
+   },
+   {
+    "text": "tences. Critical words are marked in bold. The critical words",
+    "rect": [
+     315.0,
+     254.36,
+     558.0,
+     264.4
+    ]
+   },
+   {
+    "text": "in garden path sentences are underlined, and the control coun-",
+    "rect": [
+     315.0,
+     266.39,
+     558.0,
+     276.35
+    ]
+   },
+   {
+    "text": "terparts are italic.",
+    "rect": [
+     315.0,
+     278.11,
+     385.0,
+     288.31
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s6",
+    "text": "Table 2: A list of garden path constructions and example sentences."
+   },
+   {
+    "sentence_id": "s7",
+    "text": "Critical words are marked in bold."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "The critical words in garden path sentences are underlined, and the control counterparts are italic."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2405.08223/c04",
+  "doc_id": "arx-2405.08223",
+  "page": 5,
+  "selection": [
+   {
+    "text": "Figure 6: (a) Average effect size (RT difference to unambigu-",
+    "rect": [
+     315.0,
+     560.14,
+     558.0,
+     570.17
+    ]
+   },
+   {
+    "text": "ous control) at critical region estimated from human experi-",
+    "rect": [
+     315.0,
+     572.17,
+     558.0,
+     582.13
+    ]
+   },
+   {
+    "text": "ment. (b) Average effect size estimated from model simu-",
+    "rect": [
+     315.0,
+     584.05,
+     558.0,
+     594.08
+    ]
+   },
+   {
+    "text": "lation. (c) Average surprisal difference between experimen-",
+    "rect": [
+     315.0,
+     596.01,
+     558.0,
+     606.04
+    ]
+   },
+   {
+    "text": "tal and control sentences. (d) Average edit distance between",
+    "rect": [
+     315.0,
+     607.96,
+     558.0,
+     617.99
+    ]
+   },
+   {
+    "text": "presented sentence and closest alternative. Error bars show",
+    "rect": [
+     315.0,
+     619.99,
+     558.0,
+     629.95
+    ]
+   },
+   {
+    "text": "standard errors.",
+    "rect": [
+     315.0,
+     631.94,
+     376.97,
+     641.91
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s9",
+    "text": "Figure 6: (a) Average effect size (RT difference to unambiguous control) at critical region estimated from human experiment."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "(b) Average effect size estimated from model simulation."
+   },
+   {
+    "sentence_id": "s11",
+    "text": "(c) Average surprisal difference between experimental and control sentences."
+   },
+   {
+    "sentence_id": "s12",
+    "text": "(d) Average edit distance between presented sentence and closest alternative."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "Error bars show standard errors."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2405.08223/c05",
+  "doc_id": "arx-2405.08223",
+  "page": 5,
+  "selection": [
+   {
+    "text": "Implementation We consider interpretations w ranging",
+    "rect": [
+     315.0,
+     670.18,
+     558.0,
+     680.38
+    ]
+   },
+   {
+    "text": "over the entire sentence, rather than only the critical word,",
+    "rect": [
+     315.0,
+     682.37,
+     558.0,
+     692.33
+    ]
+   },
+   {
+    "text": "with a set of alternatives consisting of all sentences in a lex-",
+    "rect": [
+     315.0,
+     694.32,
+     558.0,
+     704.29
+    ]
+   },
+   {
+    "text": "ically matched set across different constructions as possible",
+    "rect": [
+     315.0,
+     706.28,
+     558.0,
+     716.24
+    ]
+   },
+   {
+    "text": "interpretations given a single sentence. This simulates the",
+    "rect": [
+     315.0,
+     718.23,
+     558.0,
+     728.2
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s14",
+    "text": "Implementation We consider interpretations w ranging over the entire sentence, rather than only the critical word, with a set of alternatives consisting of all sentences in a lexically matched set across different constructions as possible interpretations given a single sentence."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2405.08223/c06",
+  "doc_id": "arx-2405.08223",
+  "page": 5,
+  "selection": [
+   {
+    "text": "Figure 6: (a) Average effect size (RT difference to unambigu-",
+    "rect": [
+     315.0,
+     560.14,
+     558.0,
+     570.17
+    ]
+   },
+   {
+    "text": "ous control) at critical region estimated from human experi-",
+    "rect": [
+     315.0,
+     572.17,
+     558.0,
+     582.13
+    ]
+   },
+   {
+    "text": "ment. (b) Average effect size estimated from model simu-",
+    "rect": [
+     315.0,
+     584.05,
+     558.0,
+     594.08
+    ]
+   },
+   {
+    "text": "lation. (c) Average surprisal difference between experimen-",
+    "rect": [
+     315.0,
+     596.01,
+     558.0,
+     606.04
+    ]
+   },
+   {
+    "text": "tal and control sentences. (d) Average edit distance between",
+    "rect": [
+     315.0,
+     607.96,
+     558.0,
+     617.99
+    ]
+   },
+   {
+    "text": "presented sentence and closest alternative. Error bars show",
+    "rect": [
+     315.0,
+     619.99,
+     558.0,
+     629.95
+    ]
+   },
+   {
+    "text": "standard errors.",
+    "rect": [
+     315.0,
+     631.94,
+     376.97,
+     641.91
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s15",
+    "text": "Figure 6 compares the three constructions in four bar charts."
+   },
+   {
+    "sentence_id": "s16",
+    "text": "In panel a, the Human Effect Size chart shows the largest effect for NP/Z."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "In panel b, the Simulated Effect Size chart follows the same order."
+   },
+   {
+    "sentence_id": "s18",
+    "text": "In panel c, the Surprisal Difference chart is highest for MV/RR."
+   },
+   {
+    "sentence_id": "s19",
+    "text": "In panel d, the Edit Distance chart drops sharply for NP/Z."
+   }
+  ]
+ }
+]

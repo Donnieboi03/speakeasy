@@ -1,0 +1,67 @@
+{
+ "doc_id": "syn-capnamed-01",
+ "page": [612, 792], "margins": [72, 66, 72, 66], "columns": 1,
+ "font": "Helvetica", "bold": "Helvetica-Bold", "size": 10, "leading": 13.5, "para_gap": 7,
+ "header": "Lab Notes | Heat Recovery", "page_numbers": true,
+ "flow": [
+  {"heading": "Heat recovery in a small bakery"},
+  {"para": "p1", "s": [
+   "A bakery oven releases a large amount of warm air through its chimney.",
+   "We fitted a small heat exchanger that captures part of this heat for the wash water.",
+   "The exchanger has a primary circuit on the chimney side and a secondary circuit on the water side.",
+   "This note documents the layout and the first month of measurements."]},
+  {"figure": "F1", "label": "Figure 1", "h": 170, "shape": "round",
+   "panels": [
+    {"label": "a", "label_style": "none", "cols": 2, "parts": [
+     {"name": "Chimney", "style": "inside"}, {"name": "Coil", "style": "inside"}, {"name": "Fan", "style": "adjacent"}, {"name": "Damper", "style": "adjacent"}]},
+    {"label": "b", "label_style": "none", "cols": 2, "parts": [
+     {"name": "Pump", "style": "inside"}, {"name": "Tank", "style": "inside"}, {"name": "Valve", "style": "adjacent"}, {"name": "Controller", "style": "raster"}]}],
+   "caption": ["Figure 1: Heat exchanger layout.", "The left half shows the primary circuit and the right half shows the secondary circuit."]},
+  {"para": "p2", "s": [
+   "Hot air leaves the oven and passes a coil before it reaches the chimney.",
+   "A fan keeps the air moving when the oven door is open and the natural draught is weak.",
+   "On the water side, a pump circulates the wash water between the coil and an insulated tank.",
+   "A small controller switches the pump on when the coil is warmer than the tank."]},
+  {"para": "p3", "s": [
+   "The controller is an old unit with a printed front panel and no digital interface.",
+   "We read its state from the pump current instead of from the unit itself."]},
+  {"break": "page"},
+  {"heading": "First month"},
+  {"para": "p4", "s": [
+   "Over the first month the exchanger heated the wash water by about eighteen degrees on average.",
+   "Gas use for water heating fell by roughly a third compared with the same month last year.",
+   "The bakers reported no change in oven behaviour and no extra cleaning work."]},
+  {"table": "T1", "label": "Table 1", "grid": true, "w_frac": 0.7,
+   "caption": ["Table 1: Weekly averages during the first month."],
+   "rows": [["Week", "Water in", "Water out", "Gas saved"], ["1", "12 C", "29 C", "28 %"], ["2", "11 C", "30 C", "33 %"], ["3", "12 C", "31 C", "35 %"], ["4", "13 C", "31 C", "34 %"]]},
+  {"figure": "F2", "label": "Figure 2", "h": 120, "frame": true,
+   "panels": [{"label": "a", "label_style": "a)", "bars": [28, 33, 35, 34]}, {"label": "b", "label_style": "a)", "bars": [17, 19, 19, 18]}],
+   "caption": ["Figure 2: Weekly results.", "Panel a shows gas savings and panel b shows the water temperature rise."]},
+  {"para": "p5", "s": [
+   "Savings grew in the second week after we cleaned soot from the coil.",
+   "We expect a small drop in summer, when the incoming water is already warmer.",
+   "A full year of data will tell whether the exchanger pays for itself within three years."]}
+ ],
+ "cases": [
+  {"id": "c01", "select": "p1"},
+  {"id": "c02", "select": "p2"},
+  {"id": "c03", "select": "p4"},
+  {"id": "c04", "select": "p5"},
+  {"id": "c05", "select": "F1:caption", "script": [
+   {"text": "Figure 1 shows the two circuits of the exchanger.", "score": "none"},
+   {"text": "On the left, warm air rises through the Chimney.", "part": "a:Chimney"},
+   {"text": "The Coil takes heat from the air.", "part": "a:Coil"},
+   {"text": "A Fan keeps the air moving.", "part": "a:Fan"},
+   {"text": "The Damper closes when the oven is cold.", "part": "a:Damper"}]},
+  {"id": "c06", "select": "F1:caption", "script": [
+   {"text": "The right half shows the water side.", "score": "none"},
+   {"text": "The Pump circulates the wash water.", "part": "b:Pump"},
+   {"text": "The insulated Tank stores the warm water.", "part": "b:Tank"},
+   {"text": "A Valve lets the bakers drain the tank.", "part": "b:Valve"},
+   {"text": "The Controller switches the pump on and off.", "part": "b:Controller"}]},
+  {"id": "c07", "select": "F2:caption"},
+  {"id": "c08", "select": "T1:caption", "script": [
+   {"text": "Table 1 lists weekly averages.", "score": "none"},
+   {"text": "Gas savings stayed above a quarter in every week.", "score": "none"}]}
+ ]
+}

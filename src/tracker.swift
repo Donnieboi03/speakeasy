@@ -168,6 +168,8 @@ final class Live: NSObject {
     // shape scheme: text_band | part_oval | figure_box | table_row; table_header is a faint tint kept while a table is read
     var cueKind = "text_band"
     var drawMeta: [String: Any] = [:]       // run_id, label, doc_transform of the current event, for draw records
+    // page->screen fit behind draw records' page_rect, kept without the scroll offset `off` (screen = s * page + o + off)
+    var pageFit: (s: Double, ox: Double, oy: Double, src: String)? = nil
     var headerPanel: NSPanel? = nil
     let headerShape = CAShapeLayer()
     var headerDelta: CGRect? = nil          // header rect relative to the row band's origin (moves with it on scroll)
@@ -327,9 +329,13 @@ final class Live: NSObject {
             if !shown || abs(f.minY - lastDrawn.minY) > 2 || abs(f.minX - lastDrawn.minX) > 2 || abs(f.width - lastDrawn.width) > 2 || abs(f.height - lastDrawn.height) > 2 {
                 draws += 1
                 let H = NSScreen.screens.first?.frame.height ?? 0
+                let pageRect: Any = pageFit.map { pf -> [Double] in
+                    let ox = pf.ox + Double(off.x), oy = pf.oy + Double(off.y)
+                    return [(Double(r.minX) - ox) / pf.s, (Double(r.minY) - oy) / pf.s, (Double(r.maxX) - ox) / pf.s, (Double(r.maxY) - oy) / pf.s].map { ($0 * 10).rounded() / 10 }
+                } ?? NSNull()
                 rec(drawMeta.merging(["event": "draw", "seq": seq, "cue": cue, "cue_kind": cueKind, "header": headerDelta != nil, "rect": [Int(f.minX), Int(H - f.maxY), Int(f.width), Int(f.height)],
                      "text_rect": [Int(r.minX), Int(r.minY), Int(r.width), Int(r.height)], "src": src, "overlay": "swift-panel",
-                     "on_screen": p.isVisible]) { $1 })
+                     "on_screen": p.isVisible, "page_rect": pageRect, "page_fit": pageFit?.src ?? NSNull()]) { $1 })
                 shown = true; lastDrawn = f
             }
             drawnSeq = seq
@@ -361,7 +367,7 @@ final class Live: NSObject {
         let t = now()
         if t - lastRejLog > 0.5 { lastRejLog = t; rec(["event": "scroll-rejected", "reason": why, "counts": rejN]); rejN = [:] }
     }
-    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?) {
+    func scan(rect r: CGRect?, visible: Bool, capTs: Double, method: String, reason: String?, fit: (Double, Double, Double)? = nil) {
         lastWork = "scan"
         if capTs > 0 && capTs < lastMove { return }               // screenshot taken before the last scroll: stale
         wantScan = false
@@ -409,6 +415,7 @@ final class Live: NSObject {
                 if r.height < 30 { lineH = lineH > 0 ? 0.7 * lineH + 0.3 * r.height : r.height }
             }
             pred = 0; rect = r; scanVisible = true; hiddenByKey = false; src = method
+            if method == "doc", let f = fit { pageFit = (f.0, f.1 - Double(off.x), f.2 - Double(off.y), "anchors") }
         } else {
             if scanVisible { hideTrigger = (reason ?? "scrolled-off", now()) }
             scanVisible = false
@@ -473,6 +480,8 @@ final class Live: NSObject {
                cueKind ck: String? = nil, header: CGRect? = nil, meta: [String: Any] = [:]) {
         var r = r0
         drawMeta = meta.merging(["run_id": runId]) { a, _ in a }
+        if (meta["doc_target"] as? [Double]) == nil { pageFit = nil }   // no page-space box: nothing to map back
+        else if pageFit?.src != "anchors", let t = meta["doc_transform"] as? [Double], t.count == 3 { pageFit = (t[0], t[1], t[2], "event-transform") }
         cue = figure ? "figure" : "text"; suppressed = !drawOn
         cueKind = ck ?? (ellipse ? "part_oval" : figure ? "figure_box" : "text_band")
         if cueKind == "table_row", let h = header, let n = r0 { headerDelta = CGRect(x: h.minX - n.minX, y: h.minY - n.minY, width: h.width, height: h.height) }
@@ -663,6 +672,10 @@ struct OLine { let text: String; let toks: Set<String>; let box: CGRect }   // b
 // Match anchors to recognised lines, fit page->screen (uniform scale + offset), map the target (exact line / figure / panel).
 var gDocDiag: [String: Int] = [:]
 func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CGRect, Int, Double)? {
+    docMapFit(lines, doc, frame: frame).map { ($0.0, $0.1, $0.2) }
+}
+// docMap plus the fit itself (scale, x offset, y offset): screen = s * page + offset
+func docMapFit(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CGRect, Int, Double, (Double, Double, Double))? {
     gDocDiag = [:]
     guard let tg = doc["target"] as? [Double], tg.count == 4, let anc = doc["anchors"] as? [[Any]] else { return nil }
     var P: [(Double, Double)] = [], S: [(Double, Double)] = []
@@ -709,7 +722,7 @@ func docMap(_ lines: [OLine], _ doc: [String: Any], frame: CGRect? = nil) -> (CG
     for (p, q) in zip(P, S) { err += pow(sc * p.0 + ox - q.0, 2) + pow(sc * p.1 + oy - q.1, 2) }
     let rms = (err / n).squareRoot()
     if rms > 10 { return nil }
-    return (CGRect(x: sc * tg[0] + ox, y: sc * tg[1] + oy, width: sc * (tg[2] - tg[0]), height: sc * (tg[3] - tg[1])), P.count, rms)
+    return (CGRect(x: sc * tg[0] + ox, y: sc * tg[1] + oy, width: sc * (tg[2] - tg[0]), height: sc * (tg[3] - tg[1])), P.count, rms, (sc, ox, oy))
 }
 var gAxDead = false   // set on main when the app has no AX text geometry; the scan loop then skips AX lookups
 func stamp() -> String { let f = DateFormatter(); f.dateFormat = "yyyy-MM-dd HH:mm:ss"; return f.string(from: Date()) }
@@ -1035,6 +1048,7 @@ struct Tracker {
                     scanned = true; frames += 1; lastScan = tick
                     let frame = ws!.frame; winFrame = frame
                     var found: CGRect? = nil, method = ""
+                    var hitFit: (Double, Double, Double)? = nil
                     var continueFig = false
                     if !gAxDead, let el = axEl, let rg = ev["range"] as? [Int], rg.count == 2, let r = axBounds(el, rg[0], rg[1]) {
                         let content = CGRect(x: frame.minX, y: frame.minY + 24, width: frame.width, height: frame.height - 24)
@@ -1055,13 +1069,13 @@ struct Tracker {
                             let o0 = now()
                             var lines = recognise(img, frame: frame, accurate: accurate)
                             var hit: CGRect? = nil
-                            if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm, frame: frame) {
+                            if let dm = ev["doc"] as? [String: Any], let (r, k, e, fit) = docMapFit(lines, dm, frame: frame) {
                                 let vis = r.intersection(frame)
                                 // sanity: the mapped box must lie mostly in the window, and a text line must agree with where its words are
                                 var ok = !vis.isNull && vis.width * vis.height >= 0.5 * r.width * r.height
                                 if ok && (dm["kind"] as? String) == "line", let rf = refind(lines, target: target, near: lastBox),
                                    rf.intersection(r).isNull { ok = false }
-                                if ok { hit = vis; method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
+                                if ok { hit = vis; method = "doc"; hitFit = fit; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
                                 else { out["doc_rejected"] = true }
                             } else if ev["doc"] != nil { out["doc_diag"] = gDocDiag }
                             let dk = (ev["doc"] as? [String: Any])?["kind"] as? String
@@ -1086,10 +1100,10 @@ struct Tracker {
                             if hit == nil && !accurate && tick - lastAccurate > 1.5 {   // accurate retry, at most every 1.5 s
                                 lastAccurate = tick
                                 lines = recognise(img, frame: frame, accurate: true)
-                                if let dm = ev["doc"] as? [String: Any], let (r, k, e) = docMap(lines, dm, frame: frame) {
+                                if let dm = ev["doc"] as? [String: Any], let (r, k, e, fit) = docMapFit(lines, dm, frame: frame) {
                                     let vis = r.intersection(frame)
                                     if !vis.isNull && vis.width * vis.height >= 0.5 * r.width * r.height {
-                                        hit = vis; method = "doc"; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
+                                        hit = vis; method = "doc"; hitFit = fit; out["anchors"] = k; out["rms"] = (e * 10).rounded() / 10 }
                                 }
                                 if hit == nil { hit = refind(lines, target: target, near: lastBox) }
                             }
@@ -1112,10 +1126,10 @@ struct Tracker {
                             }
                         } else { errNote = "capture failed (Screen Recording permission?)" }
                     }
-                    let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method
+                    let fnd = found, vis = found != nil, capTs = out["cap_ts"] as? Double ?? 0, m = method, fitFound = hitFit
                     let hide = fnd == nil && (out["reason"] as? String) == "content-changed" || (fnd == nil && missRun >= 1 && out["reason"] != nil)
                     let rsn = out["reason"] as? String
-                    if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn) } }
+                    if vis || hide { await MainActor.run { Live.shared.scan(rect: fnd, visible: vis, capTs: capTs, method: m, reason: rsn, fit: fitFound) } }
                     if let r = found {
                         missRun = 0; lastBox = r
                         if method == "ax" { axHits += 1 } else if method == "doc" { docHits += 1 } else { ocrHits += 1 }

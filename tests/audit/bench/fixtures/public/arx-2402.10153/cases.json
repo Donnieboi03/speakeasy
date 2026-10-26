@@ -1,0 +1,600 @@
+[
+ {
+  "case_id": "arx-2402.10153/c01",
+  "doc_id": "arx-2402.10153",
+  "page": 2,
+  "selection": [
+   {
+    "text": "This paper presents a knowledge-based diabetes manage-",
+    "rect": [
+     58.93,
+     218.59,
+     300.02,
+     228.55
+    ]
+   },
+   {
+    "text": "ment system that is implemented through the utilization of",
+    "rect": [
+     48.96,
+     230.55,
+     300.02,
+     240.51
+    ]
+   },
+   {
+    "text": "LLM-powered CHAs. We customize the open-source open-",
+    "rect": [
+     48.96,
+     242.5,
+     300.02,
+     252.46
+    ]
+   },
+   {
+    "text": "CHA framework for diet assessment by integrating external",
+    "rect": [
+     48.96,
+     254.46,
+     300.02,
+     264.42
+    ]
+   },
+   {
+    "text": "knowledge \u2013 including the diet guidelines from the American",
+    "rect": [
+     48.96,
+     266.41,
+     300.02,
+     276.37
+    ]
+   },
+   {
+    "text": "Diabetes Association reports and the nutritional data from the",
+    "rect": [
+     48.96,
+     278.37,
+     300.02,
+     288.33
+    ]
+   },
+   {
+    "text": "Nutritionix knowledge base \u2013 into LLMs. We also incorporate",
+    "rect": [
+     48.96,
+     290.32,
+     300.02,
+     300.28
+    ]
+   },
+   {
+    "text": "an analysis tool to precisely calculate the total daily nutritional",
+    "rect": [
+     48.96,
+     302.28,
+     300.02,
+     312.24
+    ]
+   },
+   {
+    "text": "intake and compare it against the guidelines. We evaluate",
+    "rect": [
+     48.96,
+     314.23,
+     300.02,
+     324.2
+    ]
+   },
+   {
+    "text": "the proposed approach with real-world diabetes-related ques-",
+    "rect": [
+     48.96,
+     326.19,
+     300.02,
+     336.15
+    ]
+   },
+   {
+    "text": "tions focusing on daily meals in comparison to GPT4. The",
+    "rect": [
+     48.96,
+     338.14,
+     300.02,
+     348.11
+    ]
+   },
+   {
+    "text": "evaluation is centered on the assessment of the potential risk",
+    "rect": [
+     48.96,
+     350.1,
+     300.02,
+     360.06
+    ]
+   },
+   {
+    "text": "associated with the recommended dietary options.",
+    "rect": [
+     48.96,
+     362.05,
+     253.17,
+     372.02
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "This paper presents a knowledge-based diabetes management system that is implemented through the utilization of LLM-powered CHAs."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "We customize the open-source openCHA framework for diet assessment by integrating external knowledge, including the diet guidelines from the American Diabetes Association reports and the nutritional data from the Nutritionix knowledge base, into LLMs."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "We also incorporate an analysis tool to precisely calculate the total daily nutritional intake and compare it against the guidelines."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "We evaluate the proposed approach with real-world diabetes-related questions focusing on daily meals in comparison to GPT4."
+   },
+   {
+    "sentence_id": "s5",
+    "text": "The evaluation is centered on the assessment of the potential risk associated with the recommended dietary options."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2402.10153/c02",
+  "doc_id": "arx-2402.10153",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Our proposed CHA contains three main parts as Interface,",
+    "rect": [
+     58.93,
+     493.32,
+     300.02,
+     503.28
+    ]
+   },
+   {
+    "text": "Orchestrator, and External Sources (see Figure 2). The In-",
+    "rect": [
+     48.96,
+     505.28,
+     300.02,
+     515.24
+    ]
+   },
+   {
+    "text": "terface serves as a connection point between users and our",
+    "rect": [
+     48.96,
+     517.23,
+     300.02,
+     527.19
+    ]
+   },
+   {
+    "text": "framework, facilitating interactions through text using a web",
+    "rect": [
+     48.96,
+     529.19,
+     300.02,
+     539.15
+    ]
+   },
+   {
+    "text": "chat interface and relaying user queries to the Orchestrator.",
+    "rect": [
+     48.96,
+     541.14,
+     292.27,
+     551.1
+    ]
+   },
+   {
+    "text": "The Orchestrator serves as the core component of the CHA",
+    "rect": [
+     58.93,
+     553.22,
+     300.02,
+     563.18
+    ]
+   },
+   {
+    "text": "and is responsible for problem-solving, planning, executing",
+    "rect": [
+     48.96,
+     565.17,
+     300.02,
+     575.13
+    ]
+   },
+   {
+    "text": "actions, and generating appropriate responses based on user",
+    "rect": [
+     48.96,
+     577.13,
+     300.02,
+     587.09
+    ]
+   },
+   {
+    "text": "queries. It operates on the principles of the Perceptual Cycle",
+    "rect": [
+     48.96,
+     589.08,
+     300.02,
+     599.04
+    ]
+   },
+   {
+    "text": "Model [14] and involves perceiving, transforming, and ana-",
+    "rect": [
+     48.96,
+     601.04,
+     300.02,
+     611.0
+    ]
+   },
+   {
+    "text": "lyzing the world (i.e., input query and metadata). It interacts",
+    "rect": [
+     48.96,
+     612.99,
+     300.02,
+     622.95
+    ]
+   },
+   {
+    "text": "with external sources, acquires information, performs data",
+    "rect": [
+     48.96,
+     624.95,
+     300.02,
+     634.91
+    ]
+   },
+   {
+    "text": "integration, and extracts insights. The Orchestrator comprises",
+    "rect": [
+     48.96,
+     636.9,
+     300.02,
+     646.87
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s6",
+    "text": "Our proposed CHA contains three main parts as Interface, Orchestrator, and External Sources, see Figure 2."
+   },
+   {
+    "sentence_id": "s7",
+    "text": "The Interface serves as a connection point between users and our framework, facilitating interactions through text using a web chat interface and relaying user queries to the Orchestrator."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "The Orchestrator serves as the core component of the CHA and is responsible for problem-solving, planning, executing actions, and generating appropriate responses based on user queries."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "It operates on the principles of the Perceptual Cycle Model and involves perceiving, transforming, and analyzing the world (i.e., input query and metadata)."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "It interacts with external sources, acquires information, performs data integration, and extracts insights."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2402.10153/c03",
+  "doc_id": "arx-2402.10153",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Knowledge Base: serves to fetch current healthcare infor-",
+    "rect": [
+     321.94,
+     396.13,
+     563.03,
+     406.16
+    ]
+   },
+   {
+    "text": "mation from credible sources. We developed a task focused on",
+    "rect": [
+     311.98,
+     408.16,
+     563.04,
+     418.12
+    ]
+   },
+   {
+    "text": "retrieving nutritional information from Nutritionix for various",
+    "rect": [
+     311.98,
+     420.11,
+     563.04,
+     430.07
+    ]
+   },
+   {
+    "text": "foods, enhancing the up-to-dateness of the responses. This task",
+    "rect": [
+     311.98,
+     432.07,
+     563.04,
+     442.03
+    ]
+   },
+   {
+    "text": "takes a food query as input and uses the NutritioniX API [17]",
+    "rect": [
+     311.98,
+     444.02,
+     563.04,
+     453.98
+    ]
+   },
+   {
+    "text": "to retrieve a list of foods along with their corresponding",
+    "rect": [
+     311.98,
+     455.98,
+     563.04,
+     465.94
+    ]
+   },
+   {
+    "text": "nutrient information, based on standard measurements. This",
+    "rect": [
+     311.98,
+     467.93,
+     563.04,
+     477.89
+    ]
+   },
+   {
+    "text": "is achieved by leveraging the API\u2019s Natural Language for",
+    "rect": [
+     311.98,
+     479.89,
+     563.04,
+     489.85
+    ]
+   },
+   {
+    "text": "Nutrients feature, which allows for parsing of natural language",
+    "rect": [
+     311.98,
+     491.84,
+     563.04,
+     501.8
+    ]
+   },
+   {
+    "text": "requests and returning detailed nutrition information for com-",
+    "rect": [
+     311.98,
+     503.8,
+     563.04,
+     513.76
+    ]
+   },
+   {
+    "text": "mon foods.",
+    "rect": [
+     311.98,
+     515.75,
+     357.81,
+     525.71
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s11",
+    "text": "Knowledge Base: serves to fetch current healthcare information from credible sources."
+   },
+   {
+    "sentence_id": "s12",
+    "text": "We developed a task focused on retrieving nutritional information from Nutritionix for various foods, enhancing the up-to-dateness of the responses."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "This task takes a food query as input and uses the NutritioniX API to retrieve a list of foods along with their corresponding nutrient information, based on standard measurements."
+   },
+   {
+    "sentence_id": "s14",
+    "text": "This is achieved by leveraging the API's Natural Language for Nutrients feature, which allows for parsing of natural language requests and returning detailed nutrition information for common foods."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2402.10153/c04",
+  "doc_id": "arx-2402.10153",
+  "page": 2,
+  "selection": [
+   {
+    "text": "AI and Analysis Models: provide data analysis, enabling",
+    "rect": [
+     321.94,
+     528.44,
+     563.04,
+     538.47
+    ]
+   },
+   {
+    "text": "the extraction of insights and associations. This is particularly",
+    "rect": [
+     311.98,
+     540.46,
+     563.04,
+     550.42
+    ]
+   },
+   {
+    "text": "valuable in intricate healthcare contexts where LLMs may",
+    "rect": [
+     311.98,
+     552.42,
+     563.04,
+     562.38
+    ]
+   },
+   {
+    "text": "not efficiently handle intensive computations. We develop a",
+    "rect": [
+     311.98,
+     564.37,
+     563.04,
+     574.33
+    ]
+   },
+   {
+    "text": "task focused on daily food risk assessment into the openCHA",
+    "rect": [
+     311.98,
+     576.33,
+     563.04,
+     586.29
+    ]
+   },
+   {
+    "text": "framework [12]. This task follows established guidelines for",
+    "rect": [
+     311.98,
+     588.28,
+     563.04,
+     598.24
+    ]
+   },
+   {
+    "text": "daily nutrient intake to perform food risk assessments. The",
+    "rect": [
+     311.98,
+     600.24,
+     563.04,
+     610.2
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s15",
+    "text": "AI and Analysis Models: provide data analysis, enabling the extraction of insights and associations."
+   },
+   {
+    "sentence_id": "s16",
+    "text": "This is particularly valuable in intricate healthcare contexts where LLMs may not efficiently handle intensive computations."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "We develop a task focused on daily food risk assessment into the openCHA framework."
+   },
+   {
+    "sentence_id": "s18",
+    "text": "This task follows established guidelines for daily nutrient intake to perform food risk assessments."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2402.10153/c05",
+  "doc_id": "arx-2402.10153",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Fig. 2. LLM-based CHA for diabetes management enabled by the openCHA",
+    "rect": [
+     311.98,
+     270.78,
+     563.04,
+     278.75
+    ]
+   },
+   {
+    "text": "framework.",
+    "rect": [
+     311.98,
+     279.75,
+     348.66,
+     287.72
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s19",
+    "text": "Fig. 2 shows the health agent built on openCHA."
+   },
+   {
+    "sentence_id": "s20",
+    "text": "Users talk to the agent through the Web Application."
+   },
+   {
+    "sentence_id": "s21",
+    "text": "The Task Executor carries out the planned actions."
+   },
+   {
+    "sentence_id": "s22",
+    "text": "The Available Tasks box lists the tools the agent can call."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "The Data Pipe keeps metadata and intermediate data."
+   }
+  ]
+ },
+ {
+  "case_id": "arx-2402.10153/c06",
+  "doc_id": "arx-2402.10153",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Fig. 2. LLM-based CHA for diabetes management enabled by the openCHA",
+    "rect": [
+     311.98,
+     270.78,
+     563.04,
+     278.75
+    ]
+   },
+   {
+    "text": "framework.",
+    "rect": [
+     311.98,
+     279.75,
+     348.66,
+     287.72
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s24",
+    "text": "The lower row holds the two language models."
+   },
+   {
+    "sentence_id": "s25",
+    "text": "The Task Planner LLM decides what to do next."
+   },
+   {
+    "sentence_id": "s26",
+    "text": "The Response Generator LLM writes the final answer."
+   },
+   {
+    "sentence_id": "s27",
+    "text": "The Knowledge Base supplies nutrition facts."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "The Evidence-based Risk Assessment model scores each meal."
+   }
+  ]
+ }
+]

@@ -1,0 +1,319 @@
+[
+ {
+  "case_id": "syn-report-01/c01",
+  "doc_id": "syn-report-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The coastal sensor network measures water temperature, salinity and wave height along a forty",
+    "rect": [
+     64.0,
+     94.8,
+     507.52,
+     104.51
+    ]
+   },
+   {
+    "text": "kilometre shoreline. Each station reports a compact summary every ten minutes and keeps the raw",
+    "rect": [
+     64.0,
+     108.8,
+     523.26,
+     118.51
+    ]
+   },
+   {
+    "text": "samples for a full week. The network was installed in three phases between early spring and late",
+    "rect": [
+     64.0,
+     122.8,
+     512.19,
+     132.51
+    ]
+   },
+   {
+    "text": "autumn. Most stations run on solar power and a small battery that lasts about four cloudy days.",
+    "rect": [
+     64.0,
+     136.8,
+     504.62,
+     146.51
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "The coastal sensor network measures water temperature, salinity and wave height along a forty kilometre shoreline."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "Each station reports a compact summary every ten minutes and keeps the raw samples for a full week."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "The network was installed in three phases between early spring and late autumn."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "Most stations run on solar power and a small battery that lasts about four cloudy days."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-report-01/c02",
+  "doc_id": "syn-report-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "A station consists of a moored buoy, a short radio link and a relay mast on the nearest pier. The",
+    "rect": [
+     64.0,
+     229.6,
+     508.13,
+     239.31
+    ]
+   },
+   {
+    "text": "buoy carries a temperature probe, a conductivity cell and a pressure sensor for waves. Probes are",
+    "rect": [
+     64.0,
+     243.6,
+     519.77,
+     253.31
+    ]
+   },
+   {
+    "text": "cleaned by a small wiper that runs once an hour to slow the growth of algae. The relay mast",
+    "rect": [
+     64.0,
+     257.6,
+     490.03,
+     267.31
+    ]
+   },
+   {
+    "text": "forwards the packets to a gateway in the harbour office over a licensed band.",
+    "rect": [
+     64.0,
+     271.6,
+     421.77,
+     281.31
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s8",
+    "text": "A station consists of a moored buoy, a short radio link and a relay mast on the nearest pier."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "The buoy carries a temperature probe, a conductivity cell and a pressure sensor for waves."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "Probes are cleaned by a small wiper that runs once an hour to slow the growth of algae."
+   },
+   {
+    "sentence_id": "s11",
+    "text": "The relay mast forwards the packets to a gateway in the harbour office over a licensed band."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-report-01/c03",
+  "doc_id": "syn-report-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "The quality flags are set by simple range checks and by a spike detector that compares each",
+    "rect": [
+     64.0,
+     254.8,
+     494.7,
+     264.51
+    ]
+   },
+   {
+    "text": "sample with its neighbours. A sample that jumps by more than five standard deviations is marked as",
+    "rect": [
+     64.0,
+     268.8,
+     528.52,
+     278.51
+    ]
+   },
+   {
+    "text": "suspect but never deleted. Analysts can override any flag, and every override is written to an audit",
+    "rect": [
+     64.0,
+     282.8,
+     519.22,
+     292.51
+    ]
+   },
+   {
+    "text": "log with a short reason.",
+    "rect": [
+     64.0,
+     296.8,
+     172.55,
+     306.51
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s22",
+    "text": "The quality flags are set by simple range checks and by a spike detector that compares each sample with its neighbours."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "A sample that jumps by more than five standard deviations is marked as suspect but never deleted."
+   },
+   {
+    "sentence_id": "s24",
+    "text": "Analysts can override any flag, and every override is written to an audit log with a short reason."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-report-01/c04",
+  "doc_id": "syn-report-01",
+  "page": 3,
+  "selection": [
+   {
+    "text": "The archive keeps every summary and every raw sample in daily files, one file per station. Files are",
+    "rect": [
+     64.0,
+     94.8,
+     524.99,
+     104.51
+    ]
+   },
+   {
+    "text": "compressed after thirty days and copied to a second site once a week. A small web page lists the",
+    "rect": [
+     64.0,
+     108.8,
+     515.71,
+     118.51
+    ]
+   },
+   {
+    "text": "latest summary of each station and the time it arrived. Researchers can request the raw files through",
+    "rect": [
+     64.0,
+     122.8,
+     530.86,
+     132.51
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s30",
+    "text": "The archive keeps every summary and every raw sample in daily files, one file per station."
+   },
+   {
+    "sentence_id": "s31",
+    "text": "Files are compressed after thirty days and copied to a second site once a week."
+   },
+   {
+    "sentence_id": "s32",
+    "text": "A small web page lists the latest summary of each station and the time it arrived."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-report-01/c05",
+  "doc_id": "syn-report-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Data path of one station. Packets travel from the water to the archive in four hops.",
+    "rect": [
+     64.0,
+     448.6,
+     427.68,
+     456.93
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s12",
+    "text": "Figure 1: Data path of one station."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "Packets travel from the water to the archive in four hops."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-report-01/c06",
+  "doc_id": "syn-report-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Data path of one station. Packets travel from the water to the archive in four hops.",
+    "rect": [
+     64.0,
+     448.6,
+     427.68,
+     456.93
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s38",
+    "text": "Figure 1 follows one packet from the sea to the office."
+   },
+   {
+    "sentence_id": "s39",
+    "text": "It starts at the Buoy, which samples the water every second."
+   },
+   {
+    "sentence_id": "s40",
+    "text": "The Relay mast on the pier forwards each packet over the radio link."
+   },
+   {
+    "sentence_id": "s41",
+    "text": "Next the Gateway in the harbour office buffers the packets."
+   },
+   {
+    "sentence_id": "s42",
+    "text": "Finally the Archive stores the summaries and the raw samples."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-report-01/c07",
+  "doc_id": "syn-report-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Figure 2: Faults per week during the first winter. Panel a counts fouling events and panel b counts link outages.",
+    "rect": [
+     64.0,
+     525.6,
+     505.72,
+     533.93
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s28",
+    "text": "Figure 2: Faults per week during the first winter."
+   },
+   {
+    "sentence_id": "s29",
+    "text": "Panel a counts fouling events and panel b counts link outages."
+   }
+  ]
+ }
+]

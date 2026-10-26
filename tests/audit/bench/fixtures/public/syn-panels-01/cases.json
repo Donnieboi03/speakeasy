@@ -1,0 +1,372 @@
+[
+ {
+  "case_id": "syn-panels-01/c01",
+  "doc_id": "syn-panels-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The pilot plant treats river water in two stages before it reaches the storage tank. The first stage removes sand",
+    "rect": [
+     60.0,
+     82.8,
+     541.45,
+     92.7
+    ]
+   },
+   {
+    "text": "and large particles, and the second stage removes fine particles and germs. Both stages were built from",
+    "rect": [
+     60.0,
+     96.8,
+     512.74,
+     106.7
+    ]
+   },
+   {
+    "text": "standard parts so that the plant can be copied by small towns. The rest of this note explains the layout of each",
+    "rect": [
+     60.0,
+     110.8,
+     540.88,
+     120.7
+    ]
+   },
+   {
+    "text": "stage and the sensors that watch it.",
+    "rect": [
+     60.0,
+     124.8,
+     212.45,
+     134.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "The pilot plant treats river water in two stages before it reaches the storage tank."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "The first stage removes sand and large particles, and the second stage removes fine particles and germs."
+   },
+   {
+    "sentence_id": "s3",
+    "text": "Both stages were built from standard parts so that the plant can be copied by small towns."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "The rest of this note explains the layout of each stage and the sensors that watch it."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c02",
+  "doc_id": "syn-panels-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Water is pumped from the river through a coarse intake and a rotating screen. The settler gives heavy particles",
+    "rect": [
+     60.0,
+     363.8,
+     545.41,
+     373.7
+    ]
+   },
+   {
+    "text": "about forty minutes to sink before the water moves on. A slow sand filter then removes most of the remaining",
+    "rect": [
+     60.0,
+     377.8,
+     543.33,
+     387.7
+    ]
+   },
+   {
+    "text": "turbidity. The second stage adds a small dose of coagulant, which helps the membrane catch fine particles.",
+    "rect": [
+     60.0,
+     391.8,
+     528.94,
+     401.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s7",
+    "text": "Water is pumped from the river through a coarse intake and a rotating screen."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "The settler gives heavy particles about forty minutes to sink before the water moves on."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "A slow sand filter then removes most of the remaining turbidity."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "The second stage adds a small dose of coagulant, which helps the membrane catch fine particles."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c03",
+  "doc_id": "syn-panels-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: The two treatment stages. Stage one is shown on the left and stage two on the right.",
+    "rect": [
+     60.0,
+     340.8,
+     395.47,
+     348.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s24",
+    "text": "Figure 1 shows both stages side by side."
+   },
+   {
+    "sentence_id": "s25",
+    "text": "In panel a, river water first passes the Intake."
+   },
+   {
+    "sentence_id": "s26",
+    "text": "The rotating Screen catches leaves and plastic."
+   },
+   {
+    "sentence_id": "s27",
+    "text": "Heavy particles sink in the Settler."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "The Sand filter removes most of the remaining turbidity."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c04",
+  "doc_id": "syn-panels-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: The two treatment stages. Stage one is shown on the left and stage two on the right.",
+    "rect": [
+     60.0,
+     340.8,
+     395.47,
+     348.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s29",
+    "text": "Panel b shows the second stage."
+   },
+   {
+    "sentence_id": "s30",
+    "text": "The Dosing unit adds a small amount of coagulant."
+   },
+   {
+    "sentence_id": "s31",
+    "text": "The Membrane catches the fine particles."
+   },
+   {
+    "sentence_id": "s32",
+    "text": "The UV lamp treats the water before storage."
+   },
+   {
+    "sentence_id": "s33",
+    "text": "Clean water waits in the Storage tank."
+   },
+   {
+    "sentence_id": "s34",
+    "text": "Callout 1 marks the first backwash vessel."
+   },
+   {
+    "sentence_id": "s35",
+    "text": "Callout 2 marks the second backwash vessel."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c05",
+  "doc_id": "syn-panels-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Figure 2: Sensor drawing. Numbers mark the four sensors described in the text.",
+    "rect": [
+     60.0,
+     300.8,
+     345.96,
+     308.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s36",
+    "text": "Figure 2 places the four sensors."
+   },
+   {
+    "sentence_id": "s37",
+    "text": "Callout 3 is the turbidity probe after the sand filter."
+   },
+   {
+    "sentence_id": "s38",
+    "text": "Callout 4 is the pressure gauge across the membrane."
+   },
+   {
+    "sentence_id": "s39",
+    "text": "Callout 5 measures the lamp intensity."
+   },
+   {
+    "sentence_id": "s40",
+    "text": "Callout 6 reads the level of the storage tank."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c06",
+  "doc_id": "syn-panels-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Four sensors watch the plant, and each one is marked with a numbered callout in the sensor drawing. The",
+    "rect": [
+     60.0,
+     82.8,
+     523.75,
+     92.7
+    ]
+   },
+   {
+    "text": "turbidity probe sits after the sand filter and is the most important single reading. A pressure gauge across the",
+    "rect": [
+     60.0,
+     96.8,
+     536.9,
+     106.7
+    ]
+   },
+   {
+    "text": "membrane shows when the membrane needs cleaning. The other two sensors measure the lamp intensity and",
+    "rect": [
+     60.0,
+     110.8,
+     538.41,
+     120.7
+    ]
+   },
+   {
+    "text": "the level of the storage tank.",
+    "rect": [
+     60.0,
+     124.8,
+     184.64,
+     134.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s14",
+    "text": "Four sensors watch the plant, and each one is marked with a numbered callout in the sensor drawing."
+   },
+   {
+    "sentence_id": "s15",
+    "text": "The turbidity probe sits after the sand filter and is the most important single reading."
+   },
+   {
+    "sentence_id": "s16",
+    "text": "A pressure gauge across the membrane shows when the membrane needs cleaning."
+   },
+   {
+    "sentence_id": "s17",
+    "text": "The other two sensors measure the lamp intensity and the level of the storage tank."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c07",
+  "doc_id": "syn-panels-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Alarm limits were set conservatively for the first season and will be relaxed once more data is available. Every",
+    "rect": [
+     60.0,
+     420.8,
+     547.26,
+     430.7
+    ]
+   },
+   {
+    "text": "alarm sends a text message to the operator on duty and is written to the plant log. During the pilot the turbidity",
+    "rect": [
+     60.0,
+     434.8,
+     546.41,
+     444.7
+    ]
+   },
+   {
+    "text": "alarm fired six times, always after heavy rain upstream.",
+    "rect": [
+     60.0,
+     448.8,
+     304.39,
+     458.7
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s21",
+    "text": "Alarm limits were set conservatively for the first season and will be relaxed once more data is available."
+   },
+   {
+    "sentence_id": "s22",
+    "text": "Every alarm sends a text message to the operator on duty and is written to the plant log."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "During the pilot the turbidity alarm fired six times, always after heavy rain upstream."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-panels-01/c08",
+  "doc_id": "syn-panels-01",
+  "page": 2,
+  "selection": [
+   {
+    "text": "Table 1: Alarm limits used during the pilot.",
+    "rect": [
+     60.0,
+     323.8,
+     216.5,
+     331.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s41",
+    "text": "Table 1 lists the alarm limits."
+   },
+   {
+    "sentence_id": "s42",
+    "text": "Turbidity has a high limit of one unit."
+   }
+  ]
+ }
+]

@@ -1,0 +1,394 @@
+[
+ {
+  "case_id": "syn-fullwidth-01/c01",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Small delivery robots now share pavements with pedestrians",
+    "rect": [
+     48.0,
+     253.9,
+     290.47,
+     262.9
+    ]
+   },
+   {
+    "text": "in several cities. They must recognise kerbs, crossings and",
+    "rect": [
+     48.0,
+     265.9,
+     281.85,
+     274.9
+    ]
+   },
+   {
+    "text": "people from a single forward camera. Most of the software",
+    "rect": [
+     48.0,
+     277.9,
+     283.49,
+     286.9
+    ]
+   },
+   {
+    "text": "runs on a low power board inside the robot body. This paper",
+    "rect": [
+     48.0,
+     289.9,
+     289.63,
+     298.9
+    ]
+   },
+   {
+    "text": "describes the perception stack of one such robot and the tests",
+    "rect": [
+     48.0,
+     301.9,
+     291.84,
+     310.9
+    ]
+   },
+   {
+    "text": "we ran on it.",
+    "rect": [
+     48.0,
+     313.9,
+     97.99,
+     322.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s3",
+    "text": "Small delivery robots now share pavements with pedestrians in several cities."
+   },
+   {
+    "sentence_id": "s4",
+    "text": "They must recognise kerbs, crossings and people from a single forward camera."
+   },
+   {
+    "sentence_id": "s5",
+    "text": "Most of the software runs on a low power board inside the robot body."
+   },
+   {
+    "sentence_id": "s6",
+    "text": "This paper describes the perception stack of one such robot and the tests we ran on it."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fullwidth-01/c02",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The stack has four stages that run once per camera frame. A",
+    "rect": [
+     48.0,
+     330.9,
+     287.92,
+     339.9
+    ]
+   },
+   {
+    "text": "compact encoder turns each frame into a grid of features. The",
+    "rect": [
+     48.0,
+     342.9,
+     294.31,
+     351.9
+    ]
+   },
+   {
+    "text": "planner then chooses a short path and sends wheel speeds to",
+    "rect": [
+     48.0,
+     354.9,
+     288.51,
+     363.9
+    ]
+   },
+   {
+    "text": "the motors. Two helper processes watch the stack and restart",
+    "rect": [
+     48.0,
+     366.9,
+     290.72,
+     375.9
+    ]
+   },
+   {
+    "text": "it when a stage stops responding.",
+    "rect": [
+     48.0,
+     378.9,
+     180.21,
+     387.9
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s7",
+    "text": "The stack has four stages that run once per camera frame."
+   },
+   {
+    "sentence_id": "s8",
+    "text": "A compact encoder turns each frame into a grid of features."
+   },
+   {
+    "sentence_id": "s9",
+    "text": "The planner then chooses a short path and sends wheel speeds to the motors."
+   },
+   {
+    "sentence_id": "s10",
+    "text": "Two helper processes watch the stack and restart it when a stage stops responding."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fullwidth-01/c03",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "We drove the robot for three weeks on a university campus",
+    "rect": [
+     48.0,
+     417.3,
+     284.61,
+     426.3
+    ]
+   },
+   {
+    "text": "with mixed foot traffic. Every run was recorded so that",
+    "rect": [
+     48.0,
+     429.3,
+     267.95,
+     438.3
+    ]
+   },
+   {
+    "text": "failures could be replayed and analysed later. The robot",
+    "rect": [
+     48.0,
+     441.3,
+     270.44,
+     450.3
+    ]
+   },
+   {
+    "text": "completed most deliveries without help from a remote",
+    "rect": [
+     48.0,
+     453.3,
+     264.92,
+     462.3
+    ]
+   },
+   {
+    "text": "operator. Interventions happened mainly at crossings with",
+    "rect": [
+     48.0,
+     465.3,
+     279.91,
+     474.3
+    ]
+   },
+   {
+    "text": "faded paint and at busy entrances.",
+    "rect": [
+     48.0,
+     477.3,
+     183.52,
+     486.3
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s11",
+    "text": "We drove the robot for three weeks on a university campus with mixed foot traffic."
+   },
+   {
+    "sentence_id": "s12",
+    "text": "Every run was recorded so that failures could be replayed and analysed later."
+   },
+   {
+    "sentence_id": "s13",
+    "text": "The robot completed most deliveries without help from a remote operator."
+   },
+   {
+    "sentence_id": "s14",
+    "text": "Interventions happened mainly at crossings with faded paint and at busy entrances."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fullwidth-01/c04",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "The helper processes restarted a stalled stage nine times",
+    "rect": [
+     316.0,
+     381.5,
+     539.28,
+     390.5
+    ]
+   },
+   {
+    "text": "during the trial. Each restart took less than two seconds and",
+    "rect": [
+     316.0,
+     393.5,
+     554.02,
+     402.5
+    ]
+   },
+   {
+    "text": "the robot stopped safely while it waited. We now log the",
+    "rect": [
+     316.0,
+     405.5,
+     542.36,
+     414.5
+    ]
+   },
+   {
+    "text": "memory use of every stage to find the cause of these stalls.",
+    "rect": [
+     316.0,
+     417.5,
+     551.51,
+     426.5
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s21",
+    "text": "The helper processes restarted a stalled stage nine times during the trial."
+   },
+   {
+    "sentence_id": "s22",
+    "text": "Each restart took less than two seconds and the robot stopped safely while it waited."
+   },
+   {
+    "sentence_id": "s23",
+    "text": "We now log the memory use of every stage to find the cause of these stalls."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fullwidth-01/c05",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Overview of the delivery robot software. Images flow from the camera through the encoder and the planner to the motors.",
+    "rect": [
+     48.0,
+     210.0,
+     522.15,
+     218.1
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s24",
+    "text": "Figure 1 gives an overview of the software."
+   },
+   {
+    "sentence_id": "s25",
+    "text": "Each frame starts at the Camera."
+   },
+   {
+    "sentence_id": "s26",
+    "text": "The Encoder turns each frame into a grid of features."
+   },
+   {
+    "sentence_id": "s27",
+    "text": "The Planner chooses a short path."
+   },
+   {
+    "sentence_id": "s28",
+    "text": "Wheel speeds then go to the Motors."
+   },
+   {
+    "sentence_id": "s29",
+    "text": "Callout 1 marks the first watchdog process."
+   },
+   {
+    "sentence_id": "s30",
+    "text": "Callout 2 marks the second watchdog process."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fullwidth-01/c06",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 2: Remote interventions per week. Interventions fell by more",
+    "rect": [
+     316.0,
+     348.5,
+     561.47,
+     356.6
+    ]
+   },
+   {
+    "text": "than half over the three weeks.",
+    "rect": [
+     316.0,
+     359.0,
+     426.47,
+     367.1
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s19",
+    "text": "Figure 2: Remote interventions per week."
+   },
+   {
+    "sentence_id": "s20",
+    "text": "Interventions fell by more than half over the three weeks."
+   }
+  ]
+ },
+ {
+  "case_id": "syn-fullwidth-01/c07",
+  "doc_id": "syn-fullwidth-01",
+  "page": 1,
+  "selection": [
+   {
+    "text": "Figure 1: Overview of the delivery robot software. Images flow from the camera through the encoder and the planner to the motors.",
+    "rect": [
+     48.0,
+     210.0,
+     522.15,
+     218.1
+    ]
+   }
+  ],
+  "script": [
+   {
+    "sentence_id": "s1",
+    "text": "Figure 1: Overview of the delivery robot software."
+   },
+   {
+    "sentence_id": "s2",
+    "text": "Images flow from the camera through the encoder and the planner to the motors."
+   }
+  ]
+ }
+]

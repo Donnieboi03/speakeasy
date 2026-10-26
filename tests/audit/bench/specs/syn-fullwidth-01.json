@@ -1,0 +1,61 @@
+{
+ "doc_id": "syn-fullwidth-01",
+ "page": [612, 792], "margins": [48, 54, 48, 54], "columns": 2, "gutter": 20,
+ "font": "Times-Roman", "bold": "Times-Bold", "size": 10, "leading": 12, "para_gap": 5, "heading_size": 11,
+ "caption_size": 9, "caption_leading": 10.5,
+ "footer": "Proceedings of the Synthetic Workshop on Benchmarks", "page_numbers": true,
+ "flow": [
+  {"figure": "F1", "label": "Figure 1", "span": "full", "h": 150, "shape": "ellipse",
+   "panels": [{"label_style": "none", "cols": 6, "parts": [
+     {"name": "Camera", "style": "inside"}, {"name": "Encoder", "style": "inside"}, {"name": "callout", "style": "callout", "n": 1},
+     {"name": "Planner", "style": "inside"}, {"name": "callout", "style": "callout", "n": 2}, {"name": "Motors", "style": "inside"}]}],
+   "caption": ["Figure 1: Overview of the delivery robot software.", "Images flow from the camera through the encoder and the planner to the motors."]},
+  {"heading": "1 Introduction"},
+  {"para": "p1", "s": [
+   "Small delivery robots now share pavements with pedestrians in several cities.",
+   "They must recognise kerbs, crossings and people from a single forward camera.",
+   "Most of the software runs on a low power board inside the robot body.",
+   "This paper describes the perception stack of one such robot and the tests we ran on it."]},
+  {"para": "p2", "s": [
+   "The stack has four stages that run once per camera frame.",
+   "A compact encoder turns each frame into a grid of features.",
+   "The planner then chooses a short path and sends wheel speeds to the motors.",
+   "Two helper processes watch the stack and restart it when a stage stops responding."]},
+  {"heading": "2 Field tests"},
+  {"para": "p3", "s": [
+   "We drove the robot for three weeks on a university campus with mixed foot traffic.",
+   "Every run was recorded so that failures could be replayed and analysed later.",
+   "The robot completed most deliveries without help from a remote operator.",
+   "Interventions happened mainly at crossings with faded paint and at busy entrances."]},
+  {"table": "T1", "label": "Table 1",
+   "caption": ["Table 1: Field test summary."],
+   "rows": [["Week", "Runs", "Km", "Help"], ["1", "142", "61", "19"], ["2", "171", "78", "11"], ["3", "188", "85", "7"]]},
+  {"para": "p4", "s": [
+   "Interventions fell from week to week as we tuned the crossing detector.",
+   "The largest gain came from adding images taken at dusk to the training data.",
+   "Rain remained difficult because drops on the lens blur the lower part of the image."]},
+  {"figure": "F2", "label": "Figure 2", "h": 110, "frame": false,
+   "panels": [{"label_style": "none", "bars": [19, 11, 7]}],
+   "caption": ["Figure 2: Remote interventions per week.", "Interventions fell by more than half over the three weeks."]},
+  {"para": "p5", "s": [
+   "The helper processes restarted a stalled stage nine times during the trial.",
+   "Each restart took less than two seconds and the robot stopped safely while it waited.",
+   "We now log the memory use of every stage to find the cause of these stalls."]}
+ ],
+ "cases": [
+  {"id": "c01", "select": "p1"},
+  {"id": "c02", "select": "p2"},
+  {"id": "c03", "select": "p3"},
+  {"id": "c04", "select": "p5"},
+  {"id": "c05", "select": "F1:caption", "script": [
+   {"text": "Figure 1 gives an overview of the software.", "score": "none"},
+   {"text": "Each frame starts at the Camera.", "part": "Camera"},
+   {"text": "The Encoder turns each frame into a grid of features.", "part": "Encoder"},
+   {"text": "The Planner chooses a short path.", "part": "Planner"},
+   {"text": "Wheel speeds then go to the Motors.", "part": "Motors"},
+   {"text": "Callout 1 marks the first watchdog process.", "part": "callout 1"},
+   {"text": "Callout 2 marks the second watchdog process.", "part": "callout 2"}]},
+  {"id": "c06", "select": "F2:caption"},
+  {"id": "c07", "select": "F1:caption"}
+ ]
+}

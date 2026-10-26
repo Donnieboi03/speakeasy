@@ -146,6 +146,21 @@ class FocusRect(list):
     doc = None
     shape = None
     pending = None
+    sent = None
+
+LOGGED_LABEL_RE = re.compile(r"(Figure|Table) \d+[a-h]?( row \d+)?( \(grounded\))?")
+
+def _logged_label(label):
+    """doc.label as logged and written to the live file: unchanged with SPEAKEASY_LOG_TEXT=1, else a 'Figure 3a' style
+    reference only (never document text), or None."""
+    if text_logging_on(): return label
+    return label if label and LOGGED_LABEL_RE.fullmatch(label) else None
+
+def _box_target_src(f, kind, panel):
+    """doc.target_src of a figure / table / panel box taken from the parse entry f."""
+    if kind == "panel":
+        return "panel-guessed" if next(p for p in f["panels"] if p["label"] == panel).get("guessed") else "panel-labels"
+    return f"{kind}:{f['bbox_src']}"
 
 def _rendered_line(l):
     """A source line as it looks rendered on screen (markdown/table syntax removed), for OCR re-finding."""
@@ -163,7 +178,10 @@ class Focus:
         self.line_bounds = self._map_bounds(text, line_bounds)
         self.image_mode = image_mode     # True when the output may be about an image (R tags)
         self.dry, self.rec = dry, rec
+        self.run_t0 = rec.get("_t0") or time.time()
         self.prev_line, self.n, self.events, self.methods = 0, 0, 0, {}
+        self.match_score = self.match_runner_up = None
+        self.ground_requests = []                       # every grounding request submitted this run
         self.prev_start, self.ref_lines, self.map_note = 1, None, None
         self.toks = [_token_stems(l) for l in self.lines]
         self.tags = os.environ.get("SPEAKEASY_FOCUS_TAGS", "off").lower() in ("on", "1", "true", "yes")
@@ -227,7 +245,7 @@ class Focus:
     def locate(self, sentence, tag):
         """(rect, method); the rect also carries .src (source lines, for the live tracker to re-find on screen)
         and .rng (absolute AX character range of those lines, when the hotkey supplied per-line offsets)."""
-        self.ref_lines = None; self.map_note = None
+        self.ref_lines = None; self.map_note = None; self.match_score = self.match_runner_up = None
         rect, method = self._locate(sentence, tag)
         r = FocusRect(rect)
         r.nlines = (self.last_lines[1] - self.last_lines[0] + 1) if self.last_lines else None
@@ -242,6 +260,7 @@ class Focus:
             r, method = self._doc_target(r, method, sentence)
         except Exception as e:                                     # document mapping never breaks speech
             self.rec["doc_note"] = f"focus: {type(e).__name__}: {e}"[:160]
+        r.sent = self.n - 1
         return r, method
     def _doc_lines(self, a, b):
         """Page-line indices for source lines a..b (1-based), by text."""
@@ -403,11 +422,11 @@ class Focus:
                 self.last_fig = f
                 cap = f.get("caption") or ""
                 nr = FocusRect(r); nr.src = [cap[:120]] if cap else getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.nlines = getattr(r, "nlines", None)
-                nr.doc = {"kind": "figure", "label": f.get("label"), "md_line": f.get("line")}
+                nr.doc = {"kind": "figure", "label": _logged_label(f.get("label")), "md_line": f.get("line")}
                 return nr, "doc-md"
             return r, method
         if not d.get("page"): return r, method
-        tgt, kind, label, shape = None, None, None, None
+        tgt, kind, label, shape, target_src = None, None, None, None, None
         fm = self._fig_mode(d)
         if f and f.get("page") != d["page"]["n"]:
             f = None                                                    # drawn on another page: named in speech, not boxed
@@ -421,27 +440,30 @@ class Focus:
             use_g = GROUNDER.enabled() and docmap.content_words(fp)
             g = docmap.ground_label(fp, fm, prect) or docmap.ground_label(sentence, fm, prect)
             if g:
-                tgt, kind, shape = g[0], "object", "ellipse"; label = fm["label"] + (panel or "") + ": " + g[1][:40]
+                tgt, kind, shape = g[0], "object", "ellipse"; label = fm["label"] + (panel or "") + (": " + g[1][:40] if text_logging_on() else "")
+                target_src = "label-object" if g[3] else "label-pad"
                 if not g[3] and use_g and docmap.device_alias(fp, fm):
                     # the label sits on a raster picture: find the named thing next to it (e.g. "the device" near "WANDmini")
                     fb = fm["bbox"]; lr = g[0]; pad = 90
                     clip = [max(fb[0], lr[0] - pad), max(fb[1], lr[1] - pad), min(fb[2], lr[2] + pad), min(fb[3], lr[3] + pad)]
                     ph = docmap.object_phrase(fp)
                     if docmap.docmap_generic(ph) or not docmap.content_words(ph): ph = g[1]
-                    r.pending = GROUNDER.submit(state.DOC.path, d["page"]["n"], clip, ph); r.pending.max_frac = 0.9
+                    r.pending = self._submit_ground(d["page"]["n"], clip, ph); r.pending.max_frac = 0.9
             else:
                 tgt, kind = (prect, "panel") if prect else (fm["bbox"], "figure"); label = fm["label"] + (panel or "")
+                target_src = _box_target_src(fm, kind, panel)
                 if use_g:
-                    r.pending = GROUNDER.submit(state.DOC.path, d["page"]["n"], prect or fm["bbox"], docmap.object_phrase(fp))
+                    r.pending = self._submit_ground(d["page"]["n"], prect or fm["bbox"], docmap.object_phrase(fp))
         elif f and (f.get("kind") == "table" or self._visible(d, f.get("bbox") or [0, 0, 0, 0])):
             self.last_fig = f
             tgt, kind = docmap.target_rect(f, panel); label = f["label"] + (panel or "")
+            target_src = _box_target_src(f, kind, panel)
         elif f:
             f = None                                                    # cited but not on screen: stay on the sentence's own lines
         if tgt is None and not f:
             # a selection inside a table body (row labels, cells): box the table
             tb = self._table_for_selection(d)
-            if tb: tgt, kind, label = tb["bbox"], "table", tb["label"]; f = tb
+            if tb: tgt, kind, label = tb["bbox"], "table", tb["label"]; f = tb; target_src = _box_target_src(tb, kind, None)
         header = None
         if tgt is not None and kind == "table" and f:
             # table: a band on the row being spoken (forward-only) + a faint header tint for the whole read
@@ -453,13 +475,13 @@ class Focus:
                 i = docmap.match_row(rows, sentence, self._row_at.get(f["label"], 0))
                 if i is not None:
                     self._row_at[f["label"]] = i
-                    tgt, kind = rows[i]["rect"], "table_row"; label = f"{f['label']} row {i}"
+                    tgt, kind = rows[i]["rect"], "table_row"; label = f"{f['label']} row {i}"; target_src = "table-rows"
                     header = rows[0]["rect"] if i > 0 else None
         if tgt is None and self.last_lines:
             ix = self._doc_lines(*self.last_lines)
             if ix:
                 ls = [d["page"]["lines"][i] for i in ix]
-                tgt = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]; kind = "line"
+                tgt = [min(l[0] for l in ls), min(l[1] for l in ls), max(l[2] for l in ls), max(l[3] for l in ls)]; kind = "line"; target_src = "lines"
         if not tgt: return r, method
         nr = FocusRect(r); nr.src = getattr(r, "src", None); nr.rng = getattr(r, "rng", None); nr.nlines = getattr(r, "nlines", None); nr.pending = getattr(r, "pending", None)
         t = self._doc_transform()
@@ -476,8 +498,9 @@ class Focus:
             own = [[round(v, 1) for v in d["page"]["lines"][i][:4]] + [d["page"]["lines"][i][4][:80]] for i in ix if len(d["page"]["lines"][i][4].strip()) >= 14]
             keys = set(a[4] for a in own)
             anc = (own + [a for a in anc if a[4] not in keys])[:48]
-        nr.doc = {"kind": kind, "label": label, "page": d["page"]["n"], "page_size": d.get("page_size"), "target": [round(v, 1) for v in tgt],
-                  "anchors": anc}
+        nr.doc = {"kind": kind, "label": _logged_label(label), "page": d["page"]["n"], "page_size": d.get("page_size"), "target": [round(v, 1) for v in tgt],
+                  "anchors": anc, "target_src": target_src}
+        if kind in ("figure", "table", "table_row") and f and f.get("split_from"): nr.doc["split_from"] = f["split_from"]
         if kind == "line": nr.doc["lines"] = [[round(v, 1) for v in d["page"]["lines"][i][:4]] for i in self._doc_lines(*self.last_lines)]
         if kind != "line" and f and f.get("caption"):
             nr.src = [re.sub(r"\s+", " ", f["caption"])[:100]]          # tracker finds the caption when anchors fail
@@ -538,6 +561,11 @@ class Focus:
         fwd = [i for i in range(n) if i + 1 >= max(1, cur)]        # current line or later
         bwd = [i for i in range(n) if i + 1 < max(1, cur)]
         bf = max(fwd, key=lambda i: adj[i]) if fwd else None
+        def log_scores(a, b):                                      # map-record score / runner_up of the chosen 1-based span a..b
+            if bf is None: return
+            self.match_score = round(sc[bf], 2)
+            others = [sc[i] for i in fwd if not a - 1 <= i <= b - 1]
+            self.match_runner_up = round(max(others), 2) if others else None
         bb = max(bwd, key=lambda i: sc[i]) if bwd else None
         T = 1.0
         best = bf
@@ -561,9 +589,11 @@ class Focus:
             a, b = self._span(a + 1, b + 1, sentence)
             self.prev_line = b; self.prev_start = a; self.last_lines = [a, b]
             self.map_note = "ref-back" if refback else "forward"
+            log_scores(a, b)
             return self._line_rect(a, b), "overlap"
         a = min(n, max(cur + 1, lo)); _, b = self._span(a, n, sentence)   # proportional progress: next lines
         if refback: a = min(n, max(cur, lo)); _, b = self._span(a, n, sentence)   # a back-reference stays where we are
+        log_scores(a, b)
         self.prev_line = b; self.prev_start = a; self.last_lines = [a, b]
         self.map_note = "ref-back" if refback else "forward"
         return self._line_rect(a, b), "progress"
@@ -576,7 +606,8 @@ class Focus:
             with open(os.path.join(d, "focus.jsonl"), "a") as f:
                 f.write(json.dumps(focus_log_record({"state": "map", "method": method, "lines": self.last_lines, "decision": self.map_note,
                                                      "ref_trigger": getattr(self, "ref_trigger", None), "ref_lines": self.ref_lines,
-                                                     "text": _log_text(sentence)[:120], "ts": round(time.time(), 3), "pid": os.getpid()})) + "\n")
+                                                     "text": _log_text(sentence)[:120], "ts": round(time.time(), 3), "pid": os.getpid(),
+                                                     "sent": self.n - 1, "score": self.match_score, "runner_up": self.match_runner_up})) + "\n")
         except OSError: pass
     # -- events --
     def _write(self, ev):
@@ -585,6 +616,8 @@ class Focus:
         try:
             d = os.path.join(home(), "logs"); os.makedirs(d, exist_ok=True)
             with open(os.path.join(d, "focus.jsonl"), "a") as f: f.write(json.dumps(focus_log_record(ev)) + "\n")
+            if ev["state"] == "show" and self.rec.get("first_focus_ms") is None:
+                self.rec["first_focus_ms"] = int((time.time() - self.run_t0) * 1000)
         except OSError: pass
         if self.dry: return
         try:
@@ -604,7 +637,7 @@ class Focus:
                 nr = FocusRect([x0, y0, x1 - x0, y1 - y0]); nr.__dict__.update(getattr(rect, "__dict__", {}))   # keep doc.target etc.
                 rect = nr; clamped = True
         self.events += 1
-        ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect], "text": text[:80], **self.style}
+        ev = {"state": "show", "seq": self.events, "rect": [round(v, 1) for v in rect], "text": text[:80], **self.style, "sent": rect.sent}
         if getattr(rect, "src", None): ev["src"] = rect.src
         ev["range"] = getattr(rect, "rng", None)                    # absolute AX character range, or null when unknown
         if getattr(rect, "doc", None): ev["doc"] = rect.doc          # page-space target + text anchors for the tracker
@@ -627,18 +660,24 @@ class Focus:
         hold = getattr(rect, "hold", None)
         if hold is not None:
             seq = self.events
-            self._write({"state": "clear", "seq": seq, "hold": True})       # hide the previous box; nothing wrong is shown
+            self._write({"state": "clear", "seq": seq, "hold": True, "sent": rect.sent})       # hide the previous box; nothing wrong is shown
             def after_fit():
-                if self._cf_done.wait(8.0) and self.events == seq and not state.STOP.is_set():
+                fit_done = self._cf_done.wait(8.0)
+                if fit_done and self.events == seq and not state.STOP.is_set():
                     t = self._doc_transform()
                     if t and t != "pending":
                         ev["rect"] = [round(v, 1) for v in docmap.apply(t, hold)]; ev["late_fit"] = True
                         self.events += 1; ev["seq"] = self.events                # new key: the overlay saw this seq as the hold clear
-                        if fut is not None and fut.done.is_set(): self._apply_ground(rect, fut, ev)
+                        if fut is not None:
+                            if fut.done.is_set(): self._apply_ground(rect, fut, ev)
+                            else: self._ground_missed(fut, "timeout")           # no answer yet when the box went up: never applied
                         self._write(ev)
                     if not ev.get("late_fit"):
                         self.methods["fit-miss"] = self.methods.get("fit-miss", 0) + 1
+                        if fut is not None: self._ground_missed(fut, "no-fit")
                         self.events += 1; ev["seq"] = self.events; self._write(ev)                                  # fit failed: fall back to the AX-based box
+                elif fut is not None and not state.STOP.is_set():
+                    self._ground_missed(fut, "superseded" if fit_done else "no-fit")
             threading.Thread(target=after_fit, daemon=True).start()
             return
         if fut is not None and fut.done.is_set(): self._apply_ground(rect, fut, ev)
@@ -646,24 +685,40 @@ class Focus:
         if fut is not None and not fut.done.is_set():
             seq = self.events
             def late():                                             # grounding finished after the sentence started: update the box
-                if fut.done.wait(6.0) and self.events == seq and not state.STOP.is_set():
-                    ev2 = dict(ev); ev2["doc"] = dict(ev["doc"])
-                    if self._apply_ground(rect, fut, ev2):
-                        self.events += 1; ev2["seq"] = self.events; self._write(ev2)
+                answered = fut.done.wait(6.0)
+                if state.STOP.is_set(): return
+                if not answered: self._ground_missed(fut, "timeout"); return
+                if self.events != seq: self._ground_missed(fut, "superseded"); return
+                ev2 = dict(ev); ev2["doc"] = dict(ev["doc"])
+                if self._apply_ground(rect, fut, ev2):
+                    self.events += 1; ev2["seq"] = self.events; self._write(ev2)
             threading.Thread(target=late, daemon=True).start()
+    def _submit_ground(self, page, clip, phrase):
+        fut = GROUNDER.submit(state.DOC.path, page, clip, phrase); self.ground_requests.append(fut)
+        return fut
+    def _ground_missed(self, fut, reason):
+        """Runs-log ground_miss_reasons: count a request that drew no oval, once (the first reason that applies wins)."""
+        if not fut.settle(reason): return False
+        reasons = self.rec.setdefault("ground_miss_reasons", {}); reasons[reason] = reasons.get(reason, 0) + 1
+        return True
     def _apply_ground(self, rect, fut, ev):
         b = fut.best()
-        if not b: self.methods["ground-miss"] = self.methods.get("ground-miss", 0) + 1; return False
+        if not b:
+            if self._ground_missed(fut, fut.miss_reason()): self.methods["ground-miss"] = self.methods.get("ground-miss", 0) + 1
+            return False
         ev["doc"]["target"] = [round(v, 1) for v in b]; ev["doc"]["kind"] = "object"; ev["shape"] = "ellipse"; ev["cue_kind"] = "part_oval"
-        ev["doc"]["label"] = (ev["doc"].get("label") or "") + " (grounded)"
+        ev["doc"]["target_src"] = "vlm"; ev["doc"].pop("split_from", None)
+        ev["doc"]["label"] = _logged_label((ev["doc"].get("label") or "") + " (grounded)")
         t = self._doc_transform()
         if t and t != "pending": ev["rect"] = [round(v, 1) for v in docmap.apply(t, b)]
-        self.methods["ground-vlm"] = self.methods.get("ground-vlm", 0) + 1
+        if fut.settle("vlm"): self.methods["ground-vlm"] = self.methods.get("ground-vlm", 0) + 1   # after the runs record: drawn, not counted
         self.rec["ground_ms"] = fut.ms
         return True
     def clear(self):
         self._write({"state": "clear", "seq": self.events + 1})
     def summary(self):
+        for fut in self.ground_requests:               # still unsettled when the runs record is written
+            self._ground_missed(fut, "superseded" if fut.done.is_set() else "timeout")
         tot = sum(self.methods.values())
         self.rec["focus_events"] = self.events
         self.rec["focus_tags"] = self.tags

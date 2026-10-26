@@ -10,6 +10,8 @@ class GroundFuture:
     """One grounding request: done is set when the answer (or a failure) is in; boxes are page-space [x0, y0, x1, y1]."""
     def __init__(self, clip):
         self.done = threading.Event(); self.boxes = []; self.labels = []; self.ms = None; self.clip = clip; self.max_frac = 0.6
+        self.error = None                                       # exception class name when the request raised
+        self.outcome = None; self.outcome_lock = threading.Lock()   # "vlm" or a ground_miss_reasons reason, set once
     def best(self):
         """The grounded box for the sentence's object: a non-generic phrase, not (almost) the whole figure."""
         c = self.clip; clip_area = max(1.0, (c[2] - c[0]) * (c[3] - c[1]))
@@ -17,6 +19,14 @@ class GroundFuture:
                 if (b[2] - b[0]) * (b[3] - b[1]) < self.max_frac * clip_area and docmap.content_words(l or "x y z") and not docmap.REF_RE.search(l or "")]
         if not good: good = [(b, l) for b, l in zip(self.boxes, self.labels or [""] * len(self.boxes)) if (b[2] - b[0]) * (b[3] - b[1]) < self.max_frac * clip_area]
         return good[0][0] if good else None
+    def settle(self, outcome):
+        """Record how the request ended; the first call wins. False when it had already ended."""
+        with self.outcome_lock:
+            if self.outcome is not None: return False
+            self.outcome = outcome; return True
+    def miss_reason(self):
+        """Why best() is None: error (request raised), no-box (no parseable box) or too-large (every box filtered out)."""
+        return "error" if self.error else "no-box" if not self.boxes else "too-large"
 
 def gemini_model(model):
     """Gemini answers boxes natively as box_2d [ymin, xmin, ymax, xmax] on 0..1000 (y first), whatever the prompt says."""
@@ -87,6 +97,7 @@ class Grounder:
                 self.box_convention = "yx" if gemini_model(model) else "xy"
                 future.boxes = [[clip[0] + box[0] * w, clip[1] + box[1] * h, clip[0] + box[2] * w, clip[1] + box[3] * h]]; future.labels = [text[:60]]
         except Exception as e:                                   # a failed request only loses the part oval; speech goes on
+            future.error = type(e).__name__
             with self.errors_lock: self.error_classes[type(e).__name__] = self.error_classes.get(type(e).__name__, 0) + 1
         finally:
             future.ms = int((time.time() - t0) * 1000); future.done.set()

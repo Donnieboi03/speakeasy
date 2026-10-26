@@ -1,0 +1,67 @@
+{
+ "doc_id": "arx-2402.10153", "source": "arxiv", "arxiv": "2402.10153v2",
+ "title": "Knowledge-Infused LLM-Powered Conversational Health Agent: A Case Study for Diabetes Patients",
+ "authors": "Mahyar Abbasian, Zhongqi Yang, Elahe Khatibi, Pengfei Zhang, Nitish Nagesh, Iman Azimi, Ramesh Jain, Amir M. Rahmani",
+ "license": "CC-BY-4.0", "license_url": "https://creativecommons.org/licenses/by/4.0/",
+ "url": "https://arxiv.org/pdf/2402.10153v2", "pdf_sha256": "280066866eadfae482d775b844635e2580037bc91f7a354f017e78dc76e14721",
+ "features": {"columns": 2, "multi_panel": false},
+ "pages": [{"n": 2, "blocks": [
+   {"kind": "paragraph", "lines": [0, 13]},
+   {"kind": "paragraph", "lines": [14, 26]},
+   {"kind": "heading", "lines": [27, 27]},
+   {"kind": "paragraph", "lines": [28, 35]},
+   {"kind": "paragraph", "lines": [36, 40]},
+   {"kind": "paragraph", "lines": [41, 54]},
+   {"kind": "figure", "region": [310, 50, 566, 266], "label": "Figure 2"},
+   {"kind": "caption", "lines": [82, 83], "label": "Figure 2"},
+   {"kind": "paragraph", "lines": [84, 85]},
+   {"kind": "paragraph", "lines": [86, 90]},
+   {"kind": "paragraph", "lines": [91, 101]},
+   {"kind": "paragraph", "lines": [102, 114]},
+   {"kind": "paragraph", "lines": [115, 117]}]}],
+ "parts": [
+  {"name": "Web Application", "figure": "Figure 2", "page": 2, "label_text": "Web Application", "style": "inside"},
+  {"name": "Task Executor", "figure": "Figure 2", "page": 2, "label_text": "Task Executor", "style": "inside"},
+  {"name": "Available Tasks", "figure": "Figure 2", "page": 2, "label_text": "Available Tasks", "style": "inside"},
+  {"name": "Data Pipe", "figure": "Figure 2", "page": 2, "label_text": "Data Pipe", "style": "inside"},
+  {"name": "Response Generator LLM", "figure": "Figure 2", "page": 2, "label_text": "Response Generator LLM", "style": "inside"},
+  {"name": "Task Planner LLM", "figure": "Figure 2", "page": 2, "label_text": "Task Planner LLM", "style": "inside"},
+  {"name": "Knowledge Base", "figure": "Figure 2", "page": 2, "label_text": "Knowledge Base", "region": [470, 72, 533, 90], "style": "inside"},
+  {"name": "Evidence-based Risk Assessment", "figure": "Figure 2", "page": 2, "label_text": "Evidence-based Risk Assessment", "style": "inside"}],
+ "cases": [
+  {"id": "c01", "page": 2, "lines": [14, 26], "script": [
+   {"text": "This paper presents a knowledge-based diabetes management system that is implemented through the utilization of LLM-powered CHAs."},
+   {"text": "We customize the open-source openCHA framework for diet assessment by integrating external knowledge, including the diet guidelines from the American Diabetes Association reports and the nutritional data from the Nutritionix knowledge base, into LLMs."},
+   {"text": "We also incorporate an analysis tool to precisely calculate the total daily nutritional intake and compare it against the guidelines."},
+   {"text": "We evaluate the proposed approach with real-world diabetes-related questions focusing on daily meals in comparison to GPT4."},
+   {"text": "The evaluation is centered on the assessment of the potential risk associated with the recommended dietary options."}]},
+  {"id": "c02", "page": 2, "lines": [36, 48], "script": [
+   {"text": "Our proposed CHA contains three main parts as Interface, Orchestrator, and External Sources, see Figure 2.", "score": "none"},
+   {"text": "The Interface serves as a connection point between users and our framework, facilitating interactions through text using a web chat interface and relaying user queries to the Orchestrator."},
+   {"text": "The Orchestrator serves as the core component of the CHA and is responsible for problem-solving, planning, executing actions, and generating appropriate responses based on user queries."},
+   {"text": "It operates on the principles of the Perceptual Cycle Model and involves perceiving, transforming, and analyzing the world (i.e., input query and metadata)."},
+   {"text": "It interacts with external sources, acquires information, performs data integration, and extracts insights."}]},
+  {"id": "c03", "page": 2, "lines": [91, 101], "script": [
+   {"text": "Knowledge Base: serves to fetch current healthcare information from credible sources."},
+   {"text": "We developed a task focused on retrieving nutritional information from Nutritionix for various foods, enhancing the up-to-dateness of the responses."},
+   {"text": "This task takes a food query as input and uses the NutritioniX API to retrieve a list of foods along with their corresponding nutrient information, based on standard measurements."},
+   {"text": "This is achieved by leveraging the API's Natural Language for Nutrients feature, which allows for parsing of natural language requests and returning detailed nutrition information for common foods."}]},
+  {"id": "c04", "page": 2, "lines": [102, 108], "script": [
+   {"text": "AI and Analysis Models: provide data analysis, enabling the extraction of insights and associations."},
+   {"text": "This is particularly valuable in intricate healthcare contexts where LLMs may not efficiently handle intensive computations."},
+   {"text": "We develop a task focused on daily food risk assessment into the openCHA framework."},
+   {"text": "This task follows established guidelines for daily nutrient intake to perform food risk assessments."}]},
+  {"id": "c05", "page": 2, "lines": [82, 83], "figure": "Figure 2", "script": [
+   {"text": "Fig. 2 shows the health agent built on openCHA.", "score": "none"},
+   {"text": "Users talk to the agent through the Web Application.", "part": "Web Application"},
+   {"text": "The Task Executor carries out the planned actions.", "part": "Task Executor"},
+   {"text": "The Available Tasks box lists the tools the agent can call.", "part": "Available Tasks"},
+   {"text": "The Data Pipe keeps metadata and intermediate data.", "part": "Data Pipe"}]},
+  {"id": "c06", "page": 2, "lines": [82, 83], "figure": "Figure 2", "script": [
+   {"text": "The lower row holds the two language models.", "score": "none"},
+   {"text": "The Task Planner LLM decides what to do next.", "part": "Task Planner LLM"},
+   {"text": "The Response Generator LLM writes the final answer.", "part": "Response Generator LLM"},
+   {"text": "The Knowledge Base supplies nutrition facts.", "part": "Knowledge Base"},
+   {"text": "The Evidence-based Risk Assessment model scores each meal.", "part": "Evidence-based Risk Assessment"}]}
+ ]
+}

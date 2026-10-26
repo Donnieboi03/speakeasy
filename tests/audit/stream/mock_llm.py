@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Mock OpenAI-compatible chat server. Env: MOCK_PORT, MOCK_LOG, MOCK_TEXT (text-model reply), MOCK_VISION (vision reply),
-MOCK_TOKEN_DELAY (s between streamed tokens), MOCK_FIRST_DELAY (s before first token). Logs every request incl. image dims."""
+MOCK_TOKEN_DELAY (s between streamed tokens), MOCK_FIRST_DELAY (s before first token), MOCK_REPLY_FILE (text reply re-read per
+request; overrides MOCK_TEXT), MOCK_PORT_FILE (with MOCK_PORT=0: the bound port is written there). Logs every request incl. image dims."""
 import base64, io, json, os, time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 LOG = os.environ.get("MOCK_LOG", "/tmp/mock_llm.jsonl")
@@ -45,6 +46,9 @@ class H(BaseHTTPRequestHandler):
         if not self.path.rstrip("/").endswith("chat/completions"):
             return self._json({"done": True, "response": ""})
         reply = cfg("MOCK_VISION", "The image shows a chart. I can see three bars.") if vision else cfg("MOCK_TEXT", "Alpha handles 42 requests per second. Beta handles 77.")
+        if not vision and cfg("MOCK_REPLY_FILE", ""):
+            try: reply = open(cfg("MOCK_REPLY_FILE", ""), encoding="utf-8").read()
+            except OSError: pass
         time.sleep(float(cfg("MOCK_FIRST_DELAY", "0.2")))
         if req.get("stream"):
             self.send_response(200); self.send_header("Content-Type", "text/event-stream"); self.send_header("Transfer-Encoding", "chunked"); self.end_headers()
@@ -60,4 +64,8 @@ class H(BaseHTTPRequestHandler):
             return
         time.sleep(float(cfg("MOCK_TOKEN_DELAY", "0.05")) * len(reply.split(" ")))
         self._json({"id": "x", "object": "chat.completion", "model": req.get("model"), "choices": [{"index": 0, "message": {"role": "assistant", "content": reply}, "finish_reason": "stop"}]})
-ThreadingHTTPServer(("127.0.0.1", int(cfg("MOCK_PORT", "18890"))), H).serve_forever()
+SRV = ThreadingHTTPServer(("127.0.0.1", int(cfg("MOCK_PORT", "18890"))), H)
+if cfg("MOCK_PORT_FILE", ""):
+    with open(cfg("MOCK_PORT_FILE", "") + ".tmp", "w") as f: f.write(str(SRV.server_address[1]))
+    os.replace(cfg("MOCK_PORT_FILE", "") + ".tmp", cfg("MOCK_PORT_FILE", ""))
+SRV.serve_forever()
