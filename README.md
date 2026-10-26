@@ -40,7 +40,7 @@ cd src && ./install.sh
 Each run appends a JSONL record to `~/.speakeasy/logs/runs.jsonl`. It includes stage timings (`copy_ms`, `capture_ms`, `vision_ms`, `llm_ms`, `llm_first_token_ms`, `first_sentence_ms`, `tts_first_audio_ms`, `tts_synth_ms`, `speak_ms`, `total_ms`), errors separated by stage, `notes` (informational events such as removed superlatives, kept separate from errors), peak RSS, `tts_server_rss_mb`, loaded Ollama models, and the capture method and rect. Use `speakeasy last` and `speakeasy stats` to inspect them. Schema: `tests/audit/SCHEMA.md`.
 
 ## Tests
-These are black-box tests written independently of the implementation. `tests/run_tests.sh` runs the grid and regression suite (LLM-judged). `tests/audit/run_audit.sh` runs the observability, privacy, no-selection and TTS suites. Set `SPEAKEASY_BIN` to test a different build. `cd tracker && swift test` runs the tracker XCTests (also in macOS CI, `.github/workflows/macos.yml`). The highlight-crop test needs your own `HIGHLIGHT_FIXTURE` screenshot, which isn't shipped.
+These are black-box tests written independently of the implementation. Install their Python deps with `pip install -r tests/requirements.txt`. `tests/run_tests.sh` runs the grid and regression suite (LLM-judged). `tests/audit/run_audit.sh` runs the observability, privacy, no-selection and TTS suites. Set `SPEAKEASY_BIN` to test a different build. `cd tracker && swift test` runs the tracker XCTests (also in macOS CI, `.github/workflows/macos.yml`). The highlight-crop test needs your own `HIGHLIGHT_FIXTURE` screenshot, which isn't shipped.
 
 ## Resource use (measured, M-series, 18 GB)
 - Ollama 3B text runner: about 2 GB resident (the vision model loads on demand, about 3 GB more).

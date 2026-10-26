@@ -1,0 +1,9 @@
+# Python packages the test and audit suites import (the app itself needs only pypdfium2 + pillow).
+# pymupdf is AGPL-3.0: used only by the box-accuracy ground truth and doc fixtures, never shipped.
+numpy
+matplotlib
+pillow
+reportlab
+pypdfium2
+pymupdf
+pyflakes

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Mac-only live tracker test. NEVER prompts: preflights Screen Recording + Accessibility first and exits 77 (skip) if not granted.
 # Builds the tracker from the repo into a temp dir; never touches ~/.speakeasy. Usage: test_tracker_mac.sh [REPO] [FIXTURE_DIR]
-set -u; REPO=${1:-$HOME/speakeasy-repo}; FIX=${2:-$HOME/speakeasy-test-artifacts/images}; T=$(mktemp -d /tmp/se_trk_live.XXXX); H=$T/home; mkdir -p $H/logs
+set -u; REPO=${1:-$(cd "$(dirname "$0")/../../.." && pwd)}; FIX=${2:-$REPO/tests/images}; T=$(mktemp -d /tmp/se_trk_live.XXXX); H=$T/home; mkdir -p $H/logs
 cat > $T/pf.swift <<'S'
 import CoreGraphics; import ApplicationServices
 print("{\"screen_recording\": \(CGPreflightScreenCaptureAccess()), \"accessibility\": \(AXIsProcessTrusted())}")

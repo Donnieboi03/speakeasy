@@ -1,6 +1,6 @@
 """Synthetic screen geometry: place a rendered PDF page on a virtual screen (points), crop a capture region at a backing scale."""
-import subprocess, json, os
-VENV = os.environ.get("DOC_VENV", "/workspace/.doc-venv")
+import subprocess, json, os, sys
+VENV = os.environ.get("DOC_VENV", sys.prefix)
 K = 1.594  # screen pt per PDF pt at 100% (measured from Donovan's Cursor viewer: 130% -> 2.07)
 def page_to_screen(b, g):
     s = g["zoom"] * K; return [g["ox"] + b[0] * s, g["oy"] + b[1] * s, g["ox"] + b[2] * s, g["oy"] + b[3] * s]

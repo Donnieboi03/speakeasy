@@ -11,3 +11,4 @@ last_capture*.png
 *_capture*.png
 *.wav
 .DS_Store
+.build/

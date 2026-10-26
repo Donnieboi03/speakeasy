@@ -6,11 +6,11 @@ Part A - speakeasy CLI: page-space doc targets for Read-area and selection runs 
          emitted screen rects stay inside the capture region in points (no Retina doubling, negative/secondary display origins).
 Part B - box_accuracy.py: synthetic tracker draws generated with a known page->screen transform for every geometry; the analyzer must
          recover the transform from the capture image and report ~0 pt for correct boxes and the injected offset for wrong ones.
-Env: DOC_VENV (python with PyMuPDF+Pillow+numpy, default /workspace/.doc-venv), SPEAKEASY_BIN, BOXACC_QUICK=1 for a reduced matrix."""
+Env: DOC_VENV (python with PyMuPDF+Pillow+numpy, default the venv running this script), SPEAKEASY_BIN, BOXACC_QUICK=1 for a reduced matrix."""
 import itertools, json, os, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); AUD = os.path.dirname(HERE); sys.path.insert(0, HERE)
 from geom import page_to_screen, xywh, render_capture, K
-BIN = os.environ.get("SPEAKEASY_BIN", os.path.join(HERE, "../../../src/speakeasy")); VENV = os.environ.get("DOC_VENV", "/workspace/.doc-venv")
+BIN = os.environ.get("SPEAKEASY_BIN", os.path.join(HERE, "../../../src/speakeasy")); VENV = os.environ.get("DOC_VENV", sys.prefix)
 PY = os.path.join(VENV, "bin/python"); TOL = 8.0; R = []; TMP = tempfile.gettempdir()
 def add(c, ok, d=""): R.append({"check": c, "pass": bool(ok), "detail": str(d)[:300]})
 FX = tempfile.mkdtemp(prefix="se_boxfx_"); subprocess.run([sys.executable, os.path.join(HERE, "make_fig5.py"), FX], check=True, capture_output=True)
