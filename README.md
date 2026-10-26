@@ -3,7 +3,7 @@
 Wispr Flow in reverse: highlight text on your Mac, press **Ctrl+Option+S**, and hear it read back in plain conversational language. Filler is cut, and tables, charts and figures are *explained* instead of read cell by cell. Free, open source, fully offline.
 
 ## How it works
-1. **Hotkey (Speakeasy.app, menu bar)** reads the selection through Accessibility (Cmd-C fallback) and takes a screenshot of its bounds, or of the focused window when nothing is selected. A floating pill shows listening / thinking / speaking with a stop button.
+1. **Hotkey (Speakeasy.app, menu bar)** reads the selection through Accessibility (Cmd-C fallback) and takes a screenshot of its bounds, or of the focused window when nothing is selected. The bar at the bottom centre of the screen (see **The bar** below) shows preparing / reading with Pause, Next, Stop and Wrong spot.
 2. **Nothing highlighted?** It captures the **focused window** (configurable) and the vision model sums it up in 2 to 4 spoken sentences. If the window can't be found, it captures nothing and logs why. It never silently falls back to full screen.
 3. **Local LLM rewrite (Ollama):** one model, `qwen3-vl:4b-instruct` (Apache-2.0), for text, images and figure grounding. Includes prompt-injection delimiters, grounding checks and a superlative check. Fallback chain: vision, then text LLM, then deterministic cleanup.
 4. **TTS:** macOS `say` by default; `install.sh` switches to [Kokoro-82M](https://huggingface.co/mlx-community/Kokoro-82M-bf16) through [mlx-audio](https://github.com/Blaizzy/mlx-audio). when its venv is present. Kokoro runs as a local OpenAI-compatible server (`127.0.0.1:8000/v1/audio/speech`) under a LaunchAgent and synthesizes the next sentence while the current one plays. If the server is down, it falls back to macOS `say`.
@@ -36,6 +36,9 @@ cd src && ./install.sh
 | `SPEAKEASY_PREWARM` | `1` | On hotkey, load the text/vision models in the background so the first call isn't cold (`0` disables) |
 | `SPEAKEASY_VISION_MAX_PX` | `768` | Longest side the screenshot is downscaled to before it goes to the vision model |
 | `SPEAKEASY_MODEL` | `qwen3-vl:4b-instruct` | Text model (same as the vision model by default) |
+| `SPEAKEASY_DOC_NAMES` | `on` | Keep document names and paths in `~/.speakeasy/library.json` (never in a log) for the Reading log; `off` deletes the file |
+| `SPEAKEASY_BAR` | `on` | Show the bar (menu "Show bar"; ⌃⌥B hides it until pressed again) |
+| `SPEAKEASY_BAR_HIDE_FULLSCREEN` | `on` | Hide the idle bar while a full-screen app is in front |
 | `SPEAKEASY_LOG_TEXT` | unset | `1` adds the input / output text to runs.jsonl and the sentence text, source lines and anchor text to focus.jsonl |
 
 
@@ -43,6 +46,9 @@ cd src && ./install.sh
 Each run appends a JSONL record to `~/.speakeasy/logs/runs.jsonl`. It includes stage timings (`copy_ms`, `capture_ms`, `vision_ms`, `llm_ms`, `llm_first_token_ms`, `first_sentence_ms`, `tts_first_audio_ms`, `tts_synth_ms`, `speak_ms`, `total_ms`), errors separated by stage, `notes` (informational events such as removed superlatives, kept separate from errors), peak RSS, `tts_server_rss_mb`, loaded Ollama models, and the capture method and rect. Use `speakeasy last` and `speakeasy stats` to inspect them. Schema: `tests/audit/SCHEMA.md`.
 
 No text in runs/focus logs unless `SPEAKEASY_LOG_TEXT=1`; the live `focus.json` holds the current source lines while a run is active. Without it, focus.jsonl records carry `text_len` / `text_hash` and `src_n` / `src_hash` (first 12 hex chars of SHA-256) instead of the text, and notes / errors name no table column, cell or model output. `capture_path` is home-relative (`~/...`) when the file is under your home folder.
+
+- `speakeasy logs --scrub [--yes]` removes text from older `runs.jsonl*` / `focus.jsonl*` records in place (no backup copy),
+  refuses while a read is running, and logs one count-only `command: scrub` record.
 
 Temporary files: the crop is kept at `~/.speakeasy/last_capture.png` for auditing unless `SPEAKEASY_KEEP_CAPTURE=0`. The per-line bounds and document-hint files the app passes to the backend are deleted after they are read.
 
@@ -124,22 +130,27 @@ Both live in `~/.speakeasy/config` and can be toggled from the menu-bar app ("Hi
 
 ## Read area (Control-Option-A)
 
-For PDFs and pages where selecting text is awkward: press Control-Option-A (or "Read area…" in the menu, or the viewfinder button on the pill), drag a rectangle, release. Esc cancels. Speakeasy takes the text the way copying does: the app's Accessibility text inside the rectangle when it has any; for a PDF, the document's own text layer inside the rectangle (the recognised lines fit the page to the screen, then the PDF lines inside the mapped rectangle are taken column by column, like a PDF reader's rectangle selection), so the words and per-line boxes are exact; on-screen text recognition (Vision) only when neither exists; the region also goes to the vision model for figures. The highlight band and figure cues are anchored to that region and follow scrolling like a text selection. The region is captured in memory with ScreenCaptureKit; the only file is the usual temporary capture, deleted after the run. `runs.jsonl` logs `capture_method: area` and `area_text: ax|pdf|ocr`, never the text. The overlay follows the common pattern of open-source capture tools such as Flameshot (one transparent window per screen, crosshair, Esc).
+For PDFs and pages where selecting text is awkward: press Control-Option-A (or "Read area" in the menu, or click the bar), drag a rectangle, release. Esc, a click on the bar or Control-Option-A again cancels. The overlay never activates Speakeasy, so the document keeps keyboard focus; a size readout follows the cursor. Speakeasy takes the text the way copying does: the app's Accessibility text inside the rectangle when it has any; for a PDF, the document's own text layer inside the rectangle (the recognised lines fit the page to the screen, then the PDF lines inside the mapped rectangle are taken column by column, like a PDF reader's rectangle selection), so the words and per-line boxes are exact; on-screen text recognition (Vision) only when neither exists; the region also goes to the vision model for figures. The highlight band and figure cues are anchored to that region and follow scrolling like a text selection. The region is captured in memory with ScreenCaptureKit; the only file is the usual temporary capture, deleted after the run. `runs.jsonl` logs `capture_method: area` and `area_text: ax|pdf|ocr`, never the text. The overlay follows the common pattern of open-source capture tools such as Flameshot (one transparent window per screen, crosshair, Esc).
 
-## Stats
+## The bar
 
-`speakeasy stats --json` (and the menu bar's Stats window) counts words listened, a daily streak heatmap, figures and tables explained, median time to first audio, and reading time saved, estimated as words read to you ÷ 238 words per minute (average adult silent reading rate; an estimate, not a measurement). `runs.jsonl` stores only counts (`words_in`, `words_spoken`, `audio_s`, `kind`), never the text. Logs rotate at 5 MB (5 kept).
+A small navy bar sits at the bottom centre of the display, 8 pt above the Dock (contract `docs/contracts/phase7-usable-app.md` B, look `docs/design.md` 6.1). At rest it is a 56 × 8 stub with an ice margin tick; hover it for **Read area ⌃⌥A**, **Read selection ⌃⌥S** and the last place you read. Click it to arm Read area. While a read runs it shows one tick per sentence, "N of M", **Pause** (⌃⌥P), **Next** (⌃⌥N), **Stop** and **Wrong spot** (⌃⌥W, flags a wrong highlight in `logs/app.jsonl`); the last three keys and Esc are registered only while they apply, so they reach your document otherwise. It never takes keyboard focus, follows reads started from the CLI too, stacks 8 pt above another app's floating bar that sits on its spot (else moves to bottom left, then right; a position you dragged it to wins), slides to a bottom corner when the highlight comes near it, follows the pointer's display at rest, hides at rest in full-screen apps, and can be dragged to bottom left or right (remembered per display arrangement). Right-click at rest: *Hide for 1 hour*, *Hide until ⌃⌥B*, *Settings…*. Screen sharing apps can see the bar (macOS offers no way to hide a window from other apps' captures); hide it with ⌃⌥B. Speakeasy's own captures always exclude it. Pause and Next are signals to the running backend (`SIGUSR2`, `SIGUSR1`); runs log `paused_ms`, `skips`, `end`, `sent_spoken`, `sent_n`.
+
+## Reading log (stats)
+
+`speakeasy stats [--json] [--window 1|7|30]` (and the menu bar's **Reading log…**) shows what you act on: per-document progress and the resume point (page, figure, sentence), first audio (median, slowest 1 in 10, local vs OpenRouter, 14-day trend), distinct figures and tables, finished vs stopped reads, highlight quality (on target first time, flagged wrong spot, sentences with no cue), listening speed, and problems (Kokoro down, local model down, cloud fell back, layout model missing, highlight failed, permission missing, slow first audio) with one action each. The menu line reads "Today: 9 reads, 14 min". `--json` is schema 2 (`tests/audit/SCHEMA.md`). Stats read a whitelist of log keys only, never `text`, `input`, `output`, `error`, `llm_error` or `notes`. Document names come from `~/.speakeasy/library.json` (written by the backend after it resolves a document, mode 0600, never rotated or logged; Settings → *Show document names*, on by default). Logs rotate at 5 MB (5 kept).
 
 ## Credits
 
-- [open-wispr](https://github.com/human37/open-wispr) (MIT): the menu-bar app's package layout, status-bar controller and recording-pill pattern. See `app/NOTICE`.
+- [open-wispr](https://github.com/human37/open-wispr) (MIT): the menu-bar app's package layout, status-bar controller and the floating panel the bar grew from. See `app/NOTICE`.
+- Fonts bundled in the app under the SIL Open Font License 1.1: [Source Serif 4](https://github.com/adobe-fonts/source-serif) (Adobe), [IBM Plex Sans and Plex Mono](https://github.com/IBM/plex) (IBM). Licence texts and file hashes: `app/NOTICE`.
 - [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT), [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0/BSD), [PP-DocLayout-S](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0) via [onnxruntime](https://github.com/microsoft/onnxruntime) (MIT), [Kokoro](https://github.com/hexgrad/kokoro) via [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Ollama](https://ollama.com), [python-build-standalone](https://github.com/astral-sh/python-build-standalone).
 
 ## Optional cloud (OpenRouter)
 
 Off by default; everything runs locally unless you turn it on. Bring your own key, like Raycast or open-wispr:
 
-- Menu bar → **Cloud (OpenRouter)…** (or pill gear): toggle *Rewrite* (sends the selected text) and/or *Figure grounding* (sends figure screenshots), pick a model, paste a key. A cloud icon shows on the pill while on.
+- Menu bar → **Cloud (OpenRouter)…**: toggle *Rewrite* (sends the selected text) and/or *Find figure parts* (sends crops), pick a model, paste a key. The bar shows the word "Cloud" during a read that uses it, and the window shows the last 7 days' first-audio numbers for cloud and local.
 - Or from a terminal: `security add-generic-password -U -s speakeasy-openrouter -a openrouter -w` (prompts for the key), then add `SPEAKEASY_LLM=openrouter`, `SPEAKEASY_GROUND=openrouter`, `SPEAKEASY_OR_MODEL=google/gemini-3.5-flash-lite` lines to `~/.speakeasy/config`.
 - The key lives only in the login Keychain (`SPEAKEASY_OR_KEY` env overrides for testing); config holds on/off and the model.
 - OpenAI-compatible `/chat/completions` with streaming; falls back to the local model on any error, no key, or no first token within `SPEAKEASY_OR_TIMEOUT` (8 s). Only `https` public hosts are accepted for `SPEAKEASY_OR_URL`.

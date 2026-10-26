@@ -1,7 +1,8 @@
 """The source document (PDF / Markdown) behind a selection: read in the background, figure labels for the prompt,
 PDF text for Read area."""
-import json, os, re, threading, time
+import html, json, os, re, tempfile, threading, time, urllib.parse
 import speakeasy_state as state
+from selog import home, _on
 from speakeasy_state import docmap
 from observe import is_owned_capture, tempfile_dir
 from prompts import DOC_RULE
@@ -24,7 +25,7 @@ class DocJob(threading.Thread):
     def run(self):
         try: self._run()
         except Exception as e:
-            self._fill(doc_note=f"{type(e).__name__}: {e}"[:160])
+            self._fill(doc_note=type(e).__name__)                # class only: the message can hold the document's path
         finally:
             self._fill(doc_ms=int((time.time() - self.t0) * 1000), doc_ready_ms=int((time.time() - self.run_t0) * 1000)); self.done.set()
     def _run(self):
@@ -45,7 +46,10 @@ class DocJob(threading.Thread):
         self.path = path
         if not docmap.cached(path): self.cold = True            # first read of this file: the prompt will not wait for it
         doc, cache = docmap.load(path, sel_text=self.sel)
-        self._fill(doc_source=src, doc_path_hash=docmap.path_hash(hint.get("url") if src == "browser" else path), doc_cache=cache)
+        location = hint.get("url") if src == "browser" else path
+        self._fill(doc_source=src, doc_path_hash=docmap.path_hash(location), doc_cache=cache)
+        try: note_library(self.rec["doc_path_hash"], location, url_name(location) if src == "browser" else pdf_title(path) or os.path.basename(path))
+        except (OSError, ValueError) as e: self._fill(library_error=type(e).__name__)   # the read goes on without a name
         if not doc: return
         if cache in ("miss", "partial-miss", "miss-pdfkit") and doc["kind"] == "pdf": self._fill(layout_events=doc["layout_events"])
         out = {"kind": doc["kind"], "figures": [], "page": None, "anchors": []}
@@ -176,3 +180,71 @@ def area_pdf_text(ocr_text, args, rec, wait=4.0):
         rec.update(area_pdf="error", area_pdf_error=type(e).__name__); return None
     finally:
         rec["area_pdf_ms"] = int((time.time() - t0) * 1000)
+
+# ---------------- document library (contract A5.3): names and paths, outside the logs ----------------
+def library_path():
+    return os.path.join(home(), "library.json")
+
+def doc_names_on():
+    return _on("SPEAKEASY_DOC_NAMES")
+
+def _pdf_string(raw):
+    """A PDF literal string body (escapes, octal) as text; UTF-16BE when it starts with a byte-order mark."""
+    out, i = bytearray(), 0
+    esc = {b"n": b"\n", b"r": b"\r", b"t": b"\t", b"b": b"\b", b"f": b"\f"}
+    while i < len(raw):
+        c = raw[i:i + 1]
+        if c != b"\\": out += c; i += 1; continue
+        nxt = raw[i + 1:i + 2]
+        m = re.match(rb"[0-7]{1,3}", raw[i + 1:i + 4])
+        if m: out.append(int(m.group(0), 8) & 255); i += 1 + len(m.group(0))
+        else: out += esc.get(nxt, nxt); i += 2
+    b = bytes(out)
+    return b[2:].decode("utf-16-be", "replace") if b[:2] == b"\xfe\xff" else b.decode("latin-1")
+
+def pdf_title(path, limit=64 << 20):
+    """The title from the PDF's Info dictionary (or uncompressed XMP dc:title) when non-empty and under 120 characters."""
+    if not path.lower().endswith(".pdf"): return None
+    with open(path, "rb") as f: data = f.read(limit)
+    title = None
+    refs = re.findall(rb"/Info\s+(\d+)\s+(\d+)\s+R", data)
+    if refs:
+        n, g = refs[-1]
+        obj = re.search(rb"(?<!\d)" + n + rb"\s+" + g + rb"\s+obj(.*?)endobj", data, re.S)
+        if obj:
+            m = re.search(rb"/Title\s*\(((?:\\.|[^\\)])*)\)", obj.group(1), re.S)
+            h = None if m else re.search(rb"/Title\s*<([0-9A-Fa-f\s]*)>", obj.group(1))
+            if m: title = _pdf_string(m.group(1))
+            elif h:
+                b = bytes.fromhex(re.sub(rb"\s", b"", h.group(1)).decode())
+                title = b[2:].decode("utf-16-be", "replace") if b[:2] == b"\xfe\xff" else b.decode("latin-1")
+    if not title:
+        m = re.search(rb"<dc:title>.*?<rdf:li[^>]*>(.*?)</rdf:li>", data, re.S)
+        if m: title = html.unescape(m.group(1).decode("utf-8", "replace"))
+    title = re.sub(r"\s+", " ", title or "").strip()
+    return title if 0 < len(title) < 120 else None
+
+def url_name(url):
+    """A browser PDF's name: the URL's last path segment."""
+    return urllib.parse.unquote(urllib.parse.urlparse(url).path.rstrip("/").rsplit("/", 1)[-1]) or None
+
+def note_library(doc_hash, location, name):
+    """Add or update {doc_path_hash: {name, path, first_ts, last_ts}} in library.json (atomic, mode 0600). Names off:
+    the file is deleted and nothing is written."""
+    lp = library_path()
+    if not doc_names_on():
+        if os.path.exists(lp): os.remove(lp)
+        return
+    try:
+        with open(lp, encoding="utf-8") as f: lib = json.load(f)
+    except FileNotFoundError: lib = {}
+    if not isinstance(lib, dict): raise ValueError("library.json is not an object")
+    now = time.strftime("%Y-%m-%dT%H:%M:%S%z")
+    entry = lib.get(doc_hash) or {"first_ts": now}
+    entry.update(name=name, path=location, last_ts=now); lib[doc_hash] = entry
+    fd, tmp = tempfile.mkstemp(dir=home(), prefix=".library_", suffix=".json")     # mkstemp files are 0600
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f: json.dump(lib, f, ensure_ascii=False)
+        os.replace(tmp, lp)
+    except BaseException:
+        os.remove(tmp); raise

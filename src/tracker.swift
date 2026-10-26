@@ -33,6 +33,64 @@ func writeLine(_ d: Data, _ path: String) {
     if let h = FileHandle(forWritingAtPath: path) { h.seekToEndOfFile(); h.write(d); h.closeFile() }
     else { FileManager.default.createFile(atPath: path, contents: d) }
 }
+// ---------------- cue tokens (docs/design.md 1 and 6.6): the only colours the tracker draws with ----------------
+struct RGB { let r: Int, g: Int, b: Int
+    func cg(_ a: Double) -> CGColor { CGColor(red: CGFloat(r) / 255, green: CGFloat(g) / 255, blue: CGFloat(b) / 255, alpha: CGFloat(a)) } }
+enum CueTok {
+    static let ice = RGB(r: 168, g: 216, b: 236), glacier = RGB(r: 31, g: 110, b: 153), ember = RGB(r: 224, g: 137, b: 43)
+    static let bandAlpha = 0.38, bandDarkAlpha = 0.45, boxFillAlpha = 0.10, headerAlpha = 0.18, refAlpha = 0.60
+    static let tickW: CGFloat = 3, tickGap: CGFloat = 4            // the margin tick: 3 pt wide, 4 pt left of the first line
+    static let darkPageLuminance = 0.25                             // below it the band uses glacier and the box stroke ice
+}
+/// How one cue kind is drawn: fill / stroke colours, stroke width, corner radius, dash, and the margin tick (text bands).
+struct CueLook { let fill: CGColor?; let stroke: CGColor?; let lineWidth: CGFloat; let radius: CGFloat; let dash: [NSNumber]?; let tick: CGColor? }
+func cueLook(_ kind: String, darkPage: Bool) -> CueLook {
+    switch kind {
+    case "text_band": return CueLook(fill: darkPage ? CueTok.glacier.cg(CueTok.bandDarkAlpha) : CueTok.ice.cg(CueTok.bandAlpha), stroke: nil, lineWidth: 0,
+                                     radius: 2, dash: nil, tick: darkPage ? CueTok.ice.cg(1) : CueTok.glacier.cg(1))
+    case "table_row": return CueLook(fill: darkPage ? CueTok.glacier.cg(CueTok.bandDarkAlpha) : CueTok.ice.cg(CueTok.bandAlpha), stroke: nil, lineWidth: 0,
+                                     radius: 2, dash: nil, tick: nil)
+    case "table_header": return CueLook(fill: CueTok.ice.cg(CueTok.headerAlpha), stroke: nil, lineWidth: 0, radius: 2, dash: nil, tick: nil)
+    case "part_oval": return CueLook(fill: nil, stroke: CueTok.ember.cg(1), lineWidth: 2, radius: 0, dash: nil, tick: nil)
+    case "back_ref": return CueLook(fill: nil, stroke: CueTok.glacier.cg(CueTok.refAlpha), lineWidth: 1, radius: 2, dash: [4, 3], tick: nil)
+    default: return CueLook(fill: CueTok.ice.cg(CueTok.boxFillAlpha), stroke: darkPage ? CueTok.ice.cg(1) : CueTok.glacier.cg(1), lineWidth: 2,
+                            radius: 3, dash: nil, tick: nil)          // figure_box (figure, panel, table)
+    }
+}
+/// Mean relative luminance (0 dark .. 1 light) of the window capture under a screen rect (top-left points).
+func meanLuminance(_ img: CGImage, frame: CGRect, under r: CGRect) -> Double? {
+    let sx = Double(img.width) / Double(max(1, frame.width)), sy = Double(img.height) / Double(max(1, frame.height))
+    let px = CGRect(x: (r.minX - frame.minX) * sx, y: (r.minY - frame.minY) * sy, width: r.width * sx, height: r.height * sy)
+        .intersection(CGRect(x: 0, y: 0, width: img.width, height: img.height))
+    guard !px.isNull, px.width >= 1, px.height >= 1, let crop = img.cropping(to: px) else { return nil }
+    var buf = [UInt8](repeating: 0, count: 8 * 8 * 4)
+    guard let ctx = CGContext(data: &buf, width: 8, height: 8, bitsPerComponent: 8, bytesPerRow: 32, space: CGColorSpaceCreateDeviceRGB(),
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    ctx.interpolationQuality = .medium; ctx.draw(crop, in: CGRect(x: 0, y: 0, width: 8, height: 8))
+    var sum = 0.0
+    for i in stride(from: 0, to: buf.count, by: 4) { sum += (0.2126 * Double(buf[i]) + 0.7152 * Double(buf[i + 1]) + 0.0722 * Double(buf[i + 2])) / 255 }
+    return sum / 64
+}
+/// Offscreen render of one cue over a plain page (white or dark), with the same looks the panel uses: `--render-cue`.
+func renderCue(_ kind: String, darkPage: Bool, scale: CGFloat = 2) -> CGImage? {
+    let W: CGFloat = 360, H: CGFloat = 160, s = scale
+    guard let ctx = CGContext(data: nil, width: Int(W * s), height: Int(H * s), bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    ctx.scaleBy(x: s, y: s)
+    ctx.setFillColor(darkPage ? CGColor(red: 0.12, green: 0.12, blue: 0.13, alpha: 1) : CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+    ctx.fill(CGRect(x: 0, y: 0, width: W, height: H))
+    let look = cueLook(kind, darkPage: darkPage), body = CGRect(x: 60, y: 50, width: 240, height: 60)
+    let path = kind == "part_oval" ? CGPath(ellipseIn: body, transform: nil)
+        : CGPath(roundedRect: body, cornerWidth: look.radius, cornerHeight: look.radius, transform: nil)
+    if let f = look.fill { ctx.setFillColor(f); ctx.addPath(path); ctx.fillPath() }
+    if let st = look.stroke {
+        ctx.setStrokeColor(st); ctx.setLineWidth(look.lineWidth)
+        if let d = look.dash { ctx.setLineDash(phase: 0, lengths: d.map { CGFloat($0.doubleValue) }) }
+        ctx.addPath(path); ctx.strokePath()
+    }
+    if let t = look.tick { ctx.setFillColor(t); ctx.fill(CGRect(x: body.minX - CueTok.tickW, y: body.minY, width: CueTok.tickW, height: body.height)) }
+    return ctx.makeImage()
+}
 // ---------------- shared text fold (docs/contracts/phase3-sentence-ids.md A: the same steps as src/textfold.py) ----------------
 let foldUnitWords = ["zero", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve",
                      "thirteen", "fourteen", "fifteen", "sixteen", "seventeen", "eighteen", "nineteen"]
@@ -297,6 +355,12 @@ final class Live: NSObject {
     var wantScan = false                 // a scroll just happened / was rejected: confirm position at once
     var rejN: [String: Int] = [:], rejTotal = 0, lastRejLog = 0.0, corrections = 0
     var runId = ""
+    // per-show result (contract A3 cue_result): when the show arrived, its first draw, corrections after it
+    var showOpen = false, showAt = 0.0, showFirstDrawAt: Double? = nil, showCorrections = 0, showMaxShift: CGFloat = 0, showHid = false
+    var cueShows = 0, cueLanded = 0, cueHidden = 0
+    var darkPage = false
+    let tickShape = CAShapeLayer()
+    var lastCueWrite = 0.0, cueRect: [Int]? = nil
     var winTimer: DispatchSourceTimer? = nil
     // Window-front watch on its own queue every 25 ms, independent of the scan loop (which can sit in a 0.5 s capture + OCR).
     func startWinWatch(_ wid: CGWindowID) {
@@ -343,7 +407,7 @@ final class Live: NSObject {
         p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
         let v = NSView(frame: p.contentView!.bounds); v.wantsLayer = true; v.autoresizingMask = [.width, .height]
         shape.lineWidth = 1.5
-        v.layer!.addSublayer(shape)
+        v.layer!.addSublayer(shape); v.layer!.addSublayer(tickShape)
         p.contentView = v
         panel = p
         p.alphaValue = 0; p.orderFrontRegardless(); p.orderOut(nil); p.alphaValue = 1   // pay the first-show cost now, not mid-sentence
@@ -361,42 +425,52 @@ final class Live: NSObject {
             let t = now(), late = (t - last - 0.05) * 1000; last = t
             if late > 100 { s.stallN += 1; s.stallMax = max(s.stallMax, late)
                 s.rec(["event": "main-stall", "late_ms": late.rounded(), "after": s.lastWork]) }
+            if s.shown, t - s.lastCueWrite >= 0.25 { s.writeCue() }          // cue.json stays fresh while the cue is drawn
         }
         RunLoop.main.add(hb!, forMode: .common)
         // No view display link: it only ticks while the panel is on screen, so a hidden panel was never shown (draws: 0).
         // Coalesce instead: apply at most once per main-loop turn.
     }
-    func style(color: String?, opacity: Double, ellipse: Bool) {
-        var r = 0.23, g = 0.51, b = 0.96
-        if let c = color, c.count == 7, let v = Int(c.dropFirst(), radix: 16) { r = Double((v >> 16) & 255) / 255; g = Double((v >> 8) & 255) / 255; b = Double(v & 255) / 255 }
+    // Text: a soft ice band (fill, no border) with the glacier margin tick. Figure / table: a glacier box; parts: the ember oval.
+    func cueStyle() {
+        let look = cueLook(cueKind, darkPage: darkPage)
         CATransaction.begin(); CATransaction.setDisableActions(true)
-        shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: opacity)
-        shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: min(1, opacity * 3))
+        shape.fillColor = look.fill; shape.strokeColor = look.stroke; shape.lineWidth = look.lineWidth; shape.lineDashPattern = look.dash
+        tickShape.fillColor = look.tick; tickShape.isHidden = look.tick == nil
         CATransaction.commit()
-        isEllipse = ellipse
     }
-    // Text: a soft tinted band (low-alpha fill, rounded, no border). Figure/table parts: a distinct outline or circle.
-    func cueStyle(figure: Bool, color: String?) {
-        var r = 0.23, g = 0.51, b = 0.96
-        if let c = color, c.count == 7, let v = Int(c.dropFirst(), radix: 16) { r = Double((v >> 16) & 255) / 255; g = Double((v >> 8) & 255) / 255; b = Double(v & 255) / 255 }
-        CATransaction.begin(); CATransaction.setDisableActions(true)
-        if cueKind == "table_row" {                                   // a row reads like text: the same soft band
-            shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.16)
-            shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0); shape.lineWidth = 0
-        } else if figure {
-            shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.06)
-            shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0.9); shape.lineWidth = 2
-        } else {
-            shape.fillColor = CGColor(red: r, green: g, blue: b, alpha: 0.16)
-            shape.strokeColor = CGColor(red: r, green: g, blue: b, alpha: 0); shape.lineWidth = 0
-        }
-        CATransaction.commit()
+    /// The panel's area around a cue's text rect (top-left screen points): room for the oval's margin or the band's tick.
+    func cueArea(_ r: CGRect) -> CGRect {
+        if isEllipse { return r.insetBy(dx: -(r.width * 0.12 + 6), dy: -(r.height * 0.12 + 6)) }
+        let left: CGFloat = cueKind == "text_band" ? CueTok.tickGap + CueTok.tickW : 4     // the band fill pads 4, the tick sits left of it
+        return CGRect(x: r.minX - left, y: r.minY - 2, width: r.width + left + 4, height: r.height + 4)
     }
     func frameFor(_ r: CGRect) -> NSRect {
         let H = NSScreen.screens.first?.frame.height ?? 0
-        let (dx, dy): (CGFloat, CGFloat) = isEllipse ? (r.width * 0.12 + 6, r.height * 0.12 + 6) : (4, 2)
-        let g = r.insetBy(dx: -dx, dy: -dy)
+        let g = cueArea(r)
         return NSRect(x: g.minX, y: H - g.maxY, width: g.width, height: g.height)
+    }
+    /// cue.json for the bar's collision rule: {run_id, seq, rect} of the drawn cue, global top-left screen points.
+    func writeCue() {
+        guard let r = cueRect else { return }
+        lastCueWrite = now()
+        if let d = try? JSONSerialization.data(withJSONObject: ["run_id": runId, "seq": seq, "rect": r, "ts": (now() * 1000).rounded() / 1000]) {
+            try? d.write(to: URL(fileURLWithPath: home + "/cue.json"), options: .atomic)
+        }
+    }
+    func removeCue() { cueRect = nil; try? FileManager.default.removeItem(atPath: home + "/cue.json") }
+    /// cue_result for the show that just ended (A3): landed = drawn within 300 ms and no later correction beyond
+    /// max(12 pt, half a line); hidden = it ended hidden (app switch, scrolled off) and is left out of on_target_rate.
+    func endShow() {
+        guard showOpen else { return }
+        showOpen = false
+        let firstMs: Double? = showFirstDrawAt.map { ($0 - showAt) * 1000 }
+        let limit = max(12, (lineH > 0 ? lineH : 20) / 2)
+        let landed = (firstMs ?? .infinity) <= 300 && showMaxShift <= limit
+        let hidden = !shown && (showHid || (showFirstDrawAt == nil && !(front && winFront && !hiddenByKey && scanVisible)))
+        cueShows += 1; if landed { cueLanded += 1 }; if hidden { cueHidden += 1 }
+        rec(["event": "cue_result", "run_id": runId, "seq": seq, "cue_kind": cueKind, "first_draw_ms": firstMs.map { $0.rounded() } ?? NSNull(),
+             "corrections": showCorrections, "max_shift_px": Int(showMaxShift.rounded()), "landed": landed, "hidden": hidden])
     }
     func apply(scrollTs: UInt64? = nil) {
         if let t = scrollTs { pendingScroll.append(t) }
@@ -444,12 +518,22 @@ final class Live: NSObject {
             let f = frameFor(r)
             CATransaction.begin(); CATransaction.setDisableActions(true)
             p.setFrame(f, display: false)
-            let b = CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2)
-            shape.frame = p.contentView!.bounds
-            let rad: CGFloat = cueKind == "figure_box" ? min(12, min(b.width, b.height) / 4) : 6
-            if !lines.isEmpty { shape.path = bandPath(lines, in: r.insetBy(dx: -4, dy: -2)) }
-            else { shape.path = isEllipse ? CGPath(ellipseIn: b, transform: nil) : CGPath(roundedRect: b, cornerWidth: rad, cornerHeight: rad, transform: nil) }
+            let area = cueArea(r), look = cueLook(cueKind, darkPage: darkPage)
+            func local(_ q: CGRect) -> CGRect { CGRect(x: q.minX - area.minX, y: area.maxY - q.maxY, width: q.width, height: q.height) }
+            shape.frame = p.contentView!.bounds; tickShape.frame = p.contentView!.bounds
+            if !lines.isEmpty { shape.path = bandPath(lines, in: area, radius: look.radius) }
+            else if isEllipse { shape.path = CGPath(ellipseIn: CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2), transform: nil) }
+            else {
+                let body = local(r.insetBy(dx: -4, dy: -2)).insetBy(dx: 1, dy: 1), rad = min(look.radius, body.height / 2)
+                shape.path = CGPath(roundedRect: body, cornerWidth: rad, cornerHeight: rad, transform: nil)
+            }
+            let tick = CGRect(x: r.minX - CueTok.tickGap - CueTok.tickW, y: r.minY - 2, width: CueTok.tickW, height: r.height + 4)
+            tickShape.path = look.tick == nil ? nil : CGPath(rect: local(tick), transform: nil)
             CATransaction.commit()
+            cueRect = [Int(f.minX), Int((NSScreen.screens.first?.frame.height ?? 0) - f.maxY), Int(f.width), Int(f.height)]
+            if now() - lastCueWrite >= 0.25 { writeCue() }
+            if showOpen && showFirstDrawAt == nil { showFirstDrawAt = now() }
+            showHid = false
             if !p.isVisible { p.orderFrontRegardless() }
             drawHeader(r)
             if !shown || abs(f.minY - lastDrawn.minY) > 2 || abs(f.minX - lastDrawn.minX) > 2 || abs(f.width - lastDrawn.width) > 2 || abs(f.height - lastDrawn.height) > 2 {
@@ -478,6 +562,8 @@ final class Live: NSObject {
                 var ms: Double? = nil
                 if let t = hideTrigger { ms = (now() - t.1) * 1000; hideN += 1; hideSum += ms!; hideMax = max(hideMax, ms!) }
                 rec(["event": "hide", "seq": seq, "trigger": trig, "hide_ms": ms.map { ($0 * 10).rounded() / 10 } ?? NSNull()])
+                if trig != "speech-finished" { showHid = true }
+                removeCue()
             }
             hideTrigger = nil
         }
@@ -527,7 +613,8 @@ final class Live: NSObject {
             rejX = 0
             if abs(ex) > 8 || abs(ey) > 8 {
                 corrections += 1
-                rec(["event": "correction", "dx": Int(ex), "dy": Int(ey), "from": src, "to": method, "after_ms": Int((now() - predAt) * 1000)])
+                if showOpen && showFirstDrawAt != nil { showCorrections += 1; showMaxShift = max(showMaxShift, max(abs(ex), abs(ey))) }
+                rec(["event": "correction", "seq": seq, "dx": Int(ex), "dy": Int(ey), "from": src, "to": method, "after_ms": Int((now() - predAt) * 1000)])
             }
             predX = 0
         }
@@ -574,8 +661,9 @@ final class Live: NSObject {
         let g = h.insetBy(dx: -4, dy: -2), f = NSRect(x: g.minX, y: H - g.maxY, width: g.width, height: g.height)
         CATransaction.begin(); CATransaction.setDisableActions(true)
         p.setFrame(f, display: false); headerShape.frame = p.contentView!.bounds
-        headerShape.path = CGPath(roundedRect: CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2), cornerWidth: 5, cornerHeight: 5, transform: nil)
-        headerShape.fillColor = shape.fillColor?.copy(alpha: 0.07); headerShape.strokeColor = nil
+        let look = cueLook("table_header", darkPage: darkPage)
+        headerShape.path = CGPath(roundedRect: CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2), cornerWidth: look.radius, cornerHeight: look.radius, transform: nil)
+        headerShape.fillColor = look.fill; headerShape.strokeColor = nil
         CATransaction.commit()
         p.orderFrontRegardless()
     }
@@ -586,18 +674,19 @@ final class Live: NSObject {
             p.level = .statusBar; p.hidesOnDeactivate = false; p.isReleasedWhenClosed = false
             p.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle, .fullScreenAuxiliary]
             let v = NSView(frame: p.contentView!.bounds); v.wantsLayer = true; v.autoresizingMask = [.width, .height]
-            refShape.lineWidth = 1; refShape.lineDashPattern = [4, 3]
             v.layer!.addSublayer(refShape); p.contentView = v; refPanel = p
         }
         guard let p = refPanel, front, winFront else { return }
-        let f = frameFor(r.offsetBy(dx: off.x, dy: off.y))
+        let rr = r.offsetBy(dx: off.x, dy: off.y).insetBy(dx: -4, dy: -2)
+        let H = NSScreen.screens.first?.frame.height ?? 0, f = NSRect(x: rr.minX, y: H - rr.maxY, width: rr.width, height: rr.height)
+        let look = cueLook("back_ref", darkPage: darkPage)
         CATransaction.begin(); CATransaction.setDisableActions(true)
         p.setFrame(f, display: false)
         refShape.frame = p.contentView!.bounds
         let b = CGRect(x: 1, y: 1, width: f.width - 2, height: f.height - 2)
-        refShape.path = CGPath(roundedRect: b, cornerWidth: 5, cornerHeight: 5, transform: nil)
-        refShape.fillColor = CGColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 0.05)
-        refShape.strokeColor = CGColor(red: 0.23, green: 0.51, blue: 0.96, alpha: 0.45)
+        refShape.path = CGPath(roundedRect: b, cornerWidth: look.radius, cornerHeight: look.radius, transform: nil)
+        refShape.fillColor = look.fill; refShape.strokeColor = look.stroke
+        refShape.lineWidth = look.lineWidth; refShape.lineDashPattern = look.dash
         CATransaction.commit()
         p.orderFrontRegardless()
         refShown += 1
@@ -610,6 +699,8 @@ final class Live: NSObject {
                cueKind ck: String? = nil, header: CGRect? = nil, meta: [String: Any] = [:],
                rects: [CGRect] = [], docLines: [[Double]] = [], sentenceId sid: Any = NSNull()) {
         var r = r0
+        endShow()
+        showOpen = drawOn; showAt = now(); showFirstDrawAt = nil; showCorrections = 0; showMaxShift = 0; showHid = false
         drawMeta = meta.merging(["run_id": runId]) { a, _ in a }
         if (meta["doc_target"] as? [Double]) == nil { pageFit = nil }   // no page-space box: nothing to map back
         else if pageFit?.src != "anchors", let t = meta["doc_transform"] as? [Double], t.count == 3 { pageFit = (t[0], t[1], t[2], "event-transform") }
@@ -629,7 +720,7 @@ final class Live: NSObject {
         cueKind = ck ?? (ellipse ? "part_oval" : figure ? "figure_box" : "text_band")
         if cueKind == "table_row", let h = header, let n = r0 { headerDelta = CGRect(x: h.minX - n.minX, y: h.minY - n.minY, width: h.width, height: h.height) }
         else { headerDelta = nil }                              // row 0 is the header itself; other cues have none
-        cueStyle(figure: figure, color: color)
+        cueStyle()
         if figure { refPanel?.orderOut(nil) }                    // one cue at a time: no text outline while a figure part is boxed
         if !drawOn { rec(["event": "cue-off", "seq": s, "cue": cue]) }
         // never flash a big provisional box between sentences: a text sentence's box must fit its own lines
@@ -806,7 +897,8 @@ final class Live: NSObject {
          "scroll_lag_avg_ms": lagN > 0 ? (lagSum / Double(lagN) * 10).rounded() / 10 : NSNull(), "scroll_lag_max_ms": (lagMax * 10).rounded() / 10,
          "hide_ms_avg": hideN > 0 ? (hideSum / Double(hideN) * 10).rounded() / 10 : NSNull(), "hide_ms_max": (hideMax * 10).rounded() / 10,
          "draw_failed": drawFails, "scroll_rejected": rejTotal, "corrections": corrections, "transitions": transitions, "transitions_held_big": heldBig, "ref_outlines": refShown, "main_stalls": stallN, "main_stall_max_ms": stallMax.rounded(), "ax_disabled": axDead,
-         "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100]
+         "k_trackpad": (kCont * 100).rounded() / 100, "k_wheel": (kLine * 100).rounded() / 100,
+         "cues": ["shows": cueShows, "landed": cueLanded, "hidden": cueHidden]]
     }
 }
 
@@ -960,12 +1052,12 @@ func clampBand(_ rects: [CGRect], to win: CGRect) -> [CGRect]? {
 }
 /// One rounded rect per band line inside a panel covering `area` (screen, top-left origin); the panel's layer has a
 /// bottom-left origin. Overlapping line rects fill once (one path, non-zero winding): nothing spans a gutter or a gap.
-func bandPath(_ rects: [CGRect], in area: CGRect) -> CGPath {
+func bandPath(_ rects: [CGRect], in area: CGRect, radius: CGFloat = 2) -> CGPath {
     let p = CGMutablePath()
     for b in rects {
         let q = b.insetBy(dx: -4, dy: -2)
         let local = CGRect(x: q.minX - area.minX, y: area.maxY - q.maxY, width: q.width, height: q.height).insetBy(dx: 1, dy: 1)
-        let rad = min(6, local.height / 2)
+        let rad = min(radius, local.height / 2)
         p.addRoundedRect(in: local, cornerWidth: rad, cornerHeight: rad)
     }
     return p
@@ -1075,6 +1167,16 @@ struct Tracker {
         // Offline check: --ocr-image file.png --find "text" [--frame x,y,w,h]
         // --ocr-lines file.png --frame x,y,w,h : recognised lines as JSON, boxes in frame coordinates (used for raster figures)
         // --pdf-lines file.pdf : text lines per page with page-space boxes (top-left origin), via PDFKit (no PyMuPDF needed)
+        // --render-cue text_band|back_ref|figure_box|part_oval|table_row --out file.png [--page white|dark]: one cue drawn offscreen
+        if let kind = a["render-cue"] {
+            guard let out = a["out"], let img = renderCue(kind, darkPage: a["page"] == "dark"),
+                  let dst = CGImageDestinationCreateWithURL(URL(fileURLWithPath: out) as CFURL, "public.png" as CFString, 1, nil) else {
+                FileHandle.standardError.write("usage: speakeasy-track --render-cue KIND --out FILE.png [--page white|dark]\n".data(using: .utf8)!); exit(2)
+            }
+            CGImageDestinationAddImage(dst, img, nil)
+            if !CGImageDestinationFinalize(dst) { FileHandle.standardError.write("could not write \(out)\n".data(using: .utf8)!); exit(1) }
+            return
+        }
         if let p = a["pdf-lines"] {
             guard let doc = PDFDocument(url: URL(fileURLWithPath: p)) else { print("{\"error\":\"bad pdf\"}"); return }
             var pages: [[String: Any]] = []
@@ -1134,7 +1236,8 @@ struct Tracker {
                     "overlay": "swift-panel"], h0 + "/logs/tracker.jsonl")
         // Never prompt: without Screen Recording permission, log and exit before any ScreenCaptureKit/CGWindowList call.
         if !srAllowed {
-            appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0], h0 + "/logs/tracker.jsonl")
+            appendLine(["ts": (now() * 1000).rounded() / 1000, "event": "exit", "reason": "no_screen_recording", "window_id": Int(a["window-id"] ?? "") ?? NSNull(), "frames": 0,
+                        "run_id": a["run-id"] ?? NSNull(), "tracker_pid": Int(getpid()), "cues": ["shows": 0, "landed": 0, "hidden": 0]], h0 + "/logs/tracker.jsonl")
             exit(0)
         }
         guard let widS = a["window-id"], let wid = CGWindowID(widS) else { FileHandle.standardError.write("usage: speakeasy-track --window-id N --pid P [--home DIR] [--fps 3]\n".data(using: .utf8)!); exit(2) }
@@ -1167,6 +1270,7 @@ struct Tracker {
         var figCapRef: CGRect? = nil, figCapSeq = -1
         var frameLogN = 0
         var lastAccurate = 0.0
+        var toneSeq = -1
         var speakerSeen: Int32? = nil
         var maxRss = 0.0
         var activeS = 0.0
@@ -1227,7 +1331,7 @@ struct Tracker {
                 let sid: Any = ev["sentence_id"] ?? NSNull()
                 await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta, rects: bandRects, docLines: docLines, sentenceId: sid) }
             }
-            if !showing && lastSeq >= 0 { await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
+            if !showing && lastSeq >= 0 { await MainActor.run { Live.shared.endShow(); if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
             var scanned = false
             var winFrame: CGRect? = nil
@@ -1282,6 +1386,14 @@ struct Tracker {
                         out["cap_ts"] = c0                                      // the overlay drops scans older than the last scroll / tab switch
                         if let img = try? await SCScreenshotManager.captureImage(contentFilter: flt, configuration: cfg) {
                             capMs += (now() - c0) * 1000
+                            // dark documents (design 6.6): sample the page under the cue once per show
+                            if toneSeq != seq, let cur = await MainActor.run(body: { Live.shared.rect }), let lum = meanLuminance(img, frame: frame, under: cur) {
+                                toneSeq = seq; let dark = lum < CueTok.darkPageLuminance, sq = seq
+                                await MainActor.run {
+                                    let L = Live.shared
+                                    if L.darkPage != dark { L.darkPage = dark; L.cueStyle(); L.rec(["event": "page_tone", "seq": sq, "dark": dark]); L.apply() }
+                                }
+                            }
                             let o0 = now()
                             var lines = recognise(img, frame: frame, accurate: accurate)
                             var hit: CGRect? = nil
@@ -1406,7 +1518,7 @@ struct Tracker {
             let wait = max(0.01, tickS - dt)
             try? await Task.sleep(nanoseconds: UInt64(wait * 1e9))
         }
-        await MainActor.run { if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.flush() }
+        await MainActor.run { Live.shared.endShow(); if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.flush(); Live.shared.removeCue() }
         let lagSt: [String: Any] = await MainActor.run { Live.shared.stats() }
         let wall = max(0.001, now() - t0), active = frames
         let hits = axHits + ocrHits + docHits

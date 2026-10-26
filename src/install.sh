@@ -106,6 +106,7 @@ set_cfg SPEAKEASY_FOCUS on
 set_cfg SPEAKEASY_FOCUS_TAGS off
 set_cfg SPEAKEASY_TRACK on
 set_cfg SPEAKEASY_DOC_READ local
+set_cfg SPEAKEASY_DOC_NAMES on
 set_cfg SPEAKEASY_GROUND auto
 set_cfg SPEAKEASY_KEEP_ALIVE 10m
 # RAM: the 4-bit (Q4_K_M) build of the model is what fits next to Kokoro on 16-18 GB Macs
@@ -116,8 +117,6 @@ fi
 set_cfg SPEAKEASY_TRACK_FPS 5
 # old default (3) -> 5 scans/s while speaking
 if grep -qx 'SPEAKEASY_TRACK_FPS=3' "$CONFIG" 2>/dev/null; then sed -i '' 's/^SPEAKEASY_TRACK_FPS=3$/SPEAKEASY_TRACK_FPS=5/' "$CONFIG"; fi
-set_cfg SPEAKEASY_FOCUS_COLOR "#3B82F6"
-set_cfg SPEAKEASY_FOCUS_OPACITY 0.22
 echo "Config defaults: $CONFIG (KEY=VALUE; env vars override)."
 
 # The menu-bar app owns the hotkey, capture and the tracker.

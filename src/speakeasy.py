@@ -7,7 +7,7 @@ import provider
 import speakeasy_state as state
 from speakeasy_state import docmap
 from selog import rotate_logs, _on, load_config, RUN_META, set_state, log_run, text_logging_on
-from observe import peak_rss_mb, ollama_ps, capture_keep_path, crop_to_rect, tempfile_dir, CAP_PREFIX, is_owned_capture, handle_capture_file, cmd_last, cmd_stats, image_size
+from observe import peak_rss_mb, ollama_ps, capture_keep_path, crop_to_rect, tempfile_dir, CAP_PREFIX, is_owned_capture, handle_capture_file, cmd_last, cmd_stats, cmd_scrub, image_size
 from prompts import SYSTEM_PROMPT, READ_PROMPT, VISION_PROMPT, SCREEN_INSTRUCTION, DOC_RULE, FOCUS_TEXT_RULE, FOCUS_VISION_RULE
 from llm_client import chat, chat_stream, prewarm, model_name, vision_model
 from tts import NOT_ABBREVIATION, sentences, prewarm_tts, speak, Speaker, stop, tts_server_rss_mb, KOKORO_VOICE
@@ -859,7 +859,7 @@ def rewrite_with_image(text, path, rec, mode=None):
         except Exception as e:
             rec["vision_ms"] = int((time.time() - t0) * 1000)
             rec["stream_note"] = f"vision stream failed before speech: {type(e).__name__}: {e}"[:200]
-            err = f"vision: {type(e).__name__}: {e}"[:300]
+            err = f"vision: {type(e).__name__}: {e}"[:300]; rec["llm_error_class"] = type(e).__name__
             print("speakeasy: warning: vision model unavailable/rejected; using text only", file=sys.stderr)
             if not text.strip():
                 _empty(rec); rec["error"] = err; return ""
@@ -891,7 +891,7 @@ def rewrite_with_image(text, path, rec, mode=None):
         return o
     except Exception as e:
         rec["vision_ms"] = rec["vision_ms"] or int((time.time() - t0) * 1000)
-        err = f"vision: {type(e).__name__}: {e}"[:300]
+        err = f"vision: {type(e).__name__}: {e}"[:300]; rec["llm_error_class"] = type(e).__name__
         print(f"speakeasy: warning: vision model {'output rejected' if isinstance(e, ValueError) else 'unavailable'}; using text only", file=sys.stderr)
     if not text.strip():
         _empty(rec); rec["error"] = err; return ""
@@ -1353,7 +1353,7 @@ def _rewrite(text, rec, keep_error=False):
                 parts.append(o); continue
             except Exception as e:
                 rec["stream_note"] = f"stream failed before speech: {type(e).__name__}: {e}"[:200]
-                rec["backend"] = "fallback"; rec["error"] = f"llm: {type(e).__name__}: {e}"[:300]
+                rec["backend"] = "fallback"; rec["error"] = f"llm: {type(e).__name__}: {e}"[:300]; rec["llm_error_class"] = type(e).__name__
                 print(f"speakeasy: warning: LLM stream {'rejected' if isinstance(e, StreamReject) else 'unavailable'} ({type(e).__name__}); using local cleanup", file=sys.stderr)
                 parts.append(fallback(c)); continue
         if rec["backend"] == "llm":
@@ -1367,7 +1367,7 @@ def _rewrite(text, rec, keep_error=False):
                     parts.append(o); continue
                 raise ValueError("validation: " + why)
             except Exception as e:
-                rec["backend"] = "fallback"; rec["error"] = f"llm: {type(e).__name__}: {e}"[:300]
+                rec["backend"] = "fallback"; rec["error"] = f"llm: {type(e).__name__}: {e}"[:300]; rec["llm_error_class"] = type(e).__name__
                 print(f"speakeasy: warning: LLM {'output rejected' if isinstance(e, ValueError) else 'unavailable'} ({type(e).__name__}); using local cleanup", file=sys.stderr)
         parts.append(fallback(c))
     rec["llm_ms"] = int((time.time() - t0) * 1000) if rec["backend"] == "llm" else 0
@@ -1443,6 +1443,7 @@ def main(argv=None):
         sp.add_argument("--capture-ms", type=int, help="time the hotkey script spent capturing")
         sp.add_argument("--run-id", help="id shared with the tracker's log records")
         sp.add_argument("--area-text", choices=["ax", "ocr"], help="Read area: where the region's text came from")
+        sp.add_argument("--capture-bar-hidden", action="store_true", help="the app hid its bar for a screencapture fallback (B5.2)")
         sp.add_argument("--app", choices=["menubar", "cli"], default=None, help="what launched this run")
         sp.add_argument("--line-bounds", help="JSON file: per-line [x,y,w,h] screen rects of the selected text (from the hotkey)")
         sp.add_argument("--doc-hint", help="JSON file: {app, bundle, title, ax_document, url} of the source window (from the hotkey)")
@@ -1453,7 +1454,9 @@ def main(argv=None):
     sp = sub.add_parser("highlight", help="crop a window screenshot to the bounding box of all selection-highlight pixels")
     sp.add_argument("src"); sp.add_argument("dst")
     sp = sub.add_parser("last"); sp.add_argument("--json", action="store_true")
-    sp = sub.add_parser("stats"); sp.add_argument("-n", type=int, default=50); sp.add_argument("--json", action="store_true")
+    sp = sub.add_parser("stats"); sp.add_argument("--json", action="store_true"); sp.add_argument("--window", type=int, choices=(1, 7, 30), default=7)
+    sp.add_argument("-n", type=int, help="ignored (the per-run timing table moved to `speakeasy last`)")
+    sp = sub.add_parser("logs"); sp.add_argument("--scrub", action="store_true"); sp.add_argument("--yes", action="store_true")
     argv = list(sys.argv[1:] if argv is None else argv)
     for i in range(len(argv) - 1):                 # "--capture-rect -1200,40,..." (a display left of / above the main one)
         if argv[i] == "--capture-rect" and argv[i + 1].startswith("-"):
@@ -1496,9 +1499,17 @@ def main(argv=None):
     if args.cmd == "last":
         return cmd_last(args.json)
     if args.cmd == "stats":
-        return cmd_stats(args.n, args.json)
+        return cmd_stats(args.json, args.window)
+    if args.cmd == "logs":
+        return cmd_scrub(args.yes) if args.scrub else (print("usage: speakeasy logs --scrub [--yes]", file=sys.stderr) or 2)
     t0 = time.time()
-    if args.cmd in ("speak", "selection"): set_state("thinking")
+    state.SPEAKER = None
+    if args.cmd in ("speak", "selection"):
+        # app controls (contract B6): SIGUSR2 pause / resume, SIGUSR1 next sentence; ignored until a speaker exists
+        signal.signal(signal.SIGUSR2, lambda *_: state.SPEAKER is not None and state.SPEAKER.toggle_pause())
+        signal.signal(signal.SIGUSR1, lambda *_: state.SPEAKER is not None and state.SPEAKER.next_sentence())
+        if not getattr(args, "dry_run", False): set_state("thinking", started_ms=int(t0 * 1000), sent_i=0, sent_n=None, paused=False, seq=None, cue_kind=None, label=None,
+                  cloud=RUN_META.get("llm_provider_configured") == "openrouter" or RUN_META.get("ground_provider_configured") == "openrouter")
     rec = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": args.cmd, "verbatim_blocks": [], "area_text": getattr(args, "area_text", None),
            "doc_source": None, "doc_path_hash": None, "page": None, "figures_found": None, "doc_map_method": None, "doc_ready_ms": None}
     timing = {"copy_ms": None, "capture_ms": args.capture_ms, "vision_ms": None, "llm_ms": None,
@@ -1537,6 +1548,7 @@ def main(argv=None):
     img = args.image
     method = args.capture_method or ("none" if not img else None)
     rec.update(capture_method=method, capture_rect=args.capture_rect)
+    if getattr(args, "capture_bar_hidden", False): rec["capture_bar_hidden"] = True
     out = ""
     rec.update(image=False, image_px=None, image_sent_px=None, vision_model=vision_model() if img else None, vision_ms=None)
     rec.update(vision_gate=None, vision_gate_reason=None)
@@ -1577,7 +1589,7 @@ def main(argv=None):
             except ValueError:
                 rec["focus_fallback"] = "bad-rect"
     if streaming or state.FOCUS is not None:      # SPEAKEASY_STREAM=0 with focus: the output is spoken sentence by sentence
-        speaker = Speaker(args.rate, args.voice, timing, t0, dry=bool(args.dry_run))
+        speaker = state.SPEAKER = Speaker(args.rate, args.voice, timing, t0, dry=bool(args.dry_run))
         def _term(*_):
             state.STOP.set(); speaker.kill()
             if state.FOCUS is not None: state.FOCUS.clear()
@@ -1696,6 +1708,14 @@ def main(argv=None):
         w = timing.pop("tts_warning", None)
         if w: tts_err = (tts_err + "; " + w) if tts_err else w
         rec["tts_server_rss_mb"] = tts_server_rss_mb() if tts_engine == "kokoro" and not args.dry_run else None
+        fallback_class = timing.pop("tts_fallback", None)
+        rec["tts_fallback"] = (fallback_class or "error") if tts_engine == "kokoro" and rec["tts"] == "say" else None
+        rec["sent_n"] = timing.pop("sent_n", None); rec["sent_spoken"] = timing.pop("sent_spoken", 0)
+        rec["paused_ms"] = timing.pop("paused_ms", 0); rec["skips"] = timing.pop("skips", 0)
+        completed = timing.pop("completed", True)
+        process_failed = bool(tts_err and tts_err != w) or bool(timing.get("tts_error"))   # not the Kokoro -> say fallback
+        rec["end"] = ("stopped" if state.STOP.is_set() and not completed else
+                      "error" if process_failed or (rec["sent_spoken"] == 0 and (rewrite_err or prior_err) and not args.dry_run) else "finished")
     if timing.get("capture_ms") is None: timing["capture_ms"] = 0
     if args.cmd == "selection" and timing.get("copy_ms") is None: timing["copy_ms"] = 0
     timing["llm_first_token_ms"] = rec.get("llm_first_token_ms"); timing["first_sentence_ms"] = rec.get("first_sentence_ms")
@@ -1723,6 +1743,7 @@ def main(argv=None):
     rec["ollama_models"] = ollama_ps()
     if state.DOC is not None: state.DOC.done.wait(1.0)                       # document fields for the log (speech is already done)
     rec.update(GROUNDER.log_fields())
+    if args.cmd in ("speak", "selection"): rec["fig_ids"] = list(rec.pop("_fig_ids", []))
     set_state("idle")
     log_run(rec, text, out)
     return 0

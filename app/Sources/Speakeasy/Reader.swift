@@ -6,11 +6,15 @@ import AppKit
 import ApplicationServices
 
 final class Reader {
-    let home = NSHomeDirectory() + "/.speakeasy"
+    let home = Home.dir
     var backend: Process?
     var tracker: Process?
     var runId = ""
-    var onState: ((String) -> Void)?          // "listening" while capturing; the pill watches files for the rest
+    var onStarted: (NSScreen?) -> Void = { _ in }                 // capture began: the bar shows `preparing` on that display
+    var onFinished: (String, Bool) -> Void = { _, _ in }          // the backend exited (run id, it ran at all)
+    var onFailed: (String, String?) -> Void = { _, _ in }         // nothing could be read: copy and the one action
+    var onArmed: (Bool) -> Void = { _ in }                        // the area overlay is up / gone
+    var bar: Bar? { (NSApp.delegate as? AppDelegate)?.bar }
 
     var backendPath: String {
         let cli = NSHomeDirectory() + "/.local/bin/speakeasy"
@@ -22,16 +26,23 @@ final class Reader {
         let b = Bundle.main.bundlePath + "/Contents/Helpers/SpeakeasyTracker.app/Contents/MacOS/speakeasy-track"
         return FileManager.default.isExecutableFile(atPath: b) ? b : home + "/bin/speakeasy-track"
     }
-    var speaking: Bool {
-        guard let s = try? String(contentsOfFile: home + "/speak.pid", encoding: .utf8), let p = pid_t(s.trimmingCharacters(in: .whitespacesAndNewlines)) else { return false }
-        return kill(p, 0) == 0
+    var speakPid: pid_t? {
+        guard let s = try? String(contentsOfFile: home + "/speak.pid", encoding: .utf8), let p = pid_t(s.trimmingCharacters(in: .whitespacesAndNewlines)), p > 0 else { return nil }
+        return kill(p, 0) == 0 ? p : nil
     }
+    var speaking: Bool { speakPid != nil }
 
-    func toggle() { speaking ? stop() : start() }
-    func stop() {
+    func toggle(via: String) { if speaking { stop(via: via) } else { start() } }
+    func stop(via: String) {
+        AppLog.event("control", ["action": "stop", "via": via])
         killTracker()
         run(backendPath, ["stop"], stdin: nil)
-        onState?("idle")
+    }
+    /// Pause / resume (SIGUSR2) and next sentence (SIGUSR1) go to the backend's pid (contract B6); a dead pid is ignored.
+    func control(_ action: String, via: String) {
+        AppLog.event("control", ["action": action, "via": via])
+        guard let p = speakPid else { return }
+        kill(p, action == "next" ? SIGUSR1 : SIGUSR2)
     }
     func killTracker() {
         tracker?.terminate(); tracker = nil
@@ -44,10 +55,10 @@ final class Reader {
         runId = String(format: "%llx%04x", UInt64(t0.timeIntervalSince1970 * 1000), UInt32.random(in: 0...0xffff))
         guard AXIsProcessTrusted() else { (NSApp.delegate as? AppDelegate)?.showOnboarding(); return }
         guard let front = NSWorkspace.shared.frontmostApplication else { return }
-        onState?("listening")
         let pid = front.processIdentifier
         let appEl = AXUIElementCreateApplication(pid)
         let win = frontWindow(pid)
+        onStarted(win.flatMap { w in NSScreen.screens.first { ScreenGeo.toCG($0.frame).contains(CGPoint(x: w.frame.midX, y: w.frame.midY)) } })
         startTracker(pid: pid, wid: win?.id)                       // lock onto the source window now
         writeDocHint(front: front, appEl: appEl)
         for p in ["/tmp/speakeasy_cap_lines.json", "/tmp/speakeasy_cap_sel.png"] { try? FileManager.default.removeItem(atPath: p) }
@@ -66,7 +77,8 @@ final class Reader {
         let shot = "/tmp/speakeasy_cap_sel.png"
         if let r = rect, sr {
             let p = clamp(r.insetBy(dx: -16, dy: -16))
-            capture(["-x", "-R", rs(p), shot])
+            if let b = bar, b.testPos == "selection" { b.testRect = ScreenGeo.toNS(p); b.place(reason: nil) }   // test builds only (B9.7)
+            if !captureSelection(p, to: shot) { args += ["--capture-bar-hidden"] }
             if FileManager.default.fileExists(atPath: shot) {
                 args += ["--image", shot, "--capture-method", "bounds", "--capture-rect", rs(p)]
                 if FileManager.default.fileExists(atPath: "/tmp/speakeasy_cap_lines.json") { args += ["--line-bounds", "/tmp/speakeasy_cap_lines.json"] }
@@ -81,9 +93,25 @@ final class Reader {
         if args.firstIndex(of: "--capture-method") == nil { args += ["--capture-method", "none"] }
         args += ["--capture-ms", String(Int(Date().timeIntervalSince(t0) * 1000)), "--run-id", runId, "--app", "menubar"]
         if text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && args.firstIndex(of: "--image") == nil {
-            NSSound.beep(); killTracker(); onState?("idle"); return
+            NSSound.beep(); killTracker(); onFailed("Nothing was read. The selection was empty.", nil); return
         }
         launch(args, text: text)
+    }
+    /// The selection's pixels through ScreenCaptureKit with Speakeasy excluded, so the bar is never in the capture (B5.2).
+    /// If that fails, the bar is ordered out for a `screencapture -R` and restored; returns false in that case.
+    func captureSelection(_ rect: CGRect, to path: String) -> Bool {
+        let done = DispatchSemaphore(value: 0)
+        var image: CGImage? = nil
+        AreaSelector.capture(rect) { img in image = img; done.signal() }
+        if done.wait(timeout: .now() + 2) == .success, let img = image,
+           let png = NSBitmapImageRep(cgImage: img).representation(using: .png, properties: [:]) {
+            FileManager.default.createFile(atPath: path, contents: png); return true
+        }
+        let shown = bar?.panel.isVisible ?? false
+        if shown { bar?.panel.orderOut(nil) }
+        capture(["-x", "-R", rs(rect), path])
+        if shown { bar?.panel.orderFrontRegardless() }
+        return false
     }
 
     // ---- selection ----
@@ -209,7 +237,7 @@ final class Reader {
             if p.terminationStatus != 0 { break }        // nothing matched: done
             Thread.sleep(forTimeInterval: 1.0)
         }
-        try? FileManager.default.removeItem(atPath: NSHomeDirectory() + "/.speakeasy/tracker.pid")
+        try? FileManager.default.removeItem(atPath: Home.dir + "/tracker.pid")
     }
     func startTracker(pid: pid_t, wid: Int?) {
         killTracker()
@@ -243,18 +271,27 @@ final class Reader {
 
     // ---- area selection (Read area…) ----
     let area = AreaSelector()
-    func startArea() {
-        guard !speaking else { stop(); return }
-        guard AXIsProcessTrusted(), CGPreflightScreenCaptureAccess() else { (NSApp.delegate as? AppDelegate)?.showOnboarding(); return }
-        area.pick { [weak self] r in
-            guard let self = self, let rect = r else { return }                          // Esc / tiny drag: nothing happens
+    /// Arm Read area (B2 `armed`); armed already: cancel; reading: stop, then arm. via: bar | hotkey | menu.
+    func startArea(via: String) {
+        if area.active { area.cancel(via == "bar" ? "cancel-click" : "cancel-hotkey"); return }
+        if speaking { stop(via: via) }
+        guard CGPreflightScreenCaptureAccess() else {
+            onFailed("Screen Recording is off. Read area needs it.", "Open Screen Recording settings"); return
+        }
+        guard AXIsProcessTrusted() else { (NSApp.delegate as? AppDelegate)?.showOnboarding(); return }
+        onArmed(true)
+        area.pick { [weak self] r, result in
+            guard let self = self else { return }
+            AppLog.event("area", ["via": via, "result": result])
+            self.onArmed(false)
+            guard let rect = r else { return }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.12) { self.readArea(rect) } // let the overlay leave the screen
         }
     }
     func readArea(_ rect: CGRect) {
         let t0 = Date()
         runId = String(format: "%llx%04x", UInt64(t0.timeIntervalSince1970 * 1000), UInt32.random(in: 0...0xffff))
-        onState?("listening")
+        onStarted(NSScreen.screens.first { ScreenGeo.toCG($0.frame).contains(CGPoint(x: rect.midX, y: rect.midY)) })
         // the window under the area: the tracker follows it (scrolling, switching) like a text selection
         let c = CGPoint(x: rect.midX, y: rect.midY)
         let list = (CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]]) ?? []
@@ -293,7 +330,7 @@ final class Reader {
         AreaSelector.capture(rect) { [weak self] img in
             DispatchQueue.main.async {
                 guard let self = self else { return }
-                guard let img = img else { NSSound.beep(); self.killTracker(); self.onState?("idle"); return }
+                guard let img = img else { NSSound.beep(); self.killTracker(); self.onFailed("The area could not be captured. Check Screen Recording.", "Open Screen Recording settings"); return }
                 if text.isEmpty {
                     var out: [[String: Any]] = [], loc = 0
                     for (t, r) in AreaSelector.ocr(img, rect: rect) {
@@ -318,11 +355,11 @@ final class Reader {
         }
     }
     func launch(_ args: [String], text: String) {
-        onState?("thinking")
         backend = run(backendPath, args, stdin: text)
-        let me = backend
+        let me = backend, id = runId
+        guard backend != nil else { killTracker(); onFailed("Speakeasy could not start its reader. Reinstall from the download page.", nil); return }
         backend?.terminationHandler = { [weak self] _ in
-            DispatchQueue.main.async { if self?.backend === me { self?.backend = nil; self?.onState?("idle") } }
+            DispatchQueue.main.async { if self?.backend === me { self?.backend = nil; self?.onFinished(id, true) } }
         }
     }
 }

@@ -71,6 +71,12 @@ def _kokoro_synth(chunk, speed, timeout=30):
         f.write(data)
     return path
 
+def fallback_class(e):
+    """tts_fallback for a failed Kokoro request: unavailable (no server / no answer) or error (it answered badly)."""
+    import urllib.error
+    if isinstance(e, (urllib.error.HTTPError, ValueError)): return "error"
+    return "unavailable" if isinstance(e, (OSError, TimeoutError)) else "error"
+
 def _tool(name, *paths):
     for p in paths:
         if os.path.exists(p): return p
@@ -128,7 +134,7 @@ def speak_kokoro(text, rate, timing, t_start, playback):
             try:
                 path = _kokoro_synth(b, speed)
             except Exception as e:
-                synth["err"] = f"{type(e).__name__}: {e}"[:200]
+                synth["err"] = f"{type(e).__name__}: {e}"[:200]; timing["tts_fallback"] = fallback_class(e)
                 q.put(("fail", i)); return
             synth["ms"] += int((time.time() - t) * 1000)
             while not playback["stopped"]:
@@ -152,6 +158,7 @@ def speak_kokoro(text, rate, timing, t_start, playback):
         if timing.get("tts_first_audio_ms") is None:
             timing["tts_first_audio_ms"] = int((time.time() - t_start) * 1000)
             set_state("speaking")
+        timing["sent_spoken"] = timing.get("sent_spoken", 0) + 1
         playback["proc"] = subprocess.Popen(["afplay", val], start_new_session=True)
         playback["proc"].wait()
         try: os.remove(val)
@@ -189,6 +196,7 @@ def speak(text, rate=None, voice=None, timing=None, t_start=None):
     try:
         engine = os.environ.get("SPEAKEASY_TTS", "say").lower()
         chunks = list(sentences(text))
+        timing["sent_n"] = len(chunks); timing.setdefault("sent_spoken", 0)
         if engine == "kokoro":
             rest = speak_kokoro(text, rate, timing, t_start or t_speak, kstate)
             if timing.get("tts_warning"):
@@ -205,6 +213,7 @@ def speak(text, rate=None, voice=None, timing=None, t_start=None):
             if timing is not None and timing.get("tts_first_audio_ms") is None:
                 timing["tts_first_audio_ms"] = int((time.time() - (t_start or t_speak)) * 1000)
                 set_state("speaking")
+            timing["sent_spoken"] += 1
             if stdin_text is not None:
                 try: proc["p"].communicate(stdin_text)
                 except BrokenPipeError: pass
@@ -214,6 +223,7 @@ def speak(text, rate=None, voice=None, timing=None, t_start=None):
     finally:
         if timing is not None:
             timing["speak_ms"] = int((time.time() - t_speak) * 1000)
+            timing["completed"] = not stopped["v"]
         try:
             if open(pidfile()).read().strip() == str(os.getpid()): os.remove(pidfile())
         except OSError:
@@ -226,8 +236,11 @@ class Speaker:
         self.rate, self.voice, self.timing, self.t0, self.dry = rate, voice, timing, t0, dry
         self.engine = os.environ.get("SPEAKEASY_TTS", "say").lower()
         self.tq, self.pq = queue.Queue(), queue.Queue(maxsize=3)
-        self.proc, self.synth_ms, self.warn = None, 0, None
+        self.proc, self.synth_ms, self.warn, self.fallback = None, 0, None, None
         self.spoken = []
+        self.planned = self.started = self.skips = self.paused_ms = 0      # sent_n, sent_spoken, skips, paused_ms
+        self.paused_at, self.skipping, self.completed = None, False, False
+        self.died_paused = False                                           # the player was killed while paused (B8)
         if not dry:
             os.makedirs(home(), exist_ok=True)
             with open(pidfile(), "w") as f: f.write(str(os.getpid()))
@@ -239,9 +252,37 @@ class Speaker:
             rect = None
             if state.FOCUS is not None:
                 rect, method = state.FOCUS.locate(text, tag); state.FOCUS.note(method, text)
+            self.planned += 1
             self.tq.put((text.strip(), rect))
     def close(self):
+        if not self.dry: set_state(sent_n=self.planned)
         self.tq.put(None)
+    # ---- controls from the app (contract B6): SIGUSR2 toggles pause, SIGUSR1 skips to the next sentence ----
+    def _signal_player(self, sig):
+        p = self.proc
+        if p is None: return False
+        try: os.killpg(p.pid, sig); return True
+        except ProcessLookupError: return False                      # the player just finished
+    def toggle_pause(self):
+        if self.paused_at is None:
+            self.paused_at = time.time(); self._signal_player(signal.SIGSTOP)
+        else:
+            self.paused_ms += int((time.time() - self.paused_at) * 1000); self.paused_at = None
+            if not self._signal_player(signal.SIGCONT) and self.died_paused:
+                self.skips += 1                                       # resume after the player died acts as Next sentence (B8)
+            self.died_paused = False
+        if not self.dry: set_state(paused=self.paused_at is not None)
+    def next_sentence(self):
+        if self.proc is None: return
+        self.skipping = True
+        if self._signal_player(signal.SIGTERM):
+            self._signal_player(signal.SIGCONT)                       # a stopped player only dies once continued
+            self.skips += 1
+    def _wait_unpaused(self):
+        while self.paused_at is not None and not state.STOP.is_set(): time.sleep(0.05)
+    def _started(self, n):
+        self.started += n
+        if not self.dry: set_state(sent_i=self.started, sent_n=self.planned)
     def _synth(self):
         speed = max(0.5, min(2.0, (self.rate or 175) / 175.0))
         while True:
@@ -260,7 +301,7 @@ class Speaker:
                     self.timing.update(first_synth_ms=ms, first_chunk_chars=len(t), first_chunk_queued_ms=int((t1 - self.t0) * 1000))
                 self.pq.put(("wav", path, rect, t))
             except Exception as e:
-                self.warn = f"kokoro unavailable, fell back to say: {type(e).__name__}: {e}"[:200]
+                self.warn = f"kokoro unavailable, fell back to say: {type(e).__name__}: {e}"[:200]; self.fallback = fallback_class(e)
                 print("speakeasy: warning: Kokoro TTS server unavailable; using say", file=sys.stderr)
                 self.pq.put(("text", t, rect))
     def _first(self):
@@ -271,10 +312,14 @@ class Speaker:
             set_state("speaking")
     def _run(self, args, **kw):
         self.proc = subprocess.Popen(args, start_new_session=True, **kw)
+        if self.paused_at is not None: self._signal_player(signal.SIGSTOP)   # paused between the start and the Popen
         self.proc.wait()
         rc = self.proc.returncode; self.proc = None
-        if rc not in (0, None) and not state.STOP.is_set():
+        if rc not in (0, None) and self.paused_at is not None and not self.skipping and not state.STOP.is_set():
+            self.died_paused = True                                   # killed while paused: not a TTS failure
+        elif rc not in (0, None) and not state.STOP.is_set() and not self.skipping:
             self.timing["tts_error"] = f"tts exited {rc}"
+        self.skipping = False
     def _say(self, val):
         if self.dry:
             print(val, flush=True); return
@@ -295,10 +340,12 @@ class Speaker:
         while True:
             item = pending if pending is not None else self.pq.get()
             pending = None
+            if item is not None: self._wait_unpaused()
             if item is None or state.STOP.is_set():
                 if item and item[0] == "wav":
                     try: os.remove(item[1])
                     except OSError: pass
+                self.completed = item is None and not state.STOP.is_set()
                 return
             kind, val, rect = item[0], item[1], item[2]
             if kind == "text":            # merge queued text into one call (fewer gaps) unless the focus overlay needs per-sentence starts
@@ -310,15 +357,16 @@ class Speaker:
                         texts.append(nxt[1]); continue
                     pending = nxt if nxt is not None else ("__end__", None); break
                 val = " ".join(texts)
-                self.spoken.append(val); self._first()
+                self.spoken.append(val); self._first(); self._started(len(texts))
                 if state.FOCUS is not None and rect is not None and not state.STOP.is_set():
                     state.FOCUS.show(rect, val)         # audio for this sentence starts now
                 try: self._say(val)
                 except FileNotFoundError as e: self.timing["tts_error"] = f"unavailable: {e}"
                 if pending == ("__end__", None):
+                    self.completed = not state.STOP.is_set()
                     return
                 continue
-            self.spoken.append(item[3] if len(item) > 3 else val); self._first()
+            self.spoken.append(item[3] if len(item) > 3 else val); self._first(); self._started(1)
             if state.FOCUS is not None and rect is not None and not state.STOP.is_set():
                 state.FOCUS.show(rect, item[3] if len(item) > 3 else "")
             try: self._run(["afplay", val])
@@ -328,7 +376,7 @@ class Speaker:
     def kill(self):
         p = self.proc
         if p:
-            try: os.killpg(p.pid, signal.SIGTERM)
+            try: os.killpg(p.pid, signal.SIGTERM); os.killpg(p.pid, signal.SIGCONT)    # a paused player only dies once continued
             except OSError:
                 try: p.terminate()
                 except OSError: pass
@@ -347,6 +395,9 @@ class Speaker:
             state.FOCUS.clear()
         self.timing["speak_ms"] = int((time.time() - self.t_start) * 1000)
         self.timing["tts_synth_ms"] = self.synth_ms
+        if self.paused_at is not None: self.paused_ms += int((time.time() - self.paused_at) * 1000); self.paused_at = None
+        self.timing.update(sent_n=self.planned, sent_spoken=self.started, completed=self.completed, paused_ms=self.paused_ms,
+                           skips=self.skips, tts_fallback=self.fallback)
         if self.warn:
             self.timing["tts_warning"] = self.warn; self.timing["tts_engine_used"] = "say"
         if not self.dry:

@@ -4,7 +4,7 @@ from collections import Counter
 import partpick
 import speakeasy_state as state
 from speakeasy_state import docmap
-from selog import home, _on, text_logging_on
+from selog import home, _on, text_logging_on, set_state
 from grounding import GROUNDER
 from sentence_map import Alignment, SentenceMap, SelectionSpan
 
@@ -160,6 +160,19 @@ def _logged_label(label):
     if text_logging_on(): return label
     return label if label and LOGGED_LABEL_RE.fullmatch(label) else None
 
+# Cue style written into show records: the reading band's fill, `ice` at 38 % (docs/design.md 1 and 6.6). The tracker's
+# constants block holds the full cue palette; these two values must match it.
+CUE_STYLE = {"color": "#A8D8EC", "opacity": 0.38}
+FIG_CUE_KINDS = ("figure_box", "part_oval", "table_row")
+
+def _fig_id(page, f):
+    """p<page>:fig<n> / p<page>:tab<n>, n = the item's 1-based index among the page parse's figures (or tables) in
+    reading order; None when f is not one of the page's items."""
+    tables = f.get("kind") == "table"
+    same = [x for x in page["figures"] if (x.get("kind") == "table") == tables]
+    i = next((k for k, x in enumerate(same) if x is f), None)
+    return None if i is None else f"p{page['n']}:{'tab' if tables else 'fig'}{i + 1}"
+
 def _box_target_src(f, kind, panel):
     """doc.target_src of a figure / table / panel box taken from the parse entry f."""
     if kind == "panel":
@@ -208,9 +221,7 @@ class Focus:
         acc, self.bands = 0.0, []
         for x in w:
             self.bands.append((acc / tot, (acc + x) / tot)); acc += x
-        cfg = os.environ
-        self.style = {"color": cfg.get("SPEAKEASY_FOCUS_COLOR", "#3B82F6"),
-                      "opacity": float(cfg.get("SPEAKEASY_FOCUS_OPACITY", "0.22") or 0.22)}
+        self.style = dict(CUE_STYLE)
     def _map_bounds(self, text, lb):
         """Per-source-line screen rects from the hotkey's AX data, or None (band fallback).
         Accepts [[x,y,w,h], ...] with one entry per non-blank source line, or visual (wrapped) lines
@@ -767,6 +778,7 @@ class Focus:
         nr.doc = {"kind": kind, "label": _logged_label(label), "page": d["page"]["n"], "page_size": d.get("page_size"), "target": [round(v, 1) for v in tgt],
                   "anchors": anc, "target_src": target_src}
         if kind in ("figure", "table", "table_row") and f and f.get("split_from"): nr.doc["split_from"] = f["split_from"]
+        if kind != "line" and f: nr.fig_id = _fig_id(d["page"], f)
         if kind == "line": nr.doc["lines"] = [[round(v, 1) for v in d["page"]["lines"][i][:4]] for i in line_ix]
         if kind != "line" and f and f.get("caption"):
             nr.src = [re.sub(r"\s+", " ", f["caption"])[:100]]          # tracker finds the caption when anchors fail
@@ -887,6 +899,8 @@ class Focus:
                 self.rec["first_focus_ms"] = int((time.time() - self.run_t0) * 1000)
         except OSError: pass
         if self.dry: return
+        if ev["state"] == "show":
+            set_state(seq=ev["seq"], cue_kind=ev.get("cue_kind"), label=(ev.get("doc") or {}).get("label"))
         try:
             path = os.path.join(home(), "focus.json"); tmp = path + ".tmp"
             with open(tmp, "w") as f: json.dump({k: v for k, v in ev.items() if k != "text"}, f)   # the tracker needs src, never the spoken text
@@ -930,6 +944,10 @@ class Focus:
         dt = self._doc_transform() if getattr(rect, "doc", None) and state.DOC is not None else None
         if dt and dt != "pending": ev["doc_transform"] = [round(dt[0], 4), round(dt[1], 1), round(dt[2], 1)]
         ck = self.rec.setdefault("cue_kinds", {}); ck[ev["cue_kind"]] = ck.get(ev["cue_kind"], 0) + 1
+        fid = getattr(rect, "fig_id", None)
+        if fid and ev["cue_kind"] in FIG_CUE_KINDS:
+            ev["fig_id"] = fid; ids = self.rec.setdefault("_fig_ids", [])
+            if fid not in ids: ids.append(fid)
         if ev.get("header"): ck["table_header"] = ck.get("table_header", 0) + 1
         ev["draw"] = _on("SPEAKEASY_FIGURE_CUES" if ev["cue"] == "figure" else "SPEAKEASY_TEXT_HIGHLIGHT")
         if getattr(rect, "ref", None) and (rect.doc or {}).get("kind") in (None, "line"): ev["ref"] = rect.ref   # C.3 back-reference outline

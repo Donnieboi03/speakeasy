@@ -141,7 +141,9 @@ Wireframes are to scale in spirit, not in pixels. `▌` is the margin tick. `·`
 ### 6.1 The bar (bottom centre, above the Dock)
 
 Navy surface, `navy-line` hairline, radius 4, no shadow. Text `ice` and `#E3ECF2`. Placement and behaviour:
-contract section B.
+contract section B. Bottom centre is the default home spot. If another app's floating window already sits there, the bar
+stacks 8 pt above it when that window is bar-shaped, and otherwise uses bottom left, then bottom right. A position the
+user dragged to is always kept (contract B1 rule 8).
 
 Idle (56 × 8 visible, 72 × 24 hit area). Only the tick and a short navy stub:
 

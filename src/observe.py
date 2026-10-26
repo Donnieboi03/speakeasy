@@ -140,7 +140,7 @@ def read_runs():
     return runs
 
 def cmd_last(as_json=False):
-    runs = [r for r in read_runs() if r.get("command") not in ("last", "stats", "stop")]
+    runs = [r for r in read_runs() if r.get("command") not in ("last", "stats", "stop", "scrub")]
     if not runs:
         print("No runs logged yet (" + os.path.join(home(), "logs", "runs.jsonl") + ")"); return 0
     r = runs[-1]
@@ -167,32 +167,148 @@ def cmd_last(as_json=False):
             print(f"{k.ljust(w)}  {v}")
     return 0
 
-def cmd_stats(n=50, as_json=False):
-    import statistics
-    if as_json:
-        import stats as _st
-        print(json.dumps(_st.compute(read_runs()))); return 0
-    runs = [r for r in read_runs() if r.get("command") in ("rewrite", "speak", "selection")][-n:]
-    if not runs:
-        print("No runs logged yet."); return 0
-    print(f"Last {len(runs)} runs")
-    def med(vals):
-        vals = [v for v in vals if isinstance(v, (int, float))]
-        return f"{statistics.median(vals):.0f} ms (n={len(vals)})" if vals else "-"
-    keys = ["total_ms", "copy_ms", "capture_ms", "vision_ms", "llm_ms", "tts_first_audio_ms", "speak_ms"]
-    for k in keys:
-        vals = [(r.get("timings") or {}).get(k, r.get(k)) for r in runs]
-        if k in ("vision_ms", "llm_ms"): vals = [v for v in vals if v]
-        print(f"  median {k:<20} {med(vals)}")
-    from collections import Counter
-    print("  backend mix: " + ", ".join(f"{k}={v}" for k, v in Counter(r.get("backend") for r in runs).items()))
-    print("  capture mix: " + ", ".join(f"{k}={v}" for k, v in Counter(r.get("capture_method") or "none" for r in runs).items()))
-    print(f"  with image: {sum(1 for r in runs if r.get('image'))}")
-    rss = [r.get("peak_rss_mb") for r in runs if r.get("peak_rss_mb")]
-    if rss: print(f"  peak RSS max: {max(rss)} MB")
-    errs = Counter(re.sub(r"\d+", "N", str(r.get("error")))[:90] for r in runs if r.get("error"))
-    print(f"  errors: {sum(errs.values())}")
-    for e, c in errs.most_common(5):
-        print(f"    {c}x {e}")
+def cmd_stats(as_json=False, window=7):
+    """`speakeasy stats [--json] [--window 1|7|30]`: the Reading log's numbers (schema 2), from whitelisted log keys."""
+    import stats as _st
+    s = _st.load(home(), window)
+    if as_json: print(json.dumps(s, ensure_ascii=False)); return 0
+    print("\n".join(_st.text_lines(s))); return 0
+
+
+# ---------------- speakeasy logs --scrub (phase7 A5.4) ----------------
+SCRUB_FIELDS = ("text", "src", "ref_src", "doc.label", "doc.anchors", "input", "output", "error", "llm_error", "notes")
+_SUPERLATIVE_RE = re.compile(r"superlative '([^']*)' on \S+ contradicts .*?(?=; |$)")
+
+def _scrub_focus_rec(rec, len_hash, label_re):
+    """A focus.jsonl record -> the form focus.focus_log_record writes with SPEAKEASY_LOG_TEXT unset, in place.
+    Keys already present are kept. Returns the fields it changed."""
+    hit = []
+    if "text" in rec:
+        v = rec.pop("text"); hit.append("text")
+        if isinstance(v, str) and v:
+            n, h = len_hash(v); rec.setdefault("text_len", n); rec.setdefault("text_hash", h)
+    if "src" in rec:
+        v = rec.pop("src"); hit.append("src")
+        if isinstance(v, list) and v:
+            rec.setdefault("src_n", len(v)); rec.setdefault("src_hash", len_hash("\n".join(map(str, v)))[1])
+    if "ref_src" in rec:
+        del rec["ref_src"]; hit.append("ref_src")
+    doc = rec.get("doc")
+    if isinstance(doc, dict):
+        label = doc.get("label")
+        if isinstance(label, str) and len(label.split()) > 3 and not label_re.fullmatch(label):
+            doc["label"] = None; hit.append("doc.label")        # the writer's text-off form: label null
+        anchors = doc.get("anchors")
+        if isinstance(anchors, list) and any(isinstance(a, list) and len(a) > 4 for a in anchors):
+            doc["anchors"] = [a[:4] if isinstance(a, list) else a for a in anchors]; hit.append("doc.anchors")
+    return hit
+
+def _scrub_run_rec(rec):
+    """A runs.jsonl record without input / output and with the text-free superlative note, in place. Returns the fields it changed."""
+    hit = [k for k in ("input", "output") if k in rec]
+    for k in hit: del rec[k]
+    for k in ("error", "llm_error", "notes"):
+        v = rec.get(k)
+        if isinstance(v, str):
+            s = _SUPERLATIVE_RE.sub(r"superlative '\1' contradicts its column", v)
+            if s != v: rec[k] = s; hit.append(k)
+    return hit
+
+def _scrub_file(path, scrub, dumps, fields):
+    """(scrubbed bytes, or None when nothing changed; records changed). Untouched lines stay byte-for-byte."""
+    with open(path, "rb") as f: lines = f.read().split(b"\n")
+    changed = 0
+    for i, line in enumerate(lines):
+        try: rec = json.loads(line)
+        except ValueError: continue                              # malformed or blank line: kept as it is
+        hit = scrub(rec) if isinstance(rec, dict) else []
+        if hit:
+            changed += 1; lines[i] = dumps(rec).encode("utf-8")
+            for k in hit: fields[k] += 1
+    return (b"\n".join(lines) if changed else None), changed
+
+def _holds_text(line):
+    try: rec = json.loads(line)
+    except ValueError: return False
+    # tracker `draw` / `scroll` records carry `src` as an enum string; source lines are a list
+    return isinstance(rec, dict) and (any(rec.get(k) for k in ("text", "input", "output"))
+                                      or any(isinstance(rec.get(k), list) for k in ("src", "ref_src")))
+
+def _read_running():
+    from selog import pidfile
+    try:
+        with open(pidfile()) as f: pid = int(f.read().strip())
+    except (OSError, ValueError): return False
+    if pid <= 0: return False                                    # os.kill(0, ...) would signal our own group
+    try: os.kill(pid, 0)
+    except PermissionError: return True
+    except ProcessLookupError: return False
+    return True
+
+def _replace_with(path, data, st):
+    """Write data to a temp file next to path, then rename it over path. The temp file never outlives an error."""
+    import stat, tempfile
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(path), prefix=".scrub_")
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data); f.flush(); os.fsync(f.fileno())
+        os.chmod(tmp, stat.S_IMODE(st.st_mode))
+        now = os.stat(path)
+        if (now.st_size, now.st_mtime_ns) != (st.st_size, st.st_mtime_ns):
+            raise RuntimeError("log changed during the scrub")
+        os.replace(tmp, path)
+    except BaseException:
+        os.unlink(tmp); raise
+
+def cmd_scrub(yes=False):
+    """`speakeasy logs --scrub`: remove text from old runs / focus records in place. Prints counts only."""
+    import time
+    from focus import _len_and_hash, LOGGED_LABEL_RE
+    t0 = time.time()
+    if _read_running():
+        print("A read is running. Run the scrub after it ends.", file=sys.stderr); return 2
+    d = os.path.join(home(), "logs")
+    rotated = lambda base: [os.path.join(d, base)] + [os.path.join(d, f"{base}.{k}") for k in range(1, LOG_KEEP + 1)]
+    kinds = {"runs": (_scrub_run_rec, lambda r: json.dumps(r, ensure_ascii=False)),                 # selog.log_run
+             "focus": (lambda r: _scrub_focus_rec(r, _len_and_hash, LOGGED_LABEL_RE), json.dumps)}  # focus.py writers
+    fields = dict.fromkeys(SCRUB_FIELDS, 0); changed = {"runs": 0, "focus": 0}; plan = []
+    try:
+        for kind, (scrub, dumps) in kinds.items():
+            for path in rotated(kind + ".jsonl"):
+                if not os.path.isfile(path): continue
+                st = os.stat(path)
+                data, n = _scrub_file(path, scrub, dumps, fields)
+                if data is not None: plan.append((path, data, st)); changed[kind] += n
+        other = 0
+        for path in rotated("tracker.jsonl") + rotated("app.jsonl"):
+            if os.path.isfile(path):
+                with open(path, "rb") as f: other += sum(1 for line in f if _holds_text(line))
+        total = sum(changed.values())
+        if os.environ.get("SPEAKEASY_LOG_TEXT") == "1":
+            print("SPEAKEASY_LOG_TEXT=1 is set: new records will hold text again.")
+        if not total:
+            print("Nothing to scrub.")
+        elif not yes:
+            try: answer = input(f"Remove text from {total} records in {len(plan)} files? [y/N] ")
+            except EOFError: answer = ""
+            if answer.strip().lower() not in ("y", "yes"):
+                print("Scrub cancelled; nothing changed.", file=sys.stderr); return 1
+        for path, data, st in plan:
+            _replace_with(path, data, st)
+        event = {"ts": time.strftime("%Y-%m-%dT%H:%M:%S%z"), "command": "scrub", "files": len(plan),
+                 "records_changed": changed, "fields": fields, "other_logs_with_text": other,
+                 "ms": int((time.time() - t0) * 1000)}
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "runs.jsonl"), "a+b") as f:
+            f.seek(0, 2); sep = b""
+            if f.tell():
+                f.seek(-1, 2); sep = b"" if f.read(1) == b"\n" else b"\n"   # a torn last line stays its own line
+            f.write(sep + json.dumps(event, ensure_ascii=False).encode("utf-8") + b"\n")
+    except (OSError, ValueError, TypeError, RuntimeError) as e:
+        print(f"speakeasy: scrub failed ({type(e).__name__}); unfinished files are unchanged.", file=sys.stderr); return 1
+    if total:
+        print(f"Scrubbed {total} records in {len(plan)} files (runs: {changed['runs']}, focus: {changed['focus']}).")
+    if other:
+        print(f"Other logs with text: {other} records (not changed).")
     return 0
 

@@ -52,14 +52,21 @@ def _home_rel(p):
     h = os.path.expanduser("~")
     return "~" + p[len(h):] if p.startswith(h + os.sep) else p
 
-def set_state(state):
-    """~/.speakeasy/state.json: thinking | speaking | idle, for the menu-bar pill (no text)."""
-    if os.environ.get("SPEAKEASY_APP") != "menubar" and RUN_META.get("app") != "menubar": return
+LIVE = {"state": "idle"}        # state.json fields of the current run (live only, never copied into a log)
+
+def set_state(state=None, **live):
+    """~/.speakeasy/state.json for the menu-bar bar: state (thinking | speaking | idle) plus live fields: run_id, seq,
+    sent_i, sent_n, cue_kind, paused, label (e.g. "Figure 4"), started_ms, cloud. Cleared at idle. Written for every non-dry read, from
+    the app or the CLI, so the bar follows reads it did not start."""
+    if state == "idle": LIVE.clear(); LIVE["state"] = "idle"
+    elif state: LIVE["state"] = state
+    LIVE.update(live)
     try:
         path = os.path.join(home(), "state.json"); tmp = path + ".tmp"
-        with open(tmp, "w") as f: json.dump({"state": state, "run_id": RUN_META.get("run_id"), "t": time.time()}, f)
+        with open(tmp, "w") as f: json.dump(dict(LIVE, run_id=RUN_META.get("run_id"), t=time.time()), f)
         os.replace(tmp, path)
-    except OSError: pass
+    except OSError as e:
+        print(f"speakeasy: warning: could not write state.json: {type(e).__name__}", file=sys.stderr)
 
 LOG_MAX_BYTES = 5 * 1024 * 1024
 LOG_KEEP = 5
@@ -95,7 +102,7 @@ def log_run(rec, inp, out):
             spoke = rec.get("command") != "rewrite" and not rec.get("dry_run")
             rec["words_spoken"] = _st.words(out) if spoke else 0
             sm = (rec.get("timings") or {}).get("speak_ms")
-            rec["audio_s"] = round(sm / 1000, 1) if spoke and isinstance(sm, (int, float)) else 0
+            rec["audio_s"] = round(max(0, sm - (rec.get("paused_ms") or 0)) / 1000, 1) if spoke and isinstance(sm, (int, float)) else 0
             rec["kind"] = _st.kind_of(rec)
         if text_logging_on():
             rec["input"] = inp; rec["output"] = out

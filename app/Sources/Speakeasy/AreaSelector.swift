@@ -10,73 +10,98 @@ import Vision
 enum ScreenGeo {
     static var mainH: CGFloat { NSScreen.screens.first?.frame.height ?? 0 }
     static func toCG(_ r: NSRect) -> CGRect { CGRect(x: r.minX, y: mainH - r.maxY, width: r.width, height: r.height) }
+    static func toNS(_ r: CGRect) -> NSRect { NSRect(x: r.minX, y: mainH - r.maxY, width: r.width, height: r.height) }
 }
 
+/// One screen of the armed overlay: ink dim at 12 %, the selection as a 1 pt glacier line over 12 % ice, and the size
+/// readout in Plex Mono next to the cursor (design 6.6). It never becomes key: Esc arrives through a temporary hotkey (B3).
 final class AreaOverlayView: NSView {
     var start: NSPoint?, current: NSPoint?
-    var onDone: ((NSRect?) -> Void)?
-    let shape = CAShapeLayer()
+    var onDone: ((NSRect?, String) -> Void)?
+    var onDrag: ((NSRect) -> Void)?
+    let shape = CAShapeLayer(), readout = CATextLayer(), chip = CALayer()
     override init(frame: NSRect) {
         super.init(frame: frame)
-        wantsLayer = true; layer?.backgroundColor = NSColor.black.withAlphaComponent(0.12).cgColor
-        shape.fillColor = NSColor.systemBlue.withAlphaComponent(0.12).cgColor
-        shape.strokeColor = NSColor.systemBlue.cgColor; shape.lineWidth = 1.5; shape.lineDashPattern = [5, 3]
-        layer?.addSublayer(shape)
+        wantsLayer = true; layer?.backgroundColor = nsRGB(Hex.ink, 0.12).cgColor
+        shape.fillColor = nsRGB(Hex.ice, 0.12).cgColor
+        shape.strokeColor = nsRGB(Hex.glacier).cgColor; shape.lineWidth = 1
+        chip.backgroundColor = nsRGB(Hex.navy).cgColor; chip.cornerRadius = Radius.chip; chip.isHidden = true
+        readout.font = TType.labelMono.nsFont; readout.fontSize = TType.labelMono.size; readout.foregroundColor = nsRGB(Hex.ice).cgColor
+        readout.contentsScale = NSScreen.main?.backingScaleFactor ?? 2; readout.alignmentMode = .center
+        chip.addSublayer(readout)
+        layer?.addSublayer(shape); layer?.addSublayer(chip)
     }
     required init?(coder: NSCoder) { nil }
-    override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
-    override func resetCursorRects() { addCursorRect(bounds, cursor: .crosshair) }
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        trackingAreas.forEach(removeTrackingArea)
+        addTrackingArea(NSTrackingArea(rect: bounds, options: [.activeAlways, .cursorUpdate, .mouseMoved, .inVisibleRect], owner: self, userInfo: nil))
+    }
+    override func cursorUpdate(with event: NSEvent) { NSCursor.crosshair.set() }
+    override func mouseMoved(with event: NSEvent) { NSCursor.crosshair.set() }
     override func mouseDown(with e: NSEvent) { start = convert(e.locationInWindow, from: nil); current = start; redraw() }
     override func mouseDragged(with e: NSEvent) { current = convert(e.locationInWindow, from: nil); redraw() }
     override func mouseUp(with e: NSEvent) {
         current = convert(e.locationInWindow, from: nil)
-        guard let r = sel(), r.width >= 8, r.height >= 8, let w = window else { onDone?(nil); return }
-        onDone?(w.convertToScreen(convert(r, to: nil)))
+        guard let r = sel(), r.width >= 8, r.height >= 8, let w = window else { onDone?(nil, "tiny"); return }
+        onDone?(w.convertToScreen(convert(r, to: nil)), "read")
     }
-    override func keyDown(with e: NSEvent) { if e.keyCode == 53 { onDone?(nil) } else { super.keyDown(with: e) } }   // Esc
-    override func cancelOperation(_ sender: Any?) { onDone?(nil) }
     func sel() -> NSRect? {
         guard let a = start, let b = current else { return nil }
         return NSRect(x: min(a.x, b.x), y: min(a.y, b.y), width: abs(a.x - b.x), height: abs(a.y - b.y))
     }
-    func redraw() { shape.path = sel().map { CGPath(rect: $0, transform: nil) } }
+    func redraw() {
+        CATransaction.begin(); CATransaction.setDisableActions(true)
+        shape.path = sel().map { CGPath(rect: $0.insetBy(dx: 0.5, dy: 0.5), transform: nil) }
+        if let r = sel(), let c = current {
+            readout.string = "\(Int(r.width)) × \(Int(r.height))"
+            let w = CGFloat((readout.string as? String ?? "").count) * 7 + 12
+            chip.frame = CGRect(x: c.x + 14, y: c.y - 26, width: w, height: 18); readout.frame = chip.bounds.insetBy(dx: 0, dy: 1)
+            chip.isHidden = false
+            if let win = window { onDrag?(win.convertToScreen(convert(r, to: nil))) }
+        }
+        CATransaction.commit()
+    }
 }
 
-final class KeyPanel: NSPanel { override var canBecomeKey: Bool { true } }
+final class OverlayPanel: NSPanel {
+    override var canBecomeKey: Bool { false }
+    override var canBecomeMain: Bool { false }
+}
 
 final class AreaSelector {
     var windows: [NSWindow] = []
-    var prevApp: NSRunningApplication?
-    var monitor: Any?
+    var finish: ((NSRect?, String) -> Void)? = nil
+    var active: Bool { !windows.isEmpty }
+    var onDrag: ((CGRect) -> Void)? = nil           // the live rectangle (global top-left): the bar's collision rule 2
 
-    /// Shows the overlay; calls back with the chosen rect in global top-left (CG) coordinates, or nil when cancelled.
-    func pick(_ done: @escaping (CGRect?) -> Void) {
+    /// Shows the overlay without activating Speakeasy; calls back with the rect in global top-left (CG) coordinates and the
+    /// result (`read`, `tiny`, `cancel-esc`, `cancel-click`, `cancel-hotkey`).
+    func pick(_ done: @escaping (CGRect?, String) -> Void) {
         guard windows.isEmpty else { return }
-        prevApp = NSWorkspace.shared.frontmostApplication
         var finished = false
-        let finish: (NSRect?) -> Void = { [weak self] r in
+        finish = { [weak self] r, result in
             guard let self = self, !finished else { return }
             finished = true
-            self.windows.forEach { $0.orderOut(nil) }; self.windows = []
-            if let m = self.monitor { NSEvent.removeMonitor(m); self.monitor = nil }
-            self.prevApp?.activate()                                  // give focus back to the document before reading
-            done(r.map(ScreenGeo.toCG))
+            self.windows.forEach { $0.orderOut(nil) }; self.windows = []; self.finish = nil
+            NSCursor.arrow.set()
+            done(r.map(ScreenGeo.toCG), result)
         }
         for s in NSScreen.screens {
-            let w = KeyPanel(contentRect: s.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
+            let w = OverlayPanel(contentRect: s.frame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
             w.level = .screenSaver; w.isOpaque = false; w.backgroundColor = .clear; w.hasShadow = false
-            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; w.ignoresMouseEvents = false
-            let v = AreaOverlayView(frame: NSRect(origin: .zero, size: s.frame.size)); v.onDone = finish
+            w.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]; w.ignoresMouseEvents = false; w.hidesOnDeactivate = false
+            w.acceptsMouseMovedEvents = true; w.sharingType = .none
+            let v = AreaOverlayView(frame: NSRect(origin: .zero, size: s.frame.size))
+            v.onDone = { [weak self] r, result in self?.finish?(r, result) }
+            v.onDrag = { [weak self] r in self?.onDrag?(ScreenGeo.toCG(r)) }
             w.contentView = v; w.setFrame(s.frame, display: true)
             w.orderFrontRegardless(); windows.append(w)
         }
-        NSApp.activate(ignoringOtherApps: true)
-        let main = windows.first(where: { $0.frame.contains(NSEvent.mouseLocation) }) ?? windows.first
-        main?.makeKey(); main?.makeFirstResponder(main?.contentView)
-        monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { e in if e.keyCode == 53 { finish(nil); return nil }; return e }
         NSCursor.crosshair.set()
     }
+    func cancel(_ result: String) { finish?(nil, result) }
 
     /// The region as a CGImage, captured in memory (our own windows excluded). rect: global top-left points.
     static func capture(_ rect: CGRect, _ done: @escaping (CGImage?) -> Void) {

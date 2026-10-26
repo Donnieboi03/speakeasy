@@ -11,5 +11,6 @@ except Exception:            # pragma: no cover - missing module never breaks sp
 STOP = threading.Event()     # set by SIGTERM (stop / hotkey toggle)
 SINK = None                  # callable(sentence, tag) while streaming to TTS, else None
 FOCUS = None                 # focus.Focus while a run can show the focus box
+SPEAKER = None               # tts.Speaker of the current read (the target of the app's pause / next signals)
 DOC = None                   # document.DocJob: the source document (PDF / Markdown) read in the background
 AREA_FIT = None              # Read area on a PDF: (scale, dx, dy, rms) page -> screen from the OCR lines

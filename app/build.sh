@@ -31,6 +31,9 @@ cat > "$HELPER/Contents/Info.plist" <<HPL
 HPL
 rm -f "$TSRC"
 cp NOTICE "$APP/Contents/Resources/NOTICE"
+# the six OFL fonts (Source Serif 4, IBM Plex Sans, IBM Plex Mono) and their licence texts, registered at launch for the process
+mkdir -p "$APP/Contents/Resources/Fonts"
+cp Resources/Fonts/*.otf Resources/Fonts/OFL-*.txt "$APP/Contents/Resources/Fonts/"
 cat > "$APP/Contents/Info.plist" <<PL
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">

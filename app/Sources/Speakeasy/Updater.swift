@@ -1,5 +1,5 @@
 // Update path. Sparkle-ready: Info.plist carries SUFeedURL / SUPublicEDKey (see docs/release.md); until Sparkle
-// (MIT, sparkle-project.org) is linked, "Check for Updates…" reads the same GitHub release and opens it if newer.
+// (MIT, sparkle-project.org) is linked, "Check for updates…" reads the same GitHub release and opens it if newer.
 import AppKit
 
 enum Updater {
@@ -23,12 +23,13 @@ enum Updater {
             DispatchQueue.main.async {
                 let a = NSAlert()
                 if let t = tag, let u = page, newer(t, than: current) {
-                    a.messageText = "Speakeasy \(t) is available"; a.informativeText = "You have \(current)."
-                    a.addButton(withTitle: "Open download page"); a.addButton(withTitle: "Later")
+                    a.messageText = "Speakeasy \(t.trimmingCharacters(in: CharacterSet(charactersIn: "v"))) is available. You have \(current)."
+                    a.addButton(withTitle: "Open download page"); a.addButton(withTitle: "Not now")
                     NSApp.activate(ignoringOtherApps: true)
                     if a.runModal() == .alertFirstButtonReturn { NSWorkspace.shared.open(u) }
                 } else {
-                    a.messageText = tag == nil ? "Couldn't check for updates" : "Speakeasy is up to date (\(current))"
+                    a.messageText = tag == nil ? "Could not reach GitHub to check for updates." : "Up to date: \(current)."
+                    a.addButton(withTitle: "Close")
                     NSApp.activate(ignoringOtherApps: true); a.runModal()
                 }
             }

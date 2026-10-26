@@ -171,7 +171,8 @@ Live files (not logs; cleared at idle):
 - `state.json` gains `run_id`, `seq`, `sent_i`, `sent_n`, `cue_kind`, `paused`, `label` (for example "Figure 4"; live
   only, never copied into a log), `started_ms` (for the bar's elapsed counter).
 - New `cue.json`, written by the tracker at most 4 times a second while a cue is drawn: `{run_id, seq, rect}` in global
-  screen points. Deleted on tracker exit.
+  screen points, plus an optional `ts`. Freshness is judged by `ts`, else by the file's modification time (B1 rule 1).
+  Deleted on tracker exit.
 
 ### A4. `speakeasy stats --json` schema 2
 
@@ -309,9 +310,11 @@ release as the new Reading log (build step 3).
   (collision rule 1).
 
 Rules:
-1. **Collision with the cue.** While a read runs, if the bar's frame grown by 24 pt intersects `cue.json`'s rect (fresh
-   within 1 s), the bar slides (160 ms) to the bottom corner of the same display that is farther from the cue's centre.
-   It returns 1.5 s after the cue stops intersecting the centre spot.
+1. **Collision with the cue.** While a read runs, if the bar's frame grown by 24 pt intersects `cue.json`'s rect
+   (fresh: see below), the bar slides (160 ms) to the bottom corner of the same display that is farther from the cue's
+   centre. It returns 1.5 s after the cue stops intersecting the home spot (rule 8).
+   **Freshness of `cue.json`:** fresh when its `ts` is within 1 s of now; `ts` is optional, and when the file has no
+   `ts` key, it is fresh when the file's modification time is within 1 s of now.
 2. **Collision with the area being dragged.** While armed, the overlay's live rectangle counts as the cue.
 3. **Display.** At idle the bar is on the display that holds the pointer. While armed, preparing, reading, paused or
    in error, it is on the display holding the source window's centre (the area's centre for Read area).
@@ -324,6 +327,20 @@ Rules:
    on). Armed, preparing, reading, paused and error states still show, 8 pt above the screen's bottom edge.
 7. **Window level.** `.statusBar` normally (above documents, below menus and system alerts); above the area overlay's
    level while armed, so its hint stays visible.
+8. **Occupied home spot.** The home spot is bottom centre, or the user's remembered position (rule 4).
+   - **A remembered manual position wins:** the bar uses it as-is and this rule does not move it.
+   - Otherwise the spot is **occupied** when an on-screen window of another process, at window level ≥ `statusBar`
+     (`CGWindowListCopyWindowInfo`, `kCGWindowLayer` ≥ `kCGStatusWindowLevel`), overlaps the bar's frame at that spot.
+   - **Bar-shaped occupant** (height ≤ 80 pt and its bottom within 40 pt of `visibleFrame`'s bottom, for example
+     another app's dictation bar): the bar stacks 8 pt above it, on the same horizontal centre as the spot.
+   - **Any other occupant** (for example Wispr Flow's ~512 × 614 pt, mostly transparent overlay host): the bar never
+     stacks above it. It uses bottom left; if bottom left is occupied by a window that is not bar-shaped, bottom
+     right. Bottom left and bottom right follow the same bar-shaped stacking test. If all three spots are blocked by
+     occupants that are not bar-shaped, the bar uses bottom right anyway.
+   - Checked when the bar is created, on a display or Dock change, whenever the bar leaves `hidden`, and every 5 s while
+     `idle`. Collision rules 1 and 2 move the bar away from the resulting home spot as usual.
+   - Logged as `bar_move {reason: occupied, pos, occupants: <count of overlapping windows>, stacked: bool}` when the
+     result changes. No window titles, app names, bundle ids or pids are logged.
 
 ### B2. States
 
@@ -403,7 +420,7 @@ Every record has `ts` and `event`; `run_id` when a read is live.
 | event | Fields |
 |---|---|
 | `bar_state` | `from`, `to` (B2 names) |
-| `bar_move` | `reason`: `drag` \| `collision` \| `display` \| `fullscreen`; `pos`: `centre` \| `left` \| `right` |
+| `bar_move` | `reason`: `drag` \| `collision` \| `display` \| `fullscreen` \| `occupied`; `pos`: `centre` \| `left` \| `right`; with `occupied` also `occupants` (int, count of overlapping windows) and `stacked` (bool). No titles or app names |
 | `bar_hide` | `reason`: `hotkey` \| `hour` \| `fullscreen` \| `setting` |
 | `area` | `via`: `bar` \| `hotkey` \| `menu`; `result`: `read` \| `cancel-esc` \| `cancel-click` \| `cancel-hotkey` \| `tiny` |
 | `control` | `action`: `pause` \| `resume` \| `next` \| `stop` \| `flag`; `via`: `bar` \| `hotkey` \| `menu` |
@@ -420,7 +437,8 @@ Every record has `ts` and `event`; `run_id` when a read is live.
 | Backend exits with no audio | `error` with the run's problem if any, else "Nothing was read. The selection was empty." and no action |
 | Signal to a dead pid | Ignored; the bar goes `idle` |
 | Resume after the player died | Acts as Next sentence |
-| `cue.json` stale (over 1 s) or absent | Collision rules off for that moment; the bar stays where it is |
+| `cue.json` stale (its `ts`, or without `ts` its modification time, over 1 s old) or absent | Collision rules off for that moment; the bar stays where it is |
+| Window list unavailable (B1 rule 8) | The home spot counts as free; nothing is logged |
 | Display removed while reading | The bar moves to the display holding the pointer |
 | ⌃⌥A pressed twice quickly | Second press cancels (no second overlay) |
 | Screen Recording missing at arm | `error`: "Screen Recording is off. Read area needs it." with "Open Screen Recording settings" |
@@ -453,6 +471,19 @@ with a known selection, and a two-page PDF open in Preview.
     during a read it stays on the source window's display.
 12. **Created once.** Twenty consecutive reads create the panel once (`bar_state` from `idle` to `preparing` within
     50 ms of capture end on every read).
+13. **Occupied home spot** (B1 rule 8). A helper process (verifier fixture) opens borderless panels at window level
+    `statusBar`:
+    - a 300 × 40 pt panel at bottom centre, bottom edge on `visibleFrame`'s bottom: within 5 s the bar's frame sits
+      8 pt above it on the same horizontal centre; `bar_move {reason: occupied, pos: centre, occupants: 1,
+      stacked: true}`;
+    - a 512 × 614 pt mostly transparent panel at bottom centre: the bar moves to bottom left, never above the panel;
+      `stacked: false`;
+    - the same plus a 512 × 614 pt panel at bottom left: the bar uses bottom right;
+    - with a remembered manual position (dragged to bottom right before the helper starts, then the helper occupies
+      bottom right): the bar stays at bottom right and logs no `occupied` move;
+    - `app.jsonl` lines for these moves contain no window title, app name, bundle id or pid of the helper.
+14. **`cue.json` without `ts`.** The tracker fixture writes `cue.json` with no `ts` key: a file touched within 1 s
+    triggers collision rule 1; the same file left untouched for over 1 s does not.
 
 ## C. Design system on every surface
 
@@ -511,7 +542,7 @@ face.
 | 1 | Tokens, fonts and copy on today's surfaces: pill restyled (navy, radius 4, no shadow, no pulse, elapsed counter), stats window type, onboarding and cloud copy | `app/` only | C5 checks 1, 2, 4 pass; behaviour unchanged |
 | 2 | New log fields: `end`, sentence counts, `fig_ids`, `tts_fallback`; tracker `cue_result`, `correction.seq`, `cue.json`; live-state fields | backend, tracker | A7 checks 5, 6, 10; old stats output unchanged |
 | 3 | Stats schema 2, the document library (`library.json`, names on by default), the Reading log window, the menu line "Today: 9 reads, 14 min", problems with live checks | `stats.py`, `observe.py`, `document.py`, `app/` | A7 checks 1 to 4, 7, 8 |
-| 4 | The bar, first version: all B2 states except `paused`; Stop only while reading; placement and collision; full-screen; hide; no activation in Read area; selection capture through ScreenCaptureKit; `app.jsonl` | `app/` | B9 checks 1 to 7, 9 to 12 |
+| 4 | The bar, first version: all B2 states except `paused`; Stop only while reading; placement and collision; full-screen; hide; no activation in Read area; selection capture through ScreenCaptureKit; `app.jsonl` | `app/` | B9 checks 1 to 7, 9 to 14 |
 | 5 | Pause, Next, Wrong spot: signals, temporary hotkeys, `user_flag`; `highlight.flagged` in the Reading log | backend `tts.py` / `speakeasy.py`, `app/` | B9 check 8; A7 check 1 with flags |
 | 6 | On-screen cues in the design: colours, margin tick, ember oval, dark-page rule, area overlay readout | `tracker.swift`, `focus.py`, `AreaSelector.swift` | C5 check 5; A7 check 10 |
 | 7 | Settings window (hotkeys, bar position, full-screen rule, highlight, "Show document names"), Permissions and Cloud layouts, status glyph | `app/` | C5 checks 3, 6, 7 |

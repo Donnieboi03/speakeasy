@@ -16,19 +16,32 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 | `focus.py` | Maps each spoken sentence to source lines / figure parts and writes focus events (`focus.json`, `focus.jsonl`) |
 | `sentence_map.py` | The selection's source sentences (ids, char spans, screen and page line rects) built before speech; forward-only alignment of each spoken chunk to its source span |
 | `textfold.py` | The shared text fold (match key with offsets, fold and match tokens) every text comparison uses; `tracker.swift` carries the same steps |
-| `document.py` | Reads the source PDF / Markdown in the background, figure labels for the prompt, PDF text for Read area |
+| `document.py` | Reads the source PDF / Markdown in the background, figure labels for the prompt, PDF text for Read area, the document library (`library.json`) |
 | `grounding.py` | Figure-part grounding: the Set-of-Mark picker queue (one letter pick at a time, deadline, breakers). The local `/api/chat` always answers first; with `SPEAKEASY_GROUND=openrouter` the same marked crop goes to OpenRouter only after the local picker is unavailable or gives no logprobs |
 | `partpick.py` | Set-of-Mark picker pieces: candidate rects of a panel / figure scope, the marked crop (`partpick.py render`, run in the doc venv), the request body and the letter decision from `top_logprobs` (`PICK_MIN_P`) |
 | `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv); the figure > panel > part hierarchy (labels-below and gutter panels, text parts, callouts), hairline figures and callout references in speech |
 | `pdfpage.py` | pypdfium2 page text and rendering, imported by sibling path from doc-venv subprocesses |
 | `layoutdet.py` | PDF layout detector (PP-DocLayout-S on onnxruntime, inside the doc-venv parse only): model lookup and sha256 check, caption pairing, snapping, detector paragraphs, `layout_*` events; `layoutdet.py fetch` is the installers' model download |
 | `provider.py` | Which endpoint a purpose (`llm`, `ground`) uses: local or OpenRouter; Keychain key lookup |
-| `selog.py` | Paths, config loading, the run log (`runs.jsonl`), log rotation, the pill state file |
-| `observe.py` | Capture cropping / keeping, memory and Ollama status, `speakeasy last` / `stats` output |
-| `stats.py` | Usage counts from `runs.jsonl` (`speakeasy stats --json`) |
+| `selog.py` | Paths, config loading, the run log (`runs.jsonl`), log rotation, the live state file for the bar (`state.json`) |
+| `observe.py` | Capture cropping / keeping, memory and Ollama status, `speakeasy last` / `stats` output, `speakeasy logs --scrub` |
+| `stats.py` | The Reading log's metrics, schema 2 (`speakeasy stats --json`), from a whitelist of keys in `runs.jsonl`, `tracker.jsonl`, `app.jsonl` and names from `library.json` |
 | `highlight.py` | `speakeasy highlight SRC DST`: crops a screenshot to the selection-highlight pixels |
-| `tracker.swift` | The focus tracker (`speakeasy-track`): native panel, AX / OCR following |
+| `tracker.swift` | The focus tracker (`speakeasy-track`): native panel, AX / OCR following, the cue tokens and margin tick, per-show `cue_result`, `cue.json`; `--render-cue` draws one cue offscreen |
 | `install.sh`, `speakeasy` | Installer (copies every `src/*.py` into `~/.speakeasy/bin`) and the CLI launcher |
+
+## Menu-bar app (`app/Sources/Speakeasy`)
+
+| File | Role |
+|---|---|
+| `App.swift` | Entry point, menu, hotkeys (temporary ones only while armed / reading), `app.jsonl` writer, windows |
+| `Bar.swift` | The bar: one non-activating panel created once; states, placement, collision, hiding |
+| `Reader.swift` | Selection and area capture (ScreenCaptureKit, the app excluded), backend and tracker launch, pause / next signals |
+| `AreaSelector.swift` | The Read area overlay (never activates the app) and in-memory captures |
+| `Stats.swift` | The Reading log (schema 2), problems and their live checks |
+| `Settings.swift`, `Cloud.swift`, `Permissions.swift`, `Updater.swift` | Settings, OpenRouter, onboarding, update check |
+| `Tokens.swift` | Every colour, font, size, spacing and radius of `docs/design.md`; the only file with colour values |
+| `Snapshot.swift` | `--snapshot <surface>:<state>` and `--self-check fonts` |
 
 ## Data flow
 
@@ -49,9 +62,9 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 
 | Component | Files |
 |---|---|
-| App | `~/.speakeasy/config` (menu toggles), `~/.speakeasy/tracker.pid`; `/tmp/speakeasy_cap_sel.png`, `/tmp/speakeasy_cap_lines.json`, `/tmp/speakeasy_cap_doc.json` (capture, line bounds, document hint for one run) |
-| Backend | `logs/runs.jsonl` (one record per run), `logs/focus.jsonl`, `focus.json`, `state.json` (pill state), `speak.pid` while speaking, `last_capture.png` (unless `SPEAKEASY_KEEP_CAPTURE=0`), `cache/doc/` (parsed documents); temp files `speakeasy_cap_*` (crops, grounding crops) and `speakeasy_*.wav` (Kokoro audio), removed after the run; `speakeasy_doc_*` (downloaded PDFs, removed after a day) |
-| Tracker | `logs/tracker.jsonl` only |
+| App | `~/.speakeasy/config` (menu toggles, settings), `~/.speakeasy/tracker.pid`, `logs/app.jsonl` (bar, area, control, flag, problem and font events; no text), `library.json` (deleted / emptied when *Show document names* is switched); `/tmp/speakeasy_cap_sel.png`, `/tmp/speakeasy_cap_lines.json`, `/tmp/speakeasy_cap_doc.json` (capture, line bounds, document hint for one run) |
+| Backend | `logs/runs.jsonl` (one record per run), `logs/focus.jsonl`, `focus.json`, `state.json` (live state for the bar: state, run_id, seq, sent_i, sent_n, cue_kind, paused, label, started_ms, cloud; cleared at idle), `speak.pid` while speaking, `library.json` (document names and paths, mode 0600, never a log), `last_capture.png` (unless `SPEAKEASY_KEEP_CAPTURE=0`), `cache/doc/` (parsed documents); temp files `speakeasy_cap_*` (crops, grounding crops) and `speakeasy_*.wav` (Kokoro audio), removed after the run; `speakeasy_doc_*` (downloaded PDFs, removed after a day) |
+| Tracker | `logs/tracker.jsonl`, `cue.json` (the drawn cue's rect for the bar's collision rule, at most 4 writes a second, deleted on exit) |
 | `install.sh` | `~/.speakeasy/bin/*`, `config` defaults, `logs/tracker_build.log`, `logs/app_build.log`, the `com.speakeasy.tts` LaunchAgent (its log: `logs/tts-server.log`) |
 
 Paths are relative to `~/.speakeasy` unless shown otherwise. Logs rotate at 5 MB (5 kept).
