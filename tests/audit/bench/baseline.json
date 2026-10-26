@@ -1,9 +1,9 @@
 {
  "schema": "speakeasy-bench-baseline/1",
  "set": "public",
- "recorded_at": "2026-10-26T08:58:24+00:00",
- "commit": "7004d6ee712a968da5355d4e587077d896ec0efb",
- "dirty": true,
+ "recorded_at": "2026-10-26T09:51:28+00:00",
+ "commit": "0c30faaf6293e6c9abfafdf9b9484b1e39ffcee8",
+ "dirty": false,
  "config": {
   "box_iou_hit": 0.75,
   "box_iou_pr": 0.5,
@@ -44,8 +44,8 @@
    "precision": 66.13
   },
   "speed": {
-   "p50": 31,
-   "p95": 48
+   "p50": 40,
+   "p95": 58
   }
  },
  "detail": {
