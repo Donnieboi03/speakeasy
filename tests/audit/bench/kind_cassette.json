@@ -62,7 +62,7 @@
   }
  },
  "header": {
-  "commit": "ac83185038cb9026d947d516adbd4be5825b11d9",
+  "commit": "c795a1715bed18e10802721d23ac30039958a582",
   "figcls_model": "docling_figure_classifier_v2_5.onnx",
   "model": "qwen3-vl:4b-instruct",
   "model_digest": "84f7ed8042fa7cdbd902f7dcb7d0370e032095047cc3244179f263b77b5bc318",
@@ -70,7 +70,7 @@
   "pillow": "13.0.0",
   "prompt_sha": "8bb31d0630f7b6ef43ccad3872f057cc3c419449e9eae5b4b43829e80dc2ac1a",
   "pypdfium2": "5.14.0",
-  "recorded_at": "2026-10-27T02:52:42Z",
-  "src_sha": "3f46311a29328cd9d75ebb0dd9fa8daa71036725dd5be8fa8ca8aeb9bdc10efc"
+  "recorded_at": "2026-10-27T05:38:52Z",
+  "src_sha": "7a63f9ec50b67bd6487983696c2c1715be31e6668fd96b1d3c58be77abe1f231"
  }
 }

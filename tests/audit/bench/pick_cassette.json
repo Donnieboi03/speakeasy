@@ -831,39 +831,39 @@
   "d310f5b7f203286e623ca0baebc9a4c75a9e6af13e77d2744a15dcb455a38f60": {
    "top_logprobs": [
     {
-     "logprob": -0.086081,
+     "logprob": -0.084834,
      "token": "A"
     },
     {
-     "logprob": -9.238024,
+     "logprob": -9.221773,
      "token": "C"
     },
     {
-     "logprob": -13.344809,
+     "logprob": -13.355385,
      "token": "B"
     },
     {
-     "logprob": -16.565935,
+     "logprob": -16.591909,
      "token": "D"
     },
     {
-     "logprob": -19.490438,
+     "logprob": -19.477983,
      "token": " A"
     },
     {
-     "logprob": -19.81105,
+     "logprob": -19.803587,
      "token": "O"
     },
     {
-     "logprob": -20.464701,
+     "logprob": -20.490545,
      "token": "E"
     },
     {
-     "logprob": -21.207972,
+     "logprob": -21.208492,
      "token": "I"
     },
     {
-     "logprob": -2.496399,
+     "logprob": -2.510413,
      "token": "<other>"
     }
    ]
@@ -1102,13 +1102,13 @@
   }
  },
  "header": {
-  "commit": "91166c478bc1a8b6512caf52070ca66e7ac30b17",
+  "commit": "c795a1715bed18e10802721d23ac30039958a582",
   "model": "qwen3-vl:4b-instruct",
   "model_digest": "84f7ed8042fa7cdbd902f7dcb7d0370e032095047cc3244179f263b77b5bc318",
   "ollama_version": "0.40.10",
   "pillow": "13.0.0",
   "pypdfium2": "5.14.0",
-  "recorded_at": "2026-10-26T16:24:19Z",
-  "src_sha": "2b598eaa75d601d0c0fc03d7caa507ea334aabdc1a835fee73c851b112e135c3"
+  "recorded_at": "2026-10-27T05:39:14Z",
+  "src_sha": "7a63f9ec50b67bd6487983696c2c1715be31e6668fd96b1d3c58be77abe1f231"
  }
 }
