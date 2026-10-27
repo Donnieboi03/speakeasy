@@ -1381,7 +1381,8 @@ struct Tracker {
                 let bandRects = (ev["rects"] as? [[Double]] ?? []).compactMap { $0.count == 4 ? CGRect(x: $0[0], y: $0[1], width: $0[2], height: $0[3]) : nil }
                 let docLines = ((ev["doc"] as? [String: Any])?["lines"] as? [[Double]] ?? []).filter { $0.count == 4 }
                 let sid: Any = ev["sentence_id"] ?? NSNull()
-                await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: meta, rects: bandRects, docLines: docLines, sentenceId: sid) }
+                let eventMeta = meta
+                await MainActor.run { Live.shared.event(seq: sq, rect: rr, range: rg, srcLines: sl, color: col, opacity: op, ellipse: ell, isText: isText && !cueFig, nlines: nl, ref: drawOn ? ref : nil, figure: cueFig, drawOn: drawOn, cueKind: ck, header: hdr, meta: eventMeta, rects: bandRects, docLines: docLines, sentenceId: sid) }
             }
             if !showing && lastSeq >= 0 { await MainActor.run { Live.shared.endShow(); if Live.shared.rect != nil { Live.shared.hideTrigger = ("speech-finished", now()) }; Live.shared.rect = nil; Live.shared.apply() } }
             var out: [String: Any] = ["seq": seq, "focus_pid": epid, "window_id": Int(wid)]
