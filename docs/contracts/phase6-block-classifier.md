@@ -1370,3 +1370,16 @@ These rulings win over Amendments 3 and 4 where they differ.
 - the key `reason` is **optional**: it is present only when `src` is `unavailable` or `skipped` (`over-cap`);
 - consumers (scorer, `doc_parse.layout2`, tests) treat a missing `reason` as `null`;
 - all other A3.4 fields are unchanged.
+
+## Final audit (2026-10-26)
+
+**As shipped (f2126a9):** `SPEAKEASY_BLOCKCLS` on, the classifier and the lexicon on; heron on (`SPEAKEASY_LAYOUT2` on)
+under A3.6 item 2, with the hidden gap set at the recorded ceiling; stage C off (`SPEAKEASY_BLOCKCLS_VLM=off`, A2.2). Public
+gap gate: `kind.score` 91.30, precision 100, wrong_type 0, decoys 6/6; the existing families equal B5'.
+
+- Gap baselines are labelled by classifier state and commit (`B6@f2126a9`, `B6-pre@<sha>` with the classifier off).
+- The blocks suite's B section replays with `--layout2-model` (A4.4) and accepts the A3.6 item 2 ceiling for the hidden
+  gap gate.
+- Open: on `arx-2402.10153` page 3 with no layout model, the lexicon caption `TABLE I`'s caption block lists a 0.9 pt glyph
+  that lies 1 pt outside its `caption_bbox` (`tests/audit/logging`
+  `D_pub_arx-2402.10153_caption_block_lines_inside_caption_bbox`).

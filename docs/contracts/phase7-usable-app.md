@@ -569,3 +569,10 @@ Phase 6 starts after all eight steps have merged (section 1).
 4. **Old text-bearing records:** scrubbed by a required build step (A5.4, step 8): in place, no plain-text backup,
    idempotent, one count-only event per run.
 5. **Order:** Phase 7 before Phase 6, starting from the commit that lands Phase 5 on `main` (section 1).
+
+## 5. Final audit (2026-10-26)
+
+- `bar_move` logs the position the bar is actually placed at. After a collision dodge returned while the home spot was
+  occupied, it used to log `centre` while the bar sat at the rule 8 alternative. Placement is unchanged.
+- The readability and logging suites now pin A3's runs fields, the show `fig_id`, `llm_error_class` (A2 model-down) and
+  the schema 2 CLI (A4).

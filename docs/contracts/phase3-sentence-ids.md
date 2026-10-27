@@ -370,3 +370,10 @@ key character maps to the hyphen or the break.
 - Part-oval accuracy (`no_oval`, `centre_outside`, hidden `wrong_page`).
 - Markdown document line mapping beyond the screen-rect path.
 - Vision runs, Read-area OCR and VLM grounding.
+
+## Final audit (2026-10-26)
+
+- The hidden Phase 3 suite is promoted to `tests/audit/sentences/run_phase3.py` (public data, file-relative defaults).
+- `tests/audit/readability` `E_on_texts_equal_baseline` was a pre-existing failure since this phase. It is the intended
+  C.4 rule 3 / E behaviour: a chunk that names no table row gets the whole-block band (`method: block`, every selection
+  line) where 890faa4 pinned it to the last row. The check is pinned to that rule.

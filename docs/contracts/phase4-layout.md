@@ -430,3 +430,16 @@ merged tree, under an interpreter with the model.
 - Creating figures or tables without a `Figure N` / `Table N` caption.
 - GPU or CoreML execution providers.
 - Fetching the model at run time; only the installers download.
+
+## Final audit (2026-10-26)
+
+- The hidden Phase 4 suite is promoted to `tests/audit/layout/run_phase4.py` with the public 890faa4 bench baseline
+  (`tests/audit/layout/b4/baseline-public.json`). Its pins for later phases: Phase 6 `kind_src`, labels as printed and
+  lexicon-added tables; the install and bundle scenarios start with the Phase 6 models in place; Phase 5's on-page
+  drawing clusters keep a fallback figure inside the page (4.7); the 4.4 column rule may change an in-column table
+  body's `src`.
+- The five pre-existing `tests/audit/logging` failures are 4.4 behaviour and are pinned there: a caption-only table keeps
+  only its caption-only edge, twocol Table 2 stays in its column so 4.5 has nothing to split, and fig5 Table 1 row numbers
+  no longer count the other column's prose.
+- boxacc's Table 1 truth now excludes the caption (rules and cells). Open: the detector's Table 1 box ends at the last row
+  and misses the bottom rule by 6.3 pt (10 to 13 screen pt against the harness's 8 pt tolerance).

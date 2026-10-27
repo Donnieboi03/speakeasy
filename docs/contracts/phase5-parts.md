@@ -1028,3 +1028,11 @@ fixed or re-pinned with a reason.
 
 While the picker is default-off (Amendment 5), the 9.3 `parts_with_pick` precision check is **report-only**: it is
 computed and logged, and it **cannot FAIL** acceptance.
+
+## Final audit (2026-10-26)
+
+- A6.5: the known baseline failures are resolved as pins (they are intended Phase 3 and Phase 4 behaviour; see the final
+  audit notes in those contracts). No check is excluded any more.
+- A6.4 is still open: a Read-area drag over a label-dominated figure (boxacc's Fig. 5 area cases) gets `area_pdf: no-fit`
+  and screen-only cues; the label-anchored area fit was not built in Phase 6 or 7.
+- The public pick cassette is re-recorded for the current `src/` (same 25 request keys).
