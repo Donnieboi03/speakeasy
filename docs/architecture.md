@@ -19,7 +19,13 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 | `document.py` | Reads the source PDF / Markdown in the background, figure labels for the prompt, PDF text for Read area, the document library (`library.json`) |
 | `grounding.py` | Figure-part grounding: the Set-of-Mark picker queue (one letter pick at a time, deadline, breakers). The local `/api/chat` always answers first; with `SPEAKEASY_GROUND=openrouter` the same marked crop goes to OpenRouter only after the local picker is unavailable or gives no logprobs |
 | `partpick.py` | Set-of-Mark picker pieces: candidate rects of a panel / figure scope, the marked crop (`partpick.py render`, run in the doc venv), the request body and the letter decision from `top_logprobs` (`PICK_MIN_P`) |
-| `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv); the figure > panel > part hierarchy (labels-below and gutter panels, text parts, callouts), hairline figures and callout references in speech |
+| `docmap.py` | Document parsing entry point (also run by path inside the doc venv: `docmap.py parse-pdf`): the parse cache, `parse_pdf` and its blocks / reading order, Markdown, loading and the kind-sidecar merge, file resolution, page matching and page fits. Re-exports every name of the six modules below, so callers keep using `docmap.<name>` |
+| `doccaps.py` | Caption vocabulary: the standard caption regexes, panel and figure-reference regexes, the Phase 6 caption lexicon (`caption_info`) |
+| `docgeom.py` | Shared helpers of the docmap modules: page rectangles (union, overlap, inside, area, clip, distances, reading order), match tokens, the tracker binary path |
+| `figparts.py` | The figure > panel > part hierarchy at parse time: (a)/(b), labels-below and gutter panels, figure objects and OCR labels, numbered callouts and leader lines, hairline and detector-substitute figures, a label's part neighbourhood |
+| `doctables.py` | Tables: parse-time cell rows and the layout cue for an ambiguous caption noun, image-table rows, read-time table rows and row matching |
+| `doctyped.py` | Phase 6 typed blocks in the parse: in-box and lexicon captions, typed pairing, spanning and shared bodies, uncaptioned figures and tables, the second detector on gap pages, the caption OCR scan |
+| `docrefs.py` | Sentence references: which figure, panel, callout, object or device a spoken sentence names (`find_ref`, `callout_ref`, `names_object`, `ground_label`), the prompt's figure labels |
 | `pdfpage.py` | pypdfium2 page text and rendering, imported by sibling path from doc-venv subprocesses |
 | `layoutdet.py` | PDF layout detector (PP-DocLayout-S on onnxruntime, inside the doc-venv parse only): model lookup and sha256 check, caption pairing, snapping, detector paragraphs, `layout_*` events; `layoutdet.py fetch` is the installers' model download |
 | `blockcls.py` | Block classifier (Phase 6, inside the doc venv): Docling DocumentFigureClassifier-v2.5 on uncaptioned detector boxes (model lookup and sha256 check, routing), the candidate filter, the OCR helper glue (`speakeasy-track ocr`), the stage C kind job (`blockcls.py job`, sidecar `cache/doc/<key>.kinds.json`, `logs/blockcls.jsonl`) and Read-area capture typing (`blockcls.py capture`); on gap pages (router R1-R3) Docling layout heron as a second detector and the ink-region fallback; `blockcls.py fetch` / `fetch-layout2` are the installers' model downloads |
@@ -75,6 +81,7 @@ Paths are relative to `~/.speakeasy` unless shown otherwise. Logs rotate at 5 MB
 Every backend module is a flat file in `src/` (no packages). The backend runs as `python3 src/speakeasy.py`, from
 `~/.speakeasy/bin`, or from `Speakeasy.app/Contents/Resources/backend`. Each puts its own directory on `sys.path`. The
 doc-venv subprocesses import `docmap` / `pdfpage` the same way (`sys.path.insert(0, <src dir>)`), so those two keep their
-names and stay importable on their own. `install.sh` and `app/bundle_python.sh` copy every `src/*.py`, so a new module
+names and stay importable on their own; docmap's sibling modules (`doccaps`, `docgeom`, `figparts`, `doctables`, `doctyped`,
+`docrefs`) sit in the same directory and never import `docmap` back. `install.sh` and `app/bundle_python.sh` copy every `src/*.py`, so a new module
 needs no installer edit. Shared state lives only in `speakeasy_state.py`: modules read and assign `state.FOCUS`, never a
 copied name. Module names must not shadow a stdlib module or an installed package (macOS file names are case-insensitive).
