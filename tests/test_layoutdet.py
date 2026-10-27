@@ -1,16 +1,16 @@
 """Layout detector fallbacks, events and block invariants (docs/contracts/phase4-layout.md sections 4.7, 5, 6).
 Run under the doc venv (pypdfium2 + onnxruntime + numpy) with a verified model copy:
-    SPEAKEASY_LAYOUT_MODEL=/tmp/pp_doclayout_s.onnx ~/.speakeasy/tts-venv/bin/python tests/test_layoutdet.py
-The no-onnxruntime check also needs an interpreter with pypdfium2 but without onnxruntime (NO_ORT_PYTHON, default
-/tmp/se-testvenv/bin/python). Every parse runs in a temp SPEAKEASY_HOME, never ~/.speakeasy."""
+    ~/.speakeasy/tts-venv/bin/python tests/test_layoutdet.py   (model: SPEAKEASY_LAYOUT_MODEL, else ~/.speakeasy/models, read-only)
+The no-onnxruntime and reportlab checks also need an interpreter with pypdfium2, Pillow and reportlab but without onnxruntime
+(NO_ORT_PYTHON); they skip when it is unset. Every parse runs in a temp SPEAKEASY_HOME, never ~/.speakeasy."""
 import json, os, shutil, subprocess, sys, tempfile
 REPO = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
 SRC = os.path.join(REPO, "src")
 sys.path.insert(0, SRC)
 import layoutdet
 
-MODEL = os.environ.get("SPEAKEASY_LAYOUT_MODEL") or "/tmp/pp_doclayout_s.onnx"
-NO_ORT_PYTHON = os.environ.get("NO_ORT_PYTHON", "/tmp/se-testvenv/bin/python")
+MODEL = os.environ.get("SPEAKEASY_LAYOUT_MODEL") or os.path.expanduser("~/.speakeasy/models/pp_doclayout_s.onnx")
+NO_ORT_PYTHON = os.environ.get("NO_ORT_PYTHON", "")
 FIXTURES = os.path.join(REPO, "tests", "audit", "bench", "fixtures", "public")
 DOCS = sorted(d for d in os.listdir(FIXTURES) if os.path.isdir(os.path.join(FIXTURES, d)))
 TMP = tempfile.mkdtemp(prefix="se_layout_test_")

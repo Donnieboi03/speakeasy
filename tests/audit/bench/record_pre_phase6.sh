@@ -13,14 +13,14 @@
 #   4. B6-pre (12.1 item 3): this branch's gap harness against <ref>'s app code (--app-repo), --family gap --set all, determinism
 #      check, recorded into tests/audit/bench/baseline-gap.json (commit on phase6-bench) and <holdout>/gap/baseline.json;
 #   5. removes the temporary worktree.
-# Env: DOC_PYTHON (default ~/.speakeasy/tts-venv/bin/python, read-only), LAYOUT_MODEL (default /tmp/pp_doclayout_s.onnx),
-#      SPEAKEASY_HOLDOUT (default ~/speakeasy-holdout/bench), OUT_DIR (default ~/speakeasy-holdout/phase6/b5prime), MAIN_REPO.
+# Env: DOC_PYTHON (default ~/.speakeasy/tts-venv/bin/python, read-only), LAYOUT_MODEL (default ~/.speakeasy/models/pp_doclayout_s.onnx, read-only),
+#      SPEAKEASY_HOLDOUT (default ~/speakeasy-holdout/bench), OUT_DIR (default ~/speakeasy-holdout/phase6/b5prime), MAIN_REPO (default this repo).
 set -euo pipefail
 REF="${1:?usage: record_pre_phase6.sh <post-Phase-7 main commit>}"
 P6="$(cd "$(dirname "$0")/../../.." && pwd)"
-MAIN_REPO="${MAIN_REPO:-/Users/donnieb/Desktop/Code/speakeasy}"
+MAIN_REPO="${MAIN_REPO:-$P6}"
 DOCPY="${DOC_PYTHON:-$HOME/.speakeasy/tts-venv/bin/python}"
-LAYOUT="${LAYOUT_MODEL:-/tmp/pp_doclayout_s.onnx}"
+LAYOUT="${LAYOUT_MODEL:-$HOME/.speakeasy/models/pp_doclayout_s.onnx}"
 HOLD="${SPEAKEASY_HOLDOUT:-$HOME/speakeasy-holdout/bench}"
 OUT="${OUT_DIR:-$HOME/speakeasy-holdout/phase6/b5prime}"
 [ -f "$LAYOUT" ] || { echo "layout model not found: $LAYOUT" >&2; exit 2; }

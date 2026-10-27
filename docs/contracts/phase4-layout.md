@@ -396,7 +396,7 @@ in section 5.
   - blocks identical to a run with `SPEAKEASY_LAYOUT=off`.
   
   Use `SPEAKEASY_LAYOUT=off`, a missing override path, a corrupted copy, an interpreter without onnxruntime (e.g.
-  `/tmp/se-testvenv`), and a model file that is not ONNX but has the patched expected hash (`load-failed`), or a mocked
+  a plain venv with pypdfium2), and a model file that is not ONNX but has the patched expected hash (`load-failed`), or a mocked
   session.
 - An `inference-failed` page falls back alone while its neighbours keep `src: detector`.
 

@@ -727,8 +727,8 @@ def test_layout2_model_env_passthrough():
     os.environ["SPEAKEASY_LAYOUT2_MODEL"] = "/caller/heron.onnx"; os.environ["SPEAKEASY_LAYOUT2"] = "off"
     try:
         g = e.env("h", "t"); assert "SPEAKEASY_LAYOUT2_MODEL" not in g and "SPEAKEASY_LAYOUT2" not in g, g           # the scrub drops the caller's values
-        e.layout2_model = "/tmp/p6models/docling_layout_heron.onnx"
-        assert e.env("h", "t")["SPEAKEASY_LAYOUT2_MODEL"] == "/tmp/p6models/docling_layout_heron.onnx"
+        e.layout2_model = "/opt/models/docling_layout_heron.onnx"
+        assert e.env("h", "t")["SPEAKEASY_LAYOUT2_MODEL"] == "/opt/models/docling_layout_heron.onnx"
     finally: os.environ.pop("SPEAKEASY_LAYOUT2_MODEL"); os.environ.pop("SPEAKEASY_LAYOUT2")
 
 
