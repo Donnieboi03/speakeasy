@@ -1,8 +1,8 @@
 {
  "schema": "speakeasy-bench-baseline/1",
  "set": "public",
- "recorded_at": "2026-10-26T22:30:40+00:00",
- "commit": "f519b5313fc4188719420a790b467bcd43ba3d3a",
+ "recorded_at": "2026-10-27T03:29:34+00:00",
+ "commit": "f2126a914334222766c7f130f1c2ee8fc4aafa99",
  "dirty": false,
  "config": {
   "box_iou_hit": 0.75,
@@ -31,7 +31,8 @@
   "pdfplumber": null,
   "onnxruntime": "1.31.0",
   "pillow": "13.0.0",
-  "layout_model": "pp-doclayout-s/33688dbee1c2"
+  "layout_model": "pp-doclayout-s/33688dbee1c2",
+  "layout2_model": "docling-heron/59c81a3a2923"
  },
  "metrics": {
   "boxes": {
@@ -47,8 +48,8 @@
    "precision": 93.1
   },
   "speed": {
-   "p50": 46,
-   "p95": 69
+   "p50": 52,
+   "p95": 75
   }
  },
  "detail": {
