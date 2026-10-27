@@ -5,8 +5,8 @@ Defaults: ~/.speakeasy/last_capture.png and last log line. Reports captured rect
 Also audits labels and the Phase 2 log fields for document text (`label_audit`; `PRIVACY_LEAK` when anything is found):
 without SPEAKEASY_LOG_TEXT=1 every focus-log / live-file / tracker-draw label must be null or match LABEL_RE, and the
 Phase 2 fields (sent, score, runner_up, doc.target_src, doc.split_from, first_focus_ms, doc_ready_ms, doc_parse,
-ground_miss_reasons) and the Phase 4 layout fields (doc_parse.layout, layout_events) hold numbers, enums, labels and the
-detector version hash only; Phase 5 part_pick focus records and runs part_picks hold ids, numbers, enums and page geometry
+ground_miss_reasons), the Phase 4 layout fields (doc_parse.layout, layout_events) and the Phase 6 doc_parse fields
+(kind_src, kinds, layout2) hold numbers, enums, labels and the detector version hash only; Phase 5 part_pick focus records and runs part_picks hold ids, numbers, enums and page geometry
 only, whatever SPEAKEASY_LOG_TEXT is, and no speakeasy_cap_pick_* crop may be left in TMPDIR. Offending values are reported
 by position, never printed."""
 import json, os, re, sys, argparse
@@ -97,10 +97,25 @@ def _layout_event_ok(e):
         return set(e) == {"event", "reason", "error", "detector_version", "page"} and e["reason"] in LAYOUT_REASONS and \
             (e["error"] is None or (isinstance(e["error"], str) and ERROR_CLASS_RE.match(e["error"]))) and (e["page"] is None or _int(e["page"]))
     return False
+KIND_SRC = {"caption", "lexicon", "classifier", "vlm"}
+KINDS_SKIPPED = {"over-cap", "duplicate", "container", "area-no-vlm"}
+def _counts_by(v, keys): return isinstance(v, dict) and set(v) <= keys and all(_int(x) for x in v.values())
+def _kinds_ok(v):
+    """doc_parse.kinds (phase6-block-classifier.md 9.1 / 9.3): the page's pages[].kinds, counts and enums only."""
+    if not isinstance(v, dict) or not set(v) <= {"candidates", "accepted", "routed", "rejected", "skipped", "ms", "no_text", "ocr"}: return False
+    return all(_int(v.get(k, 0)) for k in ("candidates", "routed", "rejected", "ms")) and _counts_by(v.get("accepted", {}), {"figure", "table"}) and \
+        _counts_by(v.get("skipped", {}), KINDS_SKIPPED) and isinstance(v.get("no_text", False), bool) and v.get("ocr", "ok") in ("ok", "unavailable")
+def _layout2_ok(v):
+    """doc_parse.layout2 (phase6 Amendment 3, A5.4): the page's pages[].layout2, counts and enums only."""
+    if not isinstance(v, dict) or not set(v) <= {"routed", "by", "src", "ms", "boxes", "added", "structural", "reason", "skip"}: return False
+    return isinstance(v.get("routed", False), bool) and isinstance(v.get("by", []), list) and set(v.get("by", [])) <= {"R1", "R2", "R3"} and \
+        v.get("src") in (None, "heron", "skipped", "unavailable") and all(_int(v.get(k, 0)) for k in ("ms", "added", "structural")) and \
+        _counts_by(v.get("boxes", {}), {"figure", "table"}) and v.get("reason") in ({None} | LAYOUT_REASONS) and v.get("skip") in (None, "over-cap")
 def _doc_parse_ok(v):
     if not isinstance(v, dict): return False
-    rest = {k: x for k, x in v.items() if k != "layout"}
-    return _counts_only(rest) and ("layout" not in v or _page_layout_ok(v["layout"]))
+    rest = {k: x for k, x in v.items() if k not in ("layout", "kind_src", "kinds", "layout2")}
+    return _counts_only(rest) and ("layout" not in v or _page_layout_ok(v["layout"])) and ("kind_src" not in v or _counts_by(v["kind_src"], KIND_SRC)) and \
+        ("kinds" not in v or _kinds_ok(v["kinds"])) and ("layout2" not in v or _layout2_ok(v["layout2"]))
 def label_audit(runs_log):
     logs = os.path.dirname(runs_log); fl = a.focus_log or os.path.join(logs, "focus.jsonl"); tl = a.tracker_log or os.path.join(logs, "tracker.jsonl")
     live = a.live or os.path.join(os.path.dirname(logs), "focus.json")

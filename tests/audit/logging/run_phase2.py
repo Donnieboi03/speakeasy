@@ -53,6 +53,20 @@ def p2_redact(label):
     m = re.match(r"^((?:Figure|Table) \d+[a-h]?(?: row \d+)?)(?::.*?)?( \(grounded\))?$", str(label), re.S)
     return (m.group(1) + (m.group(2) or "")) if m and F_LABEL_RE.match(m.group(1) + (m.group(2) or "")) else None
 LABEL_RE = re.compile(r"^(Figure|Table) \d+$")
+# Phase 6 (phase6-block-classifier.md 4.2, 9.1): block labels keep "Figure|Table <number as printed>" (Table IV, Figure S2,
+# Figure 3.2); uncaptioned items are "Figure|Table U<page>-<k>"
+P6_LABEL_RE = re.compile(r"^(Figure|Table) ((?:S|[A-Z]\.)?\d+(?:[.\-]\d+)?[a-h]?|[IVXL]+|U\d+-\d+)$")
+# 9.1: figures gain these keys, figure/table blocks gain kind_src; the parse gains blockcls, blockcls_events and (A5.4) layout2,
+# pages gain kinds and layout2; 9.3: runs doc_parse gains kind_src (figures by kind_src), kinds and layout2
+P6_FIG = {"captioned", "printed_label", "aliases", "caption_src", "kind_src", "rows_src", "ocr_rows"}
+P6_TOP = {"blockcls", "blockcls_events", "layout2"}; P6_PAGE = {"kinds", "layout2"}; P6_DOC_PARSE = {"kind_src", "kinds", "layout2"}
+KIND_SRC = {"caption", "lexicon", "classifier", "vlm"}
+def p6_added(f):
+    """A figures[] entry Phase 6 adds (lexicon caption, uncaptioned, or typed by stage B / C); standard captions are unchanged."""
+    return str(f.get("caption_src", "")).startswith("lexicon") or f.get("captioned") is False or f.get("kind_src") in ("classifier", "vlm")
+# Phase 7 (phase7-usable-app.md A3, A2 model-down): runs fields; show records carry the fig_id listed in fig_ids (tests/audit/SCHEMA.md)
+P7_RUN = {"end", "sent_n", "sent_spoken", "paused_ms", "skips", "fig_ids", "tts_fallback", "llm_error_class"}
+P7_SHOW = {"fig_id"}
 BLOCK_KINDS = {"paragraph", "caption", "figure", "table"}
 NEW_RUN_KEYS = {"first_focus_ms", "doc_ready_ms", "doc_parse", "ground_miss_reasons"}
 # Phase 3 (docs/contracts/phase3-sentence-ids.md F): exactly these new keys are allowed (present only on runs with a sentence map).
@@ -172,13 +186,15 @@ def validate_parse(d, tag, expect_cols=None):
         for i, b in enumerate(blocks):
             if not isinstance(b, dict): schema_bad.append((n, i, "not-dict")); continue
             k = b.get("kind"); bb = b.get("bbox")
-            allowed = {"kind", "bbox", "src"} | ({"lines"} if k in ("paragraph", "caption") else set()) | ({"label"} if k in ("caption", "figure", "table") else set())
+            allowed = {"kind", "bbox", "src"} | ({"lines"} if k in ("paragraph", "caption") else set()) | ({"label"} if k in ("caption", "figure", "table") else set()) \
+                | ({"kind_src"} if k in ("figure", "table") and "kind_src" in b else set())
+            if "kind_src" in b and b["kind_src"] not in KIND_SRC: schema_bad.append((n, i, k, "kind_src", b["kind_src"]))
             if k not in BLOCK_KINDS: schema_bad.append((n, i, "kind", k))
             if set(b) != allowed: schema_bad.append((n, i, k, "keys", sorted(set(b) ^ allowed)))
             if not (isinstance(bb, list) and len(bb) == 4 and all(isnum(v) for v in bb) and bb[0] < bb[2] and bb[1] < bb[3]): schema_bad.append((n, i, k, "bbox", bb)); continue
             if not all(r1(v) for v in bb): round_bad.append((n, i, bb))
             if "lines" in b and not (isinstance(b["lines"], list) and b["lines"] and all(isint(x) and 0 <= x < len(lines) for x in b["lines"])): lines_bad.append((n, i, k, b["lines"]))
-            if "label" in b and not (isinstance(b["label"], str) and LABEL_RE.match(b["label"])): label_bad.append((n, i, b.get("label")))
+            if "label" in b and not (isinstance(b["label"], str) and P6_LABEL_RE.match(b["label"])): label_bad.append((n, i, b.get("label")))
             if b.get("src") not in {"figure": FIG_SRC, "table": TAB_SRC, "caption": CAP_SRC, "paragraph": PARA_SRC}.get(k, set()): src_bad.append((n, i, k, b.get("src")))
             elif b.get("src") in ("detector", "regex+detector") and ((p.get("layout") or {}).get("src") != "detector" or ((d or {}).get("layout") or {}).get("status") == "unavailable"): src_bad.append((n, i, k, b.get("src"), "detector src on a heuristic page"))
         good = [b for b in blocks if isinstance(b, dict) and isinstance(b.get("bbox"), list) and len(b["bbox"]) == 4]
@@ -247,6 +263,11 @@ def contract_box_change(x, y, bpage, n_caps):
     caption is unchanged; panels stay inside the box; split_from is a label. False: any other change."""
     xb, yb = x.get("bbox"), y.get("bbox")
     if xb == yb: return None
+    cb = y.get("caption_bbox")
+    if xb == x.get("caption_bbox") == cb and y.get("bbox_src") == "caption-only" and isinstance(yb, list) and len(yb) == 4 and isinstance(cb, list):
+        # 4.4 on a caption-only table: the Phase 2 box was the caption itself; excluding it leaves the caption-only edge
+        # (at most 2 pt tall, the caption's width, touching the caption)
+        return yb[3] - yb[1] <= 2.0 and abs(yb[0] - cb[0]) <= 0.15 and abs(yb[2] - cb[2]) <= 0.15 and (abs(yb[1] - cb[3]) <= 0.15 or abs(yb[3] - cb[1]) <= 0.15)
     if not (isinstance(xb, list) and isinstance(yb, list) and len(yb) == 4 and yb[0] < yb[2] and yb[1] < yb[3]): return False
     W, H = bpage.get("w") or 1e9, bpage.get("h") or 1e9
     if x.get("caption_bbox") != y.get("caption_bbox") or x.get("kind") != y.get("kind") or x.get("label") != y.get("label"): return False
@@ -414,7 +435,7 @@ def parse_output():
     for p in pub: docs["pub_" + os.path.basename(os.path.dirname(p))] = (p, None)
     if not pub: skip("D_public_bench_fixtures_invariants", "tests/audit/bench/fixtures/public/*/doc.pdf not present yet")
     # Phase 4 adds pages[].layout, layout, layout_events (shape-checked here) and figure split_from (4.5 two-way cut)
-    ALLOWED_NEW = {"page": {"columns", "blocks", "layout"}, "figure": {"bbox_src", "split_from", "parts", "degenerate"}, "top": {"layout", "layout_events"}, "panel": {"src", "guessed"}}
+    ALLOWED_NEW = {"page": {"columns", "blocks", "layout"} | P6_PAGE, "figure": {"bbox_src", "split_from", "parts", "degenerate"} | P6_FIG, "top": {"layout", "layout_events"} | P6_TOP, "panel": {"src", "guessed"}}
     for tag, (pdf, cols) in docs.items():
         rc, d, err = parse(pdf); add(f"D_{tag}_parse_pdf_exit0", rc == 0 and d is not None, err)
         if d is None: continue
@@ -434,7 +455,7 @@ def parse_output():
                 if k != "figures" and bp[k] != cp.get(k): diffs.append((bp.get("n"), k))
             extras |= {("page", k) for k in set(cp) - set(bp) - ALLOWED_NEW["page"]}
             if "layout" in cp and not layout_ok(cp["layout"], True): extras.add(("page", "layout", "shape"))
-            bf, cf = bp.get("figures") or [], cp.get("figures") or []
+            bf, cf = bp.get("figures") or [], [f for f in cp.get("figures") or [] if not p6_added(f)]
             if len(bf) != len(cf): diffs.append((bp.get("n"), "n_figures", len(bf), len(cf)))
             for x, y in zip(bf, cf):
                 why = contract_box_change(x, y, bp, len(bf))
@@ -717,7 +738,9 @@ def check_run(o):
             if set(dp) != {"columns", "figs_done", "blocks"} or not isinstance(bl, dict) or set(bl) != {"paragraph"}: errs.append(("figs_false_keys", sorted(dp), sorted(bl or {})))
         else:
             want = {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "layout", "parts"}   # layout: phase4-layout.md 6.3; parts: phase5-parts.md 2.5
-            if set(dp) != want: errs.append(("keys", sorted(set(dp) ^ want)))
+            if set(dp) - P6_DOC_PARSE != want: errs.append(("keys", sorted((set(dp) - P6_DOC_PARSE) ^ want)))
+            ks = dp.get("kind_src")
+            if "kind_src" in dp and not (isinstance(ks, dict) and set(ks) <= KIND_SRC and all(isint(x) and x >= 0 for x in ks.values())): errs.append(("kind_src", ks))
             if "layout" in dp and not layout_ok(dp["layout"], False): errs.append(("layout", dp.get("layout")))
             if not (isinstance(bl, dict) and set(bl) == BLOCK_KINDS and all(isint(x) and x >= 0 for x in bl.values())): errs.append(("blocks", bl))
             bs = dp.get("bbox_src")
@@ -805,7 +828,7 @@ def textfree(k, val):
     if isinstance(val, dict) and k == "runs.doc_parse" and "layout" in val:
         return layout_ok(val["layout"], False) and textfree(k, {kk: vv for kk, vv in val.items() if kk != "layout"})
     if k == "runs.part_picks": return part_picks_ok(val)
-    if isinstance(val, dict): return all(isinstance(kk, str) and (kk in BLOCK_KINDS | ALL_SRC | REASONS | {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "pdf", "ocr", "none", "labels", "guessed"} | P5_COUNT_KEYS) and textfree(k, vv) for kk, vv in val.items())
+    if isinstance(val, dict): return all(isinstance(kk, str) and (kk in BLOCK_KINDS | ALL_SRC | REASONS | {"columns", "figs_done", "blocks", "bbox_src", "labels_src", "panels", "split", "pdf", "ocr", "none", "labels", "guessed"} | P5_COUNT_KEYS | {"kind_src"} | KIND_SRC) and textfree(k, vv) for kk, vv in val.items())
     if isinstance(val, list): return all(textfree(k, x) for x in val)
     if isinstance(val, str): return (k == "doc.target_src" and target_src_ok(val)) or (k == "doc.split_from" and bool(LABEL_RE.match(val)))
     return val is None or isinstance(val, (bool, int, float))
@@ -852,7 +875,13 @@ def focus_checks():
     # twocol: Table 2 split from Figure 3 (parse says so) carries split_from; Table 4 (standalone) does not
     t2 = [x["doc"] for o in S["two_t2"] for x in docshows(o) if str(x["doc"].get("label", "")).startswith("Table 2")]
     cf = cache_fig(S["two_t2"][-1]["home"], 1, "Table 2")
-    if t2 and cf is not None: add("A_twocol_table2_split_from_matches_parse", all(d.get("split_from") == cf.get("split_from") for d in t2) and cf.get("split_from") == "Figure 3", [(d.get("split_from"), cf.get("split_from")) for d in t2][:3])
+    # phase4-layout.md 4.4 (caption excluded, body stays in its caption's column): Table 2 no longer reaches Figure 3, so 4.5 has
+    # nothing to cut; split_from is then absent in the parse and in every show. A table that still overlaps Figure 3 must carry it.
+    f3 = cache_fig(S["two_t2"][-1]["home"], 1, "Figure 3") if cf is not None else None
+    tb2, fb3 = (cf or {}).get("bbox"), (f3 or {}).get("bbox")
+    t2_clear = isinstance(tb2, list) and isinstance(fb3, list) and not (tb2[0] < fb3[2] and fb3[0] < tb2[2] and tb2[1] < fb3[3] and fb3[1] < tb2[3])
+    if t2 and cf is not None: add("A_twocol_table2_split_from_matches_parse", all(d.get("split_from") == cf.get("split_from") for d in t2) and (cf.get("split_from") == "Figure 3" or (t2_clear and "split_from" not in cf)),
+                                  [(d.get("split_from"), cf.get("split_from"), cf.get("bbox"), (f3 or {}).get("bbox")) for d in t2][:3])
     else: skip("A_twocol_table2_split_from_matches_parse", f"no Table 2 show ({len(t2)}) or no cache entry")
     t4 = [x["doc"] for o in S["two_t4"] for x in docshows(o) if str(x["doc"].get("label", "")).startswith("Table 4")]
     if t4: add("A_twocol_standalone_table4_has_no_split_from", all("split_from" not in d for d in t4), [d.get("split_from") for d in t4][:3])
@@ -932,7 +961,7 @@ def runs_checks():
     rc_, pd_, _ = parse(fx(FX["twocol"])); pg1 = (pd_ or {"pages": [{}]})["pages"][0]; figs1 = pg1.get("figures") or []
     want = {"split": sum(1 for f in figs1 if f.get("split_from")), "table": sum(1 for f in figs1 if f.get("kind") == "table"), "figure": sum(1 for f in figs1 if f.get("kind") != "table"), "columns": pg1.get("columns")}
     got = {"split": dp.get("split"), "table": (dp.get("blocks") or {}).get("table"), "figure": (dp.get("blocks") or {}).get("figure"), "columns": dp.get("columns")}
-    add("C_twocol_doc_parse_reflects_parse_pdf", got == want and want["split"] >= 1, {"doc_parse": got, "parse": want})
+    add("C_twocol_doc_parse_reflects_parse_pdf", got == want, {"doc_parse": got, "parse": want})   # split may be 0 since phase4-layout.md 4.4 (see A_twocol_table2_*)
     cols_bad, n_cols = [], 0
     for o in ALL:
         f = fixture_of(o["name"])
@@ -1131,7 +1160,7 @@ def additive():
         "fig5_cap": lambda b: bench_case("x_cap", f5, 1, [cap, cap + 1], "Figure 5 shows the drowsiness detector pipeline. In panel a, ear recordings are re-referenced and filtered. Panel b shows cross-validation.", bin_=b),
         "sentfig": lambda b: sentfig_case("x_sf", bin_=b, SPEAKEASY_GROUND="local"),
     }
-    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN | P4_RUN | P5_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
+    ALLOW = {"runs": NEW_RUN_KEYS | P3_RUN | P4_RUN | P5_RUN | P7_RUN, "map": {"sent", "score", "runner_up"} | P3_MAP, "show": {"sent"} | P3_SHOW | P7_SHOW, "clear": {"sent"}, "doc": {"target_src", "split_from"}}
     for nm, fn in pairs.items():
         b, c = fn(BIN_BASE), fn(CUR)
         def keys(runs_, st):
@@ -1154,9 +1183,11 @@ def additive():
         same = tb_ == tc_
         if not same and nm == "fig5_t1" and tb_:
             # phase4-layout.md 4.4: the table target loses its caption and stops at the gutter; reading is otherwise unchanged
-            # (same kinds, labels and order: table, then one table_row band per row). Row bands keep their y extent.
+            # (same kinds, labels and order: table, then one table_row band per row). Row bands keep their y extent; a row's
+            # number may drop because the baseline counted the other column's prose lines as rows.
             t1 = parse_fig(f5, 1, "Table 1") or {}
-            same = [(k, l) for k, l, _ in tb_] == [(k, l) for k, l, _ in tc_] and all(
+            norow = lambda l: re.sub(r" row \d+$", " row", str(l))
+            same = [(k, norow(l)) for k, l, _ in tb_] == [(k, norow(l)) for k, l, _ in tc_] and all(
                 (k == "table" and t == t1.get("bbox")) or (k == "table_row" and isinstance(t, list) and isinstance(bt, list) and abs(t[1] - bt[1]) <= 0.15 and abs(t[3] - bt[3]) <= 0.15
                  and isinstance(t1.get("bbox"), list) and t[0] >= t1["bbox"][0] - 2 and t[2] <= t1["bbox"][2] + 2) or (k not in ("table", "table_row") and t == bt)
                 for (k, l, bt), (_, _, t) in zip(tb_, tc_))

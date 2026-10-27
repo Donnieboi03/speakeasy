@@ -52,6 +52,10 @@ P2_DOC = {"target_src", "split_from"}             # inside show doc
 P3_RUN = {"sentence_map"}
 # docs/contracts/phase5-parts.md 6.2 / Amendment 2 (present when they apply); ground_box_convention is retired with bbox_2d (A2.9)
 P5_RUN = {"part_picks", "figure_mode_src", "stand_in_blocked", "no_target_chunks", "figures_degenerate", "area_page_rect", "area_region_src", "area_dropped", "area_pdf_error"}
+# docs/contracts/phase7-usable-app.md A3 (new runs fields) and A2 model-down (llm_error_class: the exception class name only);
+# show records carry the fig_id their run lists in fig_ids (tests/audit/SCHEMA.md)
+P7_RUN = {"end", "sent_n", "sent_spoken", "paused_ms", "skips", "fig_ids", "tts_fallback", "llm_error_class"}
+P7_SHOW = {"fig_id"}
 P3_MAP = {"sentence_id", "sentence_ids"}
 P3_SHOW = {"sentence_id", "match_score", "runner_up", "rects"}
 ALIGN_METHODS = {"align", "align-fuzzy", "span", "hold", "block"}   # Phase 3 amendment 3: sentence-map assignment methods
@@ -133,13 +137,18 @@ def global_checks():
     add("G_ci_stats_json_exit0", p.returncode == 0 and ok, (p.returncode, p.stdout[:100], p.stderr[-150:]))
     # --help identical except the capture-method choices
     def norm(s): return " ".join(re.sub(r"\{[^{}]*no-selection[^{}]*\}", "{CAPTURE}", s).split())
+    def norm_p7(s):
+        s = norm(s).replace(",logs}", "}").replace(" [--capture-bar-hidden]", "")
+        return s.replace(" --capture-bar-hidden the app hid its bar for a screencapture fallback (B5.2)", "")
     bh = subprocess.run([BIN_BASE, "--help"], capture_output=True, text=True, env=env_for(mkhome("hp"))).stdout
     subs = re.search(r"\{([a-z,]+)\}", bh).group(1).split(",")
     for sub in [None] + subs:
         args = ([sub] if sub else []) + ["--help"]; hb, hc = mkhome("hp"), mkhome("hp")
         b = subprocess.run([BIN_BASE] + args, capture_output=True, text=True, env=env_for(hb)); c = subprocess.run([CUR] + args, capture_output=True, text=True, env=env_for(hc))
-        add(f"G_help_{sub or 'top'}_unchanged_except_capture_choices", (b.returncode, norm(b.stdout), b.stderr) == (c.returncode, norm(c.stdout), c.stderr),
-            "" if norm(b.stdout) == norm(c.stdout) else f"base={norm(b.stdout)[:180]} cur={norm(c.stdout)[:180]}")
+        if sub == "stats":   # Phase 7 A4: the schema 2 CLI (--window; -n is ignored)
+            add("G_help_stats_is_phase7_schema2_cli", c.returncode == 0 and "--window {1,7,30}" in norm(c.stdout) and "--json" in c.stdout, norm(c.stdout)[:180]); continue
+        add(f"G_help_{sub or 'top'}_unchanged_except_capture_choices_and_phase7", (b.returncode, norm(b.stdout), b.stderr) == (c.returncode, norm_p7(c.stdout), c.stderr),
+            "" if norm(b.stdout) == norm_p7(c.stdout) else f"base={norm(b.stdout)[:180]} cur={norm_p7(c.stdout)[:180]}")
     # deterministic dry-run / fallback behaviour identical to baseline (stdout, stderr, exit code, runs-log key set and stable values)
     STABLE = ("command", "backend", "input_chars", "output_chars", "kind", "verbatim_blocks", "notes", "error", "llm_error", "capture_method", "words_in",
               "words_spoken", "mode", "vision_gate", "vision_gate_reason", "focus_events", "dry_run", "image", "tts", "tts_requested", "stream_note", "streamed")
@@ -158,13 +167,22 @@ def global_checks():
             (b, c) = out; tag = f"G_same_{cname}_{iname}"
             add(f"{tag}_stdout_stderr_rc", b[:3] == c[:3], "" if b[:3] == c[:3] else f"base={b[:3]!r:.200} cur={c[:3]!r:.200}")
             extra = set(c[3]) - set(b[3]); missing = set(b[3]) - set(c[3])
-            add(f"{tag}_runs_keyset", not (missing - {"ground_box_convention"}) and not (extra - {"ground_mode_note", "ground_provider"} - P2_RUN - P3_RUN - P5_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
+            add(f"{tag}_runs_keyset", not (missing - {"ground_box_convention"}) and not (extra - {"ground_mode_note", "ground_provider"} - P2_RUN - P3_RUN - P5_RUN - P7_RUN) and not (extra & {"ground_provider", "ground_box_convention"}),
                 {"missing": sorted(missing), "extra": sorted(extra)})
             diff = {k: (b[4][k], c[4][k]) for k in STABLE if b[4][k] != c[4][k]}
             add(f"{tag}_runs_stable_values", not diff, diff)
             if iname == "zip_table" and cname == "speak_dry": STATS_SRC = b[5]
-    # stats / last identical on the same log
-    for cmd in (["stats", "--json"], ["stats"], ["stats", "-n", "3"], ["last"], ["last", "--json"]):
+    # last identical on the same log; stats is schema 2 (phase7-usable-app.md A4: schema 1 keys removed, five text lines, -n ignored)
+    st = {}
+    for cmd in (["stats", "--json"], ["stats"], ["stats", "-n", "3"]):
+        h = mkhome("st"); os.makedirs(os.path.join(h, "logs")); shutil.copy(os.path.join(STATS_SRC, "logs", "runs.jsonl"), os.path.join(h, "logs", "runs.jsonl"))
+        p = subprocess.run([CUR] + cmd, capture_output=True, text=True, env=env_for(h, BAD), timeout=60); st[" ".join(cmd)] = (p.returncode, p.stdout, p.stderr)
+    try: sj = json.loads(st["stats --json"][1])
+    except Exception: sj = {}
+    add("G_stats_json_schema2_exit0", st["stats --json"][0] == 0 and sj.get("schema") == 2, st["stats --json"][:2])
+    add("G_stats_text_five_lines_exit0", st["stats"][0] == 0 and len(st["stats"][1].splitlines()) == 5, st["stats"][:2])
+    add("G_stats_n_ignored", st["stats -n 3"] == st["stats"], (st["stats -n 3"][:2], st["stats"][:2]))
+    for cmd in (["last"], ["last", "--json"]):
         res = []
         for b in (BIN_BASE, CUR):
             h = mkhome("st"); os.makedirs(os.path.join(h, "logs")); shutil.copy(os.path.join(STATS_SRC, "logs", "runs.jsonl"), os.path.join(h, "logs", "runs.jsonl"))
@@ -259,7 +277,7 @@ exit 0
     app = os.path.join(TMPROOT, "Speakeasy.app"); res = os.path.join(app, "Contents", "Resources"); os.makedirs(res)
     # the bundle caches the PDF layout model under $SPEAKEASY_HOME/models (Phase 4): keep it in a temp home, never ~/.speakeasy,
     # seeded with a verified copy when one is at hand so the run needs no network
-    bhome = mkhome("bundle_home"); seed = os.environ.get("SPEAKEASY_LAYOUT_MODEL") or "/tmp/pp_doclayout_s.onnx"
+    bhome = mkhome("bundle_home"); seed = os.environ.get("SPEAKEASY_LAYOUT_MODEL") or os.path.expanduser("~/.speakeasy/models/pp_doclayout_s.onnx")
     if os.path.isfile(seed): os.makedirs(os.path.join(bhome, "models"), exist_ok=True); shutil.copy(seed, os.path.join(bhome, "models", "pp_doclayout_s.onnx"))
     eb = dict(os.environ, PATH=st2 + ":/usr/bin:/bin:/usr/sbin:/sbin:" + os.path.dirname(PY3), SPEAKEASY_HOME=bhome); eb.pop("SPEAKEASY_PYTHON_VERSION", None)
     p = subprocess.run(["bash", os.path.join(brepo, "app", "bundle_python.sh"), app], capture_output=True, text=True, env=eb, timeout=300)
@@ -571,7 +589,15 @@ def privacy():
         tx = lambda F: by_state(F, lambda x: (x.get("text"), x.get("src"), x.get("lines"), x.get("range")))
         mt = lambda F: [x.get("method") for x in F if x.get("state") == "map"]
         add("E_on_map_methods_equal_baseline_or_phase3_assignment", len(mt(O["on"]["F"])) == len(mt(O["base"]["F"])) and all(p3_method(c, b) for c, b in zip(mt(O["on"]["F"]), mt(O["base"]["F"]))), (mt(O["on"]["F"]), mt(O["base"]["F"])))
-        add("E_on_texts_equal_baseline", tx(O["on"]["F"]) == tx(O["base"]["F"]), "" if tx(O["on"]["F"]) == tx(O["base"]["F"]) else (tx(O["on"]["F"])["show"][:2], tx(O["base"]["F"])["show"][:2]))
+        tdiff = lambda c, b: [(st, i, x, y) for st in c for i, (x, y) in enumerate(zip(c[st], b[st])) if x != y] + [(st, "count", len(c[st]), len(b[st])) for st in c if len(c[st]) != len(b[st])]
+        # phase3-sentence-ids.md C.4 rule 3 (amendment 5) and E: a chunk that names no single row gets the whole-block band
+        # (method block, every selection line) where the baseline pinned it to the last row
+        nsel = len(SENT_TABLE.splitlines()); onmaps = [x for x in O["on"]["F"] if x.get("state") == "map"]
+        def p3_block(st, i, cur):
+            if i == "count" or i >= len(onmaps) or onmaps[i].get("method") != "block": return False
+            return cur[2] == [1, nsel] if st == "map" else isinstance(cur[1], list) and len(cur[1]) == nsel
+        tdiffs = tdiff(tx(O["on"]["F"]), tx(O["base"]["F"]))
+        add("E_on_texts_equal_baseline_or_phase3_block", not [d for d in tdiffs if not p3_block(*d[:3])], tdiffs[:3])
         # PDF figure run: anchors, caption text, doc label; live file keeps src + full anchors
         mf = Mock(MOCK_TEXT=FIG_ANSWER, MOCK_GROUND=GROUND_BOX)
         try:
@@ -599,11 +625,11 @@ def privacy():
         bk = set().union(*[set(x) for x in P["base"]["focus"] if x.get("state") == "show"] or [set()]); ck = set().union(*[set(x) for x in P["off"]["focus"] if x.get("state") == "show"] or [set()])
         ws = (bk - {"expires", "border", "ref_src", "text", "src"}) | {"text_len", "text_hash", "src_n", "src_hash"}
         ws |= P2_SHOW
-        add("E_pdf_show_keyset_vs_baseline", ((ws ^ ck) - (ck & P3_SHOW)) <= {"hold", "late_fit"}, {"missing": sorted(ws - ck), "extra": sorted(ck - ws)})
+        add("E_pdf_show_keyset_vs_baseline", ((ws ^ ck) - (ck & (P3_SHOW | P7_SHOW))) <= {"hold", "late_fit"}, {"missing": sorted(ws - ck), "extra": sorted(ck - ws)})
         dk = lambda o: set().union(*[set(x["doc"]) for x in o["focus"] if x.get("state") == "show" and isinstance(x.get("doc"), dict)] or [set()])
         add("E_pdf_show_doc_keyset_vs_baseline", not (dk(P["base"]) - dk(P["off"])) and not (dk(P["off"]) - dk(P["base"]) - P2_DOC), {"missing": sorted(dk(P["base"]) - dk(P["off"])), "extra": sorted(dk(P["off"]) - dk(P["base"]) - P2_DOC)})
         rk = lambda o: set(o["runs"][-1]) if o["runs"] else set()
-        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN - P5_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN - P5_RUN)})
+        add("E_pdf_runs_keyset_vs_baseline", not (rk(P["base"]) - rk(P["off"])) and not (rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN - P5_RUN - P7_RUN), {"missing": sorted(rk(P["base"]) - rk(P["off"])), "extra": sorted(rk(P["off"]) - rk(P["base"]) - P2_RUN - P3_RUN - P5_RUN - P7_RUN)})
     finally: m.stop()
     # dry-run: never writes the live focus file
     m = Mock(MOCK_TEXT=SENT_ANSWER)
