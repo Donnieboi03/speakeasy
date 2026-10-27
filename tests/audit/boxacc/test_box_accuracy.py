@@ -6,7 +6,9 @@ Part A - speakeasy CLI: page-space doc targets for Read-area and selection runs 
          emitted screen rects stay inside the capture region in points (no Retina doubling, negative/secondary display origins).
 Part B - box_accuracy.py: synthetic tracker draws generated with a known page->screen transform for every geometry; the analyzer must
          recover the transform from the capture image and report ~0 pt for correct boxes and the injected offset for wrong ones.
-Env: DOC_VENV (python with PyMuPDF+Pillow+numpy, default the venv running this script), SPEAKEASY_BIN, BOXACC_QUICK=1 for a reduced matrix."""
+Env: DOC_VENV (python with PyMuPDF+Pillow+numpy, default the venv running this script), SPEAKEASY_BIN, BOXACC_QUICK=1 for a reduced matrix;
+the caller's SPEAKEASY_LAYOUT_MODEL / SPEAKEASY_FIGCLS_MODEL / SPEAKEASY_LAYOUT2_MODEL reach the CLI (the shipped detector path), else
+the parse uses its heuristics. Run this script with a python that has reportlab (fixture generation)."""
 import itertools, json, os, shutil, subprocess, sys, tempfile, time
 HERE = os.path.dirname(os.path.abspath(__file__)); AUD = os.path.dirname(HERE); sys.path.insert(0, HERE)
 from geom import page_to_screen, xywh, render_capture, K
@@ -41,7 +43,15 @@ def cli(g, mode, region_pg, clip, line_rects=None):
     sc = page_to_screen(region_pg, g); cap = [round(v, 1) for v in xywh(sc)]
     img = os.path.join(TMP, f"speakeasy_cap_box{os.getpid()}.png"); render_capture(PDF, g, cap, img)
     args = ["--image", img, "--capture-rect=" + ",".join(map(str, cap)), "--doc-hint", os.path.join(h, "hint.json"), "--run-id", f"t{int(time.time()*1000)}"]
-    if mode == "area": cmd = [BIN, "speak", "--capture-method", "area", "--area-text", "ocr"] + args; inp = clip
+    if mode == "area":
+        # Read area sends its OCR lines as line bounds (phase5-parts.md A2.1: the area's page rect comes from their fit to the
+        # page; without them an area run has no region and only screen-only cues): the page lines inside the drag, mapped to screen
+        inside = [l for l in LINES if region_pg[0] <= (l[0] + l[2]) / 2 <= region_pg[2] and region_pg[1] <= (l[1] + l[3]) / 2 <= region_pg[3]]
+        lb, loc = [], 0
+        for l in inside: lb.append({"loc": loc, "len": len(l[4]), "rect": [round(v, 1) for v in xywh(page_to_screen(l[:4], g))]}); loc += len(l[4]) + 1
+        clip = "\n".join(l[4] for l in inside) or clip
+        lbp = os.path.join(h, "area_lines.json"); json.dump(lb, open(lbp, "w"))
+        cmd = [BIN, "speak", "--capture-method", "area", "--area-text", "ocr", "--line-bounds", lbp] + args; inp = clip
     else:
         cmd = [BIN, "selection", "--capture-method", "bounds"] + args; inp = None
         if line_rects: lb = os.path.join(h, "lines.json"); json.dump(line_rects, open(lb, "w")); cmd += ["--line-bounds", lb]

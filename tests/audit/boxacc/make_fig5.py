@@ -13,14 +13,16 @@ def build(path):
     for i in range(10):
         c.drawString(40, H - y, f"Prose line {i+1} about ear EEG electrodes and the drowsiness protocol used here."); y += 12
     gt["prose_line_3"] = tl(40, 60 + 2 * 12 - 9, 40 + c.stringWidth("Prose line 3 about ear EEG electrodes and the drowsiness protocol used here.", "Helvetica", 9), 60 + 2 * 12 + 2)
-    # Table 1 at y 270..437 (caption + rules + rows)
+    # Table 1: caption at y 271..282, rules and rows at y 290..380
     c.setFont("Helvetica-Bold", 9); c.drawString(40, H - 280, "Table 1 | Relevant system, WANDmini, and NMIC specifications")
     c.setLineWidth(0.6); c.line(40, H - 290, 300, H - 290)
     c.setFont("Helvetica", 8); rows = [("Maximum Recording Channels", "64"), ("Recording Channels Used", "11"), ("ADC Resolution", "15 bits"), ("Noise Floor", "70 nV/rtHz"), ("Wireless Data Rate", "2 Mbps"), ("Battery Life", "44 h")]
     yy = 302
     for a, b in rows: c.drawString(42, H - yy, a); c.drawString(230, H - yy, b); yy += 14
     c.line(40, H - (yy - 6), 300, H - (yy - 6))
-    gt["table1"] = tl(40, 271, 300, yy - 6)
+    # the table box excludes its caption (phase4-layout.md 4.4) and, like the bench's synthetic GT, is its rules and cells:
+    # top rule to bottom rule
+    gt["table1"] = tl(40, 290, 300, yy - 6)
     # right-column prose next to the table
     c.setFont("Helvetica", 9)
     for i in range(8): c.drawString(310, H - (280 + i * 12), f"Right column sentence {i+1} on classifier agreement.")
