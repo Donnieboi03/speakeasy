@@ -41,6 +41,17 @@ cd src && ./install.sh
 | `SPEAKEASY_BAR_HIDE_FULLSCREEN` | `on` | Hide the idle bar while a full-screen app is in front |
 | `SPEAKEASY_LOG_TEXT` | unset | `1` adds the input / output text to runs.jsonl and the sentence text, source lines and anchor text to focus.jsonl |
 
+Advanced (same file or env; default in brackets): `SPEAKEASY_HOME` (`~/.speakeasy`); `SPEAKEASY_LLM_URL`
+(`http://localhost:11434/v1`, any OpenAI-compatible endpoint; `SPEAKEASY_API_KEY` adds a bearer key); `SPEAKEASY_VISION_MODEL`
+(`qwen3-vl:4b-instruct`); `SPEAKEASY_TIMEOUT` and `SPEAKEASY_VISION_TIMEOUT` (60 s per LLM / vision call); `SPEAKEASY_READ_MODE`
+(`read`; `summary` summarises prose instead of reading it through); `SPEAKEASY_VERBATIM` (`on`: emails and quotes are read as
+written); `SPEAKEASY_FOCUS_TAGS` (`off`: ask the model for line tags); `SPEAKEASY_TRACK_FPS` (5, the tracker's scan rate);
+`SPEAKEASY_CAPTURE_FIT` (`on`: fit the page to the screen from the screenshot's text); `SPEAKEASY_PDF_ENGINE` (`auto`; `pdfkit`
+reads PDF text through macOS PDFKit instead of the doc venv); `SPEAKEASY_DOC_PYTHON` (`~/.speakeasy/tts-venv/bin/python`);
+`SPEAKEASY_LAYOUT_MODEL`, `SPEAKEASY_FIGCLS_MODEL`, `SPEAKEASY_LAYOUT2_MODEL` (model file paths, still sha256-checked; the
+`*_MODEL_URL` variants change the installers' download source); `SPEAKEASY_TRACKER` and `SPEAKEASY_OCR_BIN` (the tracker binary
+and the OCR helper the block classifier calls).
+
 
 ## Observability
 Each run appends a JSONL record to `~/.speakeasy/logs/runs.jsonl`. It includes stage timings (`copy_ms`, `capture_ms`, `vision_ms`, `llm_ms`, `llm_first_token_ms`, `first_sentence_ms`, `tts_first_audio_ms`, `tts_synth_ms`, `speak_ms`, `total_ms`), errors separated by stage, `notes` (informational events such as removed superlatives, kept separate from errors), peak RSS, `tts_server_rss_mb`, loaded Ollama models, and the capture method and rect. Use `speakeasy last` and `speakeasy stats` to inspect them. Schema: `tests/audit/SCHEMA.md`.
@@ -53,7 +64,7 @@ No text in runs/focus logs unless `SPEAKEASY_LOG_TEXT=1`; the live `focus.json` 
 Temporary files: the crop is kept at `~/.speakeasy/last_capture.png` for auditing unless `SPEAKEASY_KEEP_CAPTURE=0`. The per-line bounds and document-hint files the app passes to the backend are deleted after they are read.
 
 ## Tests
-These are black-box tests written independently of the implementation. Install their Python deps with `pip install -r tests/requirements.txt`. `tests/run_tests.sh` runs the grid and regression suite (LLM-judged). `tests/audit/run_audit.sh` runs the observability, privacy, no-selection and TTS suites. Set `SPEAKEASY_BIN` to test a different build. `cd tracker && swift test` runs the tracker XCTests (also in macOS CI, `.github/workflows/macos.yml`). The highlight-crop test needs your own `HIGHLIGHT_FIXTURE` screenshot, which isn't shipped.
+These are black-box tests written independently of the implementation. Install their Python deps with `pip install -r tests/requirements.txt`. `tests/run_tests.sh` runs the grid and regression suite (LLM-judged). `tests/audit/run_audit.sh` runs the observability, privacy, no-selection and TTS suites. Each phase's acceptance suite is promoted under `tests/audit` with public data and file-relative defaults: `readability/run_phase1.py`, `logging/run_phase2.py`, `sentences/run_phase3.py`, `layout/run_phase4.py`, `parts/run_phase5.py`, `blocks/run_phase6.py`, `app/run_phase7.py`; `bench/run_bench.py` + `bench/bench_gate.py` is the three-score benchmark and `boxacc/test_box_accuracy.py` the box-accuracy harness. Set `SPEAKEASY_BIN` to test a different build. `cd tracker && swift test` runs the tracker XCTests (also in macOS CI, `.github/workflows/macos.yml`). The highlight-crop test needs your own `HIGHLIGHT_FIXTURE` screenshot, which isn't shipped.
 
 ## Resource use (M3 Pro, 18 GB)
 - Ollama with `qwen3-vl:4b-instruct` loaded (the one model for text, images and grounding): 3.2 GB, all of it in GPU memory (`ollama ps`, measured 2026-10-26). It unloads after `SPEAKEASY_KEEP_ALIVE` (10 min) idle.

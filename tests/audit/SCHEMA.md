@@ -28,6 +28,37 @@ Timing fields may be top-level or nested under `timings`.
 | capture_path | str/NoneType | _img | kept capture file path, home-relative (`~/...`) when under home |
 | peak_rss_mb | int/float | always | peak RSS of speakeasy process |
 | ollama_models | list/NoneType | <lambda> | from /api/ps: loaded models + memory |
+| tts | str/NoneType | _spoken | engine actually used: say|kokoro |
+| tts_requested | str/NoneType | _spoken | engine requested via env/config |
+| tts_voice | str/NoneType | <lambda> | voice used |
+| tts_synth_ms | int/float/NoneType | <lambda> | total synth time |
+| tts_server_rss_mb | int/float/NoneType | <lambda> | TTS server memory |
+| llm_error | str/NoneType | <lambda> | LLM-stage error |
+| copy_error | str/NoneType | _sel | clipboard/copy-stage error |
+| capture_error | str/NoneType | _sel | screenshot/capture-stage error |
+| tts_error | str/NoneType | _spk | TTS-stage error |
+| capture_original_px | str/NoneType | <lambda> | pre-crop WxH |
+| capture_cropped_px | str/NoneType | <lambda> | post-crop WxH |
+| capture_crop | str/NoneType | <lambda> | cropped|already-cropped |
+| vision_gate | str/NoneType | <lambda> | auto-skip-prose|auto-use|forced|never|null(no image) |
+| vision_gate_reason | str/NoneType | <lambda> | why the gate decided |
+| streamed | bool | <lambda> | LLM output streamed into TTS |
+| stream_note | str/NoneType | <lambda> | why streaming was/wasn't used |
+| llm_first_token_ms | int/float/NoneType | <lambda> | time to first LLM token |
+| first_sentence_ms | int/float/NoneType | <lambda> | time to first full sentence |
+| meta_refs_removed | int | <lambda> | count of screenshot/image references stripped |
+| vision_reasked | bool/NoneType | <lambda> | no-selection answer re-asked |
+| notes | list/str/NoneType | <lambda> | non-error corrections (e.g. superlative fixes) |
+| focus_events | int | _spoken | focus show events emitted |
+| focus_tags | bool | _spoken | SPEAKEASY_FOCUS_TAGS on |
+| focus_fallback | str/NoneType | _spoken | focus mapping fallback/method summary |
+| focus_tag_hit_rate | int/float/NoneType | <lambda> | share of sentences mapped via tags |
+| doc_source | str/NoneType | _spoken | where the source document came from (preview, vscode, browser, browser-file, ...) |
+| doc_path_hash | str/NoneType | <lambda> | hash of the document path, never the path |
+| page | int/NoneType | <lambda> | 1-based PDF page |
+| figures_found | int/NoneType | <lambda> | figures parsed on the page/file |
+| doc_map_method | str/NoneType | <lambda> | how the selection was located in the doc |
+| verbatim_blocks | list/NoneType | <lambda> | kinds of verbatim blocks read near word-for-word |
 
 capture_method in {bounds, area, no-selection-window, no-selection-screen, none}. backend in {llm, fallback, verbatim, none}.
 Anomaly flags: slow >30s, fallback while LLM reachable, missing/mistyped fields, capture >50% of screen, full-screen bounds capture, any error.
@@ -36,6 +67,18 @@ Optional keys (present only when the condition holds):
 
 | field | types | present when | meaning |
 |---|---|---|---|
+| mode | str | rewrite / speak / selection | how the text was spoken: `explain`, `read-through`, `verbatim` or `table` |
+| kind | str | rewrite / speak / selection | the Reading log's item type: `figure` (an image or a matched figure), `table`, `list` or `text` |
+| words_in / words_spoken / ram_total_mb | int / int / int | words: rewrite / speak / selection; RAM: speak / selection | word counts of the input and of what was spoken (0 for rewrite and dry runs); the Mac's RAM in MB |
+| area_text | str/NoneType | always for selection / speak | `ax`, `ocr` or `pdf` (Read area: where the area's text came from); null outside Read area |
+| area_pdf_lines / area_fit_anchors / area_fit_rms / area_pdf_ms | int / int / float / int | an area run tried the PDF text layer | PDF lines taken from the rectangle, anchors and RMS (pt) of the OCR-to-page fit, time spent |
+| doc_transform / capture_fit_anchors / capture_fit_rms / capture_fit_ms | str / int / float / int | a capture fit ran (page to screen from the screenshot's text) | `area-fit` or `capture-ocr`, its anchors and RMS, its time |
+| area_clamped | int | an area cue was shrunk to the area | cues clamped to the dragged rectangle (see `area_dropped`) |
+| doc_in_prompt / doc_note | bool / str | a document was read | the prompt carried its figure labels / the exception class when resolving the document failed (never the message: it can hold a path) |
+| focus_map / cue_kinds | dict / dict | focus ran | map decisions by note (`forward`, `ref-back`, ...) / shows by `cue_kind`, counts only |
+| ground_ms | int | a pick was answered | the answered pick's time |
+| llm_request_at_ms / vision_start_ms | int / int | an LLM / vision call was made | ms from run start to the request (first-highlight speed is measured from `llm_request_at_ms`) |
+| openers_removed / prompt_echo_dropped | int / int | cleanup removed an opener ("Sure, here is") / a sentence echoing the prompt | counts only |
 | ground_mode_note | str | SPEAKEASY_GROUND is not auto/local/openrouter/off/0/no/false | `SPEAKEASY_GROUND=<value> unknown; using auto` (value lowercased, max 24 chars) |
 | ground_provider | str | a pick was answered | local|openrouter: the provider of the last answered pick (phase5-parts.md A2.9). `ground_box_convention` is retired with the `bbox_2d` path |
 | ground_errors | dict | a pick request failed (either provider) | {count: int, classes: {exception class name: count}}; never model or document text |

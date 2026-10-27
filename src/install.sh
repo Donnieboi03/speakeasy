@@ -90,7 +90,7 @@ PL
 else
   echo "Kokoro venv not found at $TTS_VENV; using macOS say. (Optional: python3 -m venv $TTS_VENV && $TTS_VENV/bin/pip install mlx-audio, then re-run.)"
 fi
-# Document-aware focus (PDF parsing): PyMuPDF in the Kokoro venv (AGPL-3.0; fine for local personal use)
+# Document-aware focus (PDF parsing): pypdfium2 + Pillow, and onnxruntime + numpy for the layout models, in the Kokoro venv
 if [ -x "$TTS_VENV/bin/python" ]; then
   "$TTS_VENV/bin/python" -c 'import pypdfium2, PIL' 2>/dev/null || "$TTS_VENV/bin/python" -m pip install -q pypdfium2 pillow >/dev/null 2>&1 \
     && echo "pypdfium2 ready for document-aware focus" || echo "NOTE: pypdfium2 not installed; PDF figure mapping off (Markdown still works)"
