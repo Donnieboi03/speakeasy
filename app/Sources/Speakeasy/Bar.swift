@@ -228,6 +228,11 @@ final class Bar: NSObject {
         }
         return homeFrame(p)
     }
+    /// The spot frame(for: p) really places the bar at (the occupied home spot's stack or alternative).
+    func placedPos(_ p: BarPos) -> BarPos {
+        guard p == pos, let o = occupied else { return p }
+        switch o { case .stacked(let at, _): return at; case .alt(let alt): return alt }
+    }
     func homeFrame(_ p: BarPos) -> NSRect {
         let sc = screen(), vf = sc.visibleFrame
         let full = fullscreenHidden && model.state != .idle && model.state != .hover
@@ -300,7 +305,7 @@ final class Bar: NSObject {
             NSAnimationContext.runAnimationGroup { c in c.duration = Motion.slide; c.timingFunction = CAMediaTimingFunction(name: .easeOut); panel.animator().setFrame(f, display: true) }
         } else { panel.setFrame(f, display: true) }
         if !panel.isVisible { panel.orderFrontRegardless() }
-        if let r = reason { AppLog.event("bar_move", ["reason": r, "pos": (dodge ?? pos).rawValue]) }
+        if let r = reason { AppLog.event("bar_move", ["reason": r, "pos": placedPos(dodge ?? pos).rawValue]) }
     }
     var testRect: NSRect? = nil                    // SPEAKEASY_BAR_TEST_POS=selection (test builds): the selection's frame
 
