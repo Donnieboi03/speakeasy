@@ -66,11 +66,23 @@ document; their runs-record area_kinds are scored in capture pixels. Gated mode 
 Replay mode (12.4, scored separately, never gated): --kind replay|proxy sets SPEAKEASY_GROUND=local, SPEAKEASY_BLOCKCLS_VLM=local,
 SPEAKEASY_PICK=off and routes KIND_PROMPT requests to the kind cassette (default tests/audit/bench/kind_cassette.json,
 <holdout>/gap/kind_cassette.json; header src_sha must match the tree; proxy forwards to --kind-upstream, loopback only, and writes the
-cassette after a run without harness errors). After each warm-up the harness waits for the kind job (a cache/doc/*.kinds.json sidecar,
-stable for 1 s, up to 75 s) before the measured run. sets.<set>.kind_vlm scores the stage B blocks plus the stage C `accepted`
-block_kind records of logs/blockcls.jsonl. --ocr replay|record sets SPEAKEASY_OCR_BIN to tests/audit/bench/ocr_stub (cassette keyed by
-PNG sha256: tests/audit/bench/ocr_cassette.json, <holdout>/gap/ocr_cassette.json; record runs --ocr-helper) and scores
-image_table_rows (12.3). A kind or OCR cassette miss marks the block stale, prints a re-record line and exits 6.
+cassette after a run without harness errors). Kind job (Amendment 1 A1.2): after each warm-up the harness reads the home's parse
+cache entries (cache/doc/<key>.json); blockcls.kind_job "none" means nothing to wait for, "queued" means poll for <key>.kinds.json
+until it is readable with state done | partial | failed and its `pages` covers the parse's routed pages (Amendment 2 A2.5; 75 s cap: harness error `kind job not finished`, exit 3; failed: harness
+error naming its error, exit 3; partial is scored with its skipped count). After the measured run the sidecar's bytes must be
+unchanged (no second job). In gated mode a "queued" parse is a harness error. sets.<set>.kind_vlm scores the stage B blocks plus the
+stage C accepted entries of one full-document kind job per doc (`blockcls.py job`, run after the doc's cases), which must equal its
+logs/blockcls.jsonl accepted records; case homes are still waited for and checked. --ocr replay|record sets
+SPEAKEASY_OCR_BIN to tests/audit/bench/ocr_stub (A2.6: gated mode leaves SPEAKEASY_OCR_BIN unset and SPEAKEASY_TRACKER points nowhere; A1.1: cassette keyed only by the PNG bytes' sha256: tests/audit/bench/ocr_cassette.json,
+<holdout>/gap/ocr_cassette.json; record runs --ocr-helper and fails on an OUT.json outside the A1.1 schema) and scores image_table_rows
+(12.3). Read-area runs call no OCR helper (app-lines), so area cases need no OCR cassette. A kind or OCR cassette miss marks the block
+stale, prints a re-record line and exits 6.
+
+Second detector (Amendment 3): --layout2-model PATH (or the caller's SPEAKEASY_LAYOUT2_MODEL) is passed as SPEAKEASY_LAYOUT2_MODEL, in
+either family. Whenever the parses carry layout2 fields, sets.<set>.layout2 reports pages, routed pages by rule R1/R2/R3 and by src,
+candidates added, structural candidates, unavailable reasons, heron ms per routed page (p50/p95; not determinism-covered) and session
+load_ms; a --layout2-model run with a routed page reporting model-missing fails with exit 5. bench_gate.py requires layout2.routed == 0
+on the existing families (A3.6 item 3).
 
 Exit codes: 0 bench written; 2 preflight/usage/fixture error (nothing run); 3 harness error (bench.json written with
 complete: false), including app output that lacks the logging-contract fields and a picker or kind VLM run in gated mode; 4
@@ -123,7 +135,8 @@ STALE_MSG = "pick cassette stale: re-record with tools/pick_eval.py --record"
 KIND_STALE_MSG = "kind cassette stale: re-record with tools/kind_eval.py --record (or run_bench.py --family gap --kind proxy)"
 OCR_STALE_MSG = "ocr cassette stale: re-record with run_bench.py --family gap --ocr record --ocr-helper PATH"
 OCR_STUB = os.path.join(HERE, "ocr_stub")
-KIND_JOB_WAIT_S, KIND_JOB_QUIET_S = 75.0, 1.0
+KIND_JOB_WAIT_S = 75.0
+KIND_FINAL_STATES = ("done", "partial", "failed")
 AREA_HINT = {"app": "Safari", "bundle": "com.apple.Safari", "title": "Read area capture"}
 
 
@@ -190,6 +203,7 @@ class Env:
     def __init__(self, root, port, interp, layout_model=None, pick=None, figcls_model=None, kind=None, ocr=None):
         self.root, self.port, self.interp, self.layout_model, self.pick, self.n = root, port, interp, layout_model, pick, 0
         self.figcls_model, self.kind, self.ocr = figcls_model, kind, ocr      # ocr: None or {mode, cassette, real, log, tag}
+        self.layout2_model = None                                             # Amendment 3: heron, passed as SPEAKEASY_LAYOUT2_MODEL
 
     def home(self, tag):
         self.n += 1; d = os.path.join(self.root, "runs", f"{self.n:04d}-{tag}"); h = os.path.join(d, "home"); t = os.path.join(d, "tmp")
@@ -210,6 +224,7 @@ class Env:
         if self.layout_model: e["SPEAKEASY_LAYOUT_MODEL"] = self.layout_model
         if self.pick: e.update(SPEAKEASY_GROUND="local", SPEAKEASY_PICK="on", SPEAKEASY_VISION_MODEL=PICK_MODEL)
         if self.figcls_model: e["SPEAKEASY_FIGCLS_MODEL"] = self.figcls_model
+        if self.layout2_model: e["SPEAKEASY_LAYOUT2_MODEL"] = self.layout2_model
         e["SPEAKEASY_BLOCKCLS_VLM"] = "off"
         if self.kind: e.update(SPEAKEASY_GROUND="local", SPEAKEASY_PICK="off", SPEAKEASY_BLOCKCLS_VLM="local", SPEAKEASY_VISION_MODEL=PICK_MODEL)
         if self.ocr:
@@ -316,7 +331,7 @@ def check_fields(rec, focus):
     if miss: raise FieldsMissing("contract_fields_missing", "app output lacks logging-contract fields: " + ", ".join(miss))
 
 
-def run_case(env, mock, case, pdf, page_w, idx, public=True, kind_wait=None, want_home=False):
+def run_case(env, mock, case, pdf, page_w, idx, public=True, job_hook=None, want_home=False):
     cid = case["case_id"]; d, h, t = env.home("case")
     cp = os.path.join(d, f"{case['doc_id']}.pdf"); shutil.copyfile(pdf, cp)
     hint = os.path.join(d, "hint.json"); lbp = os.path.join(d, "lines.json")
@@ -340,7 +355,7 @@ def run_case(env, mock, case, pdf, page_w, idx, public=True, kind_wait=None, wan
     label = cid if public else f"#{idx}"
     a0 = mock.api_chats(); k0 = len(mock.kind_replies()); mock.tag(f"{idx}:warm")
     run()  # warm-up: fills the parse cache
-    if env.kind and kind_wait: kind_wait(h)
+    if job_hook: job_hook(h, "warm", label, cid)
     gated_check(a0, jl(os.path.join(h, "logs", "focus.jsonl")), k0)
     for attempt in range(3):
         shutil.rmtree(os.path.join(h, "logs"), ignore_errors=True)
@@ -353,7 +368,9 @@ def run_case(env, mock, case, pdf, page_w, idx, public=True, kind_wait=None, wan
             raise Harness("not_local", f"run left the machine or bypassed the mock (case {cid})", cid)
         check_fields(rec, focus)
         dr, fs = rec.get("doc_ready_ms"), rec.get("first_sentence_ms")
-        if dr is not None and fs is not None and dr <= fs: return (rec, focus, attempt, h) if want_home else (rec, focus, attempt)
+        if dr is not None and fs is not None and dr <= fs:
+            if job_hook: job_hook(h, "measured", label, cid)
+            return (rec, focus, attempt, h) if want_home else (rec, focus, attempt)
     raise Harness("doc_not_ready", f"doc not ready before first sentence (case {cid})", cid)
 
 
@@ -365,19 +382,85 @@ def gated_kind_check(env, mock, kinds_before, label, cid=None):
         raise KindRan("kind_vlm_in_gated_mode", f"kind VLM ran in gated mode (case {label})", cid)
 
 
-def wait_kind_job(home, deadline_s=KIND_JOB_WAIT_S, quiet_s=KIND_JOB_QUIET_S):
-    """Replay mode: wait until the home's kind sidecar (cache/doc/*.kinds.json) exists and neither it nor logs/blockcls.jsonl has
-    changed for quiet_s. Returns True when done, False at the deadline."""
-    t0 = time.time(); last = None; since = None
-    while time.time() - t0 < deadline_s:
-        side = sorted(glob.glob(os.path.join(home, "cache", "doc", "*.kinds.json")))
-        log_p = os.path.join(home, "logs", "blockcls.jsonl")
-        sig = tuple((p, os.path.getsize(p), os.path.getmtime(p)) for p in side + ([log_p] if os.path.exists(log_p) else []))
-        if side and sig == last:
-            if time.time() - since >= quiet_s: return True
-        else: last, since = sig, time.time()
-        time.sleep(0.1)
-    return False
+def routed_pages(parse):
+    """Pages of a parse output with routed candidates (pages[].kinds.routed > 0)."""
+    return sorted(p.get("n") for p in parse.get("pages") or [] if isinstance(p, dict) and isinstance(p.get("kinds"), dict)
+                  and isinstance(p["kinds"].get("routed"), int) and p["kinds"]["routed"] > 0)
+
+
+def parse_cache_entries(home, with_pages=False):
+    """[(parse key, blockcls block)] of a home's parse cache entries (cache/doc/<key>.json holding a blockcls block);
+    with_pages: [(key, blockcls, routed pages)]."""
+    out = []
+    for p in sorted(glob.glob(os.path.join(home, "cache", "doc", "*.json"))):
+        name = os.path.basename(p)
+        if name.endswith(".kinds.json"): continue
+        try: d = json.load(open(p, encoding="utf-8"))
+        except (OSError, ValueError): continue
+        if isinstance(d, dict) and isinstance(d.get("blockcls"), dict):
+            out.append((name[:-len(".json")], d["blockcls"], routed_pages(d)) if with_pages else (name[:-len(".json")], d["blockcls"]))
+    return out
+
+
+def read_sidecar(path, need_pages=()):
+    """A final kind sidecar (state done | partial | failed) whose `pages` covers need_pages (Amendment 2 A2.5), else None (absent,
+    unreadable, not final, or not yet covering the parse's routed pages)."""
+    try: d = json.load(open(path, encoding="utf-8"))
+    except (OSError, ValueError): return None
+    if not (isinstance(d, dict) and d.get("state") in KIND_FINAL_STATES): return None
+    pages = d.get("pages")
+    return d if isinstance(pages, list) and set(need_pages) <= set(pages) else None
+
+
+def wait_kind_job(home, deadline_s=KIND_JOB_WAIT_S, poll_s=0.1):
+    """Amendment 1 A1.2 harness rule as amended by A2.5. Reads the home's parse cache entries; a "queued" entry is waited for until its
+    <key>.kinds.json has a final state and its `pages` covers the parse's routed pages, up to deadline_s. Returns
+    {"status": no-parse | none | done | failed | timeout, "jobs": [...]}; each job: {key, kind_job, routed, routed_pages, state, error,
+    breaker, skipped, pages, path, sha}."""
+    entries = parse_cache_entries(home, with_pages=True)
+    if not entries: return {"status": "no-parse", "jobs": []}
+    jobs = [{"key": k, "kind_job": bc.get("kind_job"), "routed": bc.get("routed"), "routed_pages": rp, "state": None, "error": None, "breaker": None,
+             "skipped": 0, "pages": None, "path": os.path.join(home, "cache", "doc", k + ".kinds.json"), "sha": None} for k, bc, rp in entries]
+    queued = [j for j in jobs if j["kind_job"] != "none"]
+    if not queued: return {"status": "none", "jobs": jobs}
+    t0 = time.time()
+    while True:
+        for j in queued:
+            if j["state"]: continue
+            sc = read_sidecar(j["path"], j["routed_pages"])
+            if sc is None: continue
+            j.update(state=sc["state"], pages=sc.get("pages"), error=sc.get("error"), breaker=sc.get("breaker"), skipped=(sc.get("outcomes") or {}).get("skipped", 0) or 0,
+                     sha=hashlib.sha256(open(j["path"], "rb").read()).hexdigest(), entries=sc.get("entries") or [])
+        if all(j["state"] for j in queued): break
+        if time.time() - t0 >= deadline_s: return {"status": "timeout", "jobs": jobs}
+        time.sleep(poll_s)
+    return {"status": "failed" if any(j["state"] == "failed" for j in queued) else "done", "jobs": jobs}
+
+
+def sidecars_changed(info):
+    """Keys whose sidecar bytes differ from what wait_kind_job read (a second job ran)."""
+    out = []
+    for j in info.get("jobs") or []:
+        if not j.get("sha"): continue
+        try: now = hashlib.sha256(open(j["path"], "rb").read()).hexdigest()
+        except OSError: now = None
+        if now != j["sha"]: out.append(j["key"])
+    return out
+
+
+def sidecar_accepted(info):
+    """Stage C accepted entries of the final sidecars -> {page: [{kind, bbox, kind_src}]} (A1.2: must equal the log records)."""
+    out = {}
+    for j in info.get("jobs") or []:
+        for e in j.get("entries") or []:
+            if isinstance(e, dict) and e.get("outcome") == "accepted" and e.get("kind") in S.KIND_KINDS and S._is_rect(e.get("rect")):
+                b = {"kind": e["kind"], "bbox": list(e["rect"]), "kind_src": "vlm"}
+                if b not in out.setdefault(e.get("page"), []): out[e.get("page")].append(b)
+    return out
+
+
+def _accepted_set(by_page):
+    return {(pg, b["kind"], tuple(round(v, 1) for v in b["bbox"])) for pg, bs in by_page.items() for b in bs}
 
 
 def vlm_accepted(home):
@@ -400,6 +483,29 @@ def merge_preds(gated, vlm):
         for b in bs:
             if not any(c.get("kind") == b["kind"] and S.iou(c["bbox"], b["bbox"]) >= 0.9 for c in cur if S._is_rect(c.get("bbox"))): cur.append(b)
     return out
+
+
+def run_kind_job_direct(env, mock, d, label):
+    """Kind mode, once per doc (every page, unlike a case's document job, which may parse the selected pages first): parse it into a temp home's parse
+    cache and run the document's kind job through the app's own entry (`blockcls.py job PDF CACHE`, contract section 1), then wait for
+    its final sidecar (A1.2 / A2.5). Returns {page: [accepted stage C blocks]}."""
+    dh, h, t = env.home("kindjob"); c = os.path.join(h, "cache", "doc"); os.makedirs(c)
+    cache = os.path.join(c, "0" * 20 + ".json"); e = env.env(h, t); mock.tag(f"{label}:job")
+    try:
+        p = subprocess.run([env.interp, DOCMAP, "parse-pdf", d["pdf"], cache], capture_output=True, text=True, env=e, timeout=180)
+        if p.returncode != 0: raise Harness("parse_failed", f"docmap.py parse-pdf failed before the kind job ({label})", None, (p.stderr.strip().splitlines() or [""])[-1])
+        info = wait_kind_job(h, 0.0)
+        if info["status"] in ("none", "no-parse"): return {}
+        p = subprocess.run([env.interp, os.path.join(APP, "src", "blockcls.py"), "job", d["pdf"], cache], capture_output=True, text=True, env=e, timeout=KIND_JOB_WAIT_S + 30)
+        info = wait_kind_job(h, KIND_JOB_WAIT_S)
+    except subprocess.TimeoutExpired:
+        raise Harness("kind_job_unfinished", f"kind job not finished ({label})")
+    finally: mock.tag("")
+    if info["status"] == "timeout": raise Harness("kind_job_unfinished", f"kind job not finished ({label}, exit {p.returncode})")
+    if info["status"] == "failed": raise Harness("kind_job_failed", f"kind job failed: {next((j.get('error') for j in info['jobs'] if j.get('state') == 'failed'), None)} ({label})")
+    side, logged = sidecar_accepted(info), vlm_accepted(h)
+    if _accepted_set(side) != _accepted_set(logged): raise Harness("kind_sources_differ", f"stage C accepted set differs between the sidecar and logs/blockcls.jsonl ({label})")
+    return side, info
 
 
 def run_area_case(env, mock, case, fx_dir, idx, public=True):
@@ -499,12 +605,6 @@ def load_set(set_name, holdout, family="default"):
     return docs, m["manifest_sha256"]
 
 
-def routed_of(parse):
-    """Routed candidates of a parse (pages[].kinds.routed), so the harness knows whether a kind job will run."""
-    return sum(pg["kinds"].get("routed") or 0 for pg in parse.get("pages") or [] if isinstance(pg, dict) and isinstance(pg.get("kinds"), dict)
-               and isinstance(pg["kinds"].get("routed"), int))
-
-
 def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, family="default"):
     pub = side_of(set_name) == "public"; gap = family == "gap"
     preds = {}; layouts = []; figs_of = {}; scored_tags = set(); parses = {}
@@ -516,11 +616,27 @@ def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, fami
     log(f"bench: {set_name} layout pages {lay['pages']} detector {lay['src']['detector']} heuristic {lay['src']['heuristic']} missing {lay['missing']} "
         f"reasons {lay['reasons']} ms p50 {lay['ms']['p50']} p95 {lay['ms']['p95']}")
     acc = new_acc(pick=bool(env.pick), rows=bool(env.ocr)); cases_out = []; pick_r0 = len(mock.pick_replies()); kind_r0 = len(mock.kind_replies())
-    area_preds = {}; vlm_of = {}; job_timeouts = [0]
+    area_preds = {}; vlm_of = {}; jobs = {"states": {}, "skipped": 0, "waits": 0}; job_info = {}
+    def job_hook(home, stage, label, cid):
+        if stage == "measured":
+            ch = sidecars_changed(job_info.get(home) or {})
+            if ch: raise Harness("kind_job_rerun", f"kind sidecar changed during the measured run: a second job ran (case {label})", cid)
+            return
+        info = wait_kind_job(home, KIND_JOB_WAIT_S if env.kind else 0.0); job_info[home] = info
+        if not env.kind:
+            if info["status"] not in ("none", "no-parse"):
+                raise Harness("kind_job_in_gated_mode", f"parse queued a kind job in gated mode (blockcls.kind_job, case {label})", cid)
+            return
+        if info["status"] == "no-parse": raise Harness("kind_job_no_parse", f"no parse cache entry with a blockcls block after the warm-up (case {label})", cid)
+        if info["status"] == "timeout": raise Harness("kind_job_unfinished", f"kind job not finished (case {label})", cid)
+        if info["status"] == "failed":
+            err = next((j.get("error") for j in info["jobs"] if j.get("state") == "failed"), None)
+            raise Harness("kind_job_failed", f"kind job failed: {err} (case {label})", cid)
+        info["logged"] = vlm_accepted(home)   # read now: run_case clears logs/ before each measured attempt
+        for j in info["jobs"]:
+            if j.get("state"): jobs["states"][j["state"]] = jobs["states"].get(j["state"], 0) + 1; jobs["waits"] += 1
     for d in docs:
         gt = d["gt"]; pw = {p["n"]: p["w"] for p in gt["pages"]}; first = [True]
-        def kind_wait(home, d=d):
-            if routed_of(parses[d["doc_id"]]) and not wait_kind_job(home): job_timeouts[0] += 1
         for case in sorted(d["cases"], key=lambda c: c["case_id"]):
             if glob and not fnmatch.fnmatch(case["case_id"], glob): continue
             counter[0] += 1
@@ -534,8 +650,13 @@ def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, fami
                     log(f"bench: {set_name} case {counter[0]:3d} {case['case_id'] if pub else ''} area_pdf {rec.get('area_pdf')} "
                         f"area_kinds {json.dumps(cases_out[-1]['area_kinds'])}")
                     continue
-                rec, focus, tries, home = run_case(env, mock, case, d["pdf"], pw[case["page"]], counter[0], public=pub, kind_wait=kind_wait, want_home=True)
-                if env.kind and first[0]: vlm_of[d["doc_id"]] = vlm_accepted(home); first[0] = False
+                rec, focus, tries, home = run_case(env, mock, case, d["pdf"], pw[case["page"]], counter[0], public=pub, job_hook=job_hook, want_home=True)
+                if env.kind and first[0]:
+                    first[0] = False; vlm_of[d["doc_id"]] = (job_info.get(home) or {}).get("logged") or {}; side = sidecar_accepted(job_info.get(home) or {})
+                    jobs["skipped"] += sum(j.get("skipped") or 0 for j in (job_info.get(home) or {}).get("jobs") or [])
+                    if (job_info.get(home) or {}).get("status") == "done" and _accepted_set(side) != _accepted_set(vlm_of[d["doc_id"]]):
+                        raise Harness("kind_sources_differ", f"stage C accepted set differs between the sidecar and logs/blockcls.jsonl (case {case['case_id'] if pub else '#' + str(counter[0])})",
+                                      case["case_id"] if pub else None)
                 scored_tags.add(f"{counter[0]}:m{tries}"); acc["figs"] = figs_of.get(d["doc_id"], {})
                 r = score_case(case, gt, rec, focus, acc); cases_out.append(r)
                 log(f"bench: {set_name} case {counter[0]:3d} {case['case_id'] if pub else ''} lines {r['lines']['hits']}/{r['lines']['n']} "
@@ -547,6 +668,20 @@ def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, fami
                 cid = ex.case_id if pub else None
                 errors.append({"case_id": cid, "code": ex.code, "message": ex.message if pub else ex.code})
                 log(f"bench: ERROR {ex.message}" + (f" | stderr: {ex.detail}" if ex.detail else ""))
+    if env.kind:   # kind_vlm comes from one full-document kind job per doc: a case's document job may parse only the selected
+        for d in docs:   # pages first (A2.5), and area-only scanned docs and real gap docs have no bounds case at all
+            if glob and not any(fnmatch.fnmatch(c["case_id"], glob) for c in d["cases"]): continue
+            label = d["doc_id"] if pub else "#doc"
+            try:
+                r = run_kind_job_direct(env, mock, d, label); vlm_of[d["doc_id"]] = {}
+                if r:
+                    vlm_of[d["doc_id"]], info = r
+                    for j in info["jobs"]:
+                        if j.get("state"): jobs["states"][j["state"]] = jobs["states"].get(j["state"], 0) + 1; jobs["skipped"] += j.get("skipped") or 0
+                log(f"bench: {set_name} kind job {label} accepted {sum(len(v) for v in vlm_of.get(d['doc_id'], {}).values())}")
+            except Harness as ex:
+                errors.append({"case_id": None, "code": ex.code, "message": ex.message if pub else ex.code})
+                log(f"bench: ERROR {ex.message}" + (f" | stderr: {ex.detail}" if ex.detail else ""))
     gated_kind_check(env, mock, kind_r0, f"{set_name} end of set")
     real = [d["gt"] for d in docs if d["subset"] == "real"]
     reviewed = bool(real) and all(g.get("reviewed_by_human") for g in real)
@@ -557,21 +692,31 @@ def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, fami
            "speed": S.speed_summary(V["fh"], V["a2b"], V["missing"]), "layout": lay, "invariants": S.invariants_summary(acc["inv"])}
     for sec in ("boxes", "lines", "parts"):
         if "real" in blk[sec]["by_subset"]: blk[sec]["by_subset"]["real"].update(gt_source="agent", reviewed_by_human=reviewed)
+    if any(isinstance(p.get("layout2"), dict) or any(isinstance(pg.get("layout2"), dict) for pg in p.get("pages") or [] if isinstance(pg, dict)) for p in parses.values()):
+        l2 = blk["layout2"] = S.layout2_summary([parses[d["doc_id"]] for d in docs])
+        blk["_l2_tops"] = [parses[d["doc_id"]].get("layout2") for d in docs if isinstance(parses[d["doc_id"]].get("layout2"), dict)]
+        log(f"bench: {set_name} layout2 pages {l2['pages']} routed {l2['routed']} by_rule {json.dumps(l2['by_rule'])} src {json.dumps(l2['src'], sort_keys=True)} "
+            f"added {l2['added']} structural {l2['structural']} reasons {json.dumps(l2['reasons'], sort_keys=True)} ms p50 {l2['ms']['p50']} p95 {l2['ms']['p95']} load_ms max {l2['load_ms']['max']}")
     if gap:
         gts = [(d["doc_id"], d["gt"]) for d in docs]
         blk["kind"] = S.score_kind(gts, preds, area_preds)
         blk["blockcls"] = S.blockcls_summary([parses[d["doc_id"]] for d in docs])
         if env.ocr:
             R = acc["rows"]; reps = jl(env.ocr["log"]); miss = sum(1 for r in reps if r.get("result") == "miss")
+            bad = sum(1 for r in reps if r.get("result") == "bad-schema")
             blk["image_table_rows"] = dict(S.rows_summary(R["hits"], R["n"], R["reasons"]), replay_miss=miss if env.ocr["mode"] == "replay" else 0,
-                                           stale=env.ocr["mode"] == "replay" and miss > 0, ocr_calls=len(reps))
+                                           stale=env.ocr["mode"] == "replay" and miss > 0, ocr_calls=len(reps), ocr_bad_schema=bad)
+            if bad:
+                errors.append({"case_id": None, "code": "ocr_bad_schema", "message": f"{set_name}: {bad} OCR helper outputs outside the Amendment 1 A1.1 schema"})
+                log(f"bench: ERROR {set_name}: {bad} OCR helper outputs outside the A1.1 schema")
         else:
             blk["image_table_rows"] = S.rows_summary(0, 0, {}, reason="gated: no OCR helper (contract 12.4)")
         if env.kind:
             reps = mock.kind_replies()[kind_r0:]; miss = sum(1 for r in reps if r.get("result") == "miss")
             kv = S.score_kind(gts, {d["doc_id"]: merge_preds(preds[d["doc_id"]], vlm_of.get(d["doc_id"], {})) for d in docs}, area_preds)
             kv.update(requests=len(reps), by_result={x: sum(1 for r in reps if r.get("result") == x) for x in sorted({r.get("result") for r in reps})},
-                      replay_miss=miss if env.kind == "replay" else 0, stale=env.kind == "replay" and miss > 0, job_timeouts=job_timeouts[0],
+                      replay_miss=miss if env.kind == "replay" else 0, stale=env.kind == "replay" and miss > 0, job_states=dict(sorted(jobs["states"].items())),
+                      skipped=jobs["skipped"],
                       ms={"p50": S.nearest_rank([round((r["t1"] - r["t0"]) * 1000) for r in reps if r.get("t1") and r.get("t0")], 0.5),
                           "p95": S.nearest_rank([round((r["t1"] - r["t0"]) * 1000) for r in reps if r.get("t1") and r.get("t0")], 0.95)})
             blk["kind_vlm"] = kv
@@ -579,7 +724,7 @@ def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, fami
         log(f"bench: {set_name} kind {k['score']} ({k['hits']}/{k['gt']}) precision {k['precision']} ({k['matched']}/{k['pred']}) wrong_type {k['wrong_type']['total']} "
             f"prose_decoys {k['prose_decoys']['kept']}/{k['prose_decoys']['n']} | blockcls candidates {bc['candidates']} by_outcome {json.dumps(bc['by_outcome'], sort_keys=True)}")
         if env.kind: log(f"bench: {set_name} kind_vlm {blk['kind_vlm']['score']} precision {blk['kind_vlm']['precision']} requests {blk['kind_vlm']['requests']} "
-                         f"replay_miss {blk['kind_vlm']['replay_miss']} job_timeouts {job_timeouts[0]}")
+                         f"replay_miss {blk['kind_vlm']['replay_miss']} job_states {json.dumps(jobs['states'], sort_keys=True)} skipped {jobs['skipped']}")
     if env.pick:
         reps = mock.pick_replies()[pick_r0:]
         miss = sum(1 for r in reps if r.get("result") == "miss" and r.get("run") in scored_tags)
@@ -593,6 +738,11 @@ def run_set(set_name, docs, env, mock, glob, errors, counter, det_versions, fami
     return blk, cases_out, boxes.get("by_doc")
 
 
+def pop_private(blk):
+    """Drop harness-only keys (leading underscore) before bench.json is written."""
+    return {k: v for k, v in blk.items() if not k.startswith("_")}
+
+
 def blockcls_coverage_errors(set_name, bc):
     """A --figcls-model gap run must have the classifier on in every parse (12.4): [] when every parse reports blockcls.status ok."""
     bad = {k: v for k, v in (bc.get("status") or {}).items() if k != "ok"}
@@ -600,7 +750,7 @@ def blockcls_coverage_errors(set_name, bc):
 
 
 def run_once(sets, holdout, glob, interp, keep, layout_model, pr, last_cases, pick=None, cassettes=None, upstream=None, family="default",
-             figcls_model=None, kind=None, kind_cassettes=None, kind_upstream=None, ocr=None, ocr_cassettes=None, ocr_helper=None):
+             figcls_model=None, kind=None, kind_cassettes=None, kind_upstream=None, ocr=None, ocr_cassettes=None, ocr_helper=None, layout2_model=None):
     t0 = time.time(); root = os.path.realpath(tempfile.mkdtemp(prefix="se_bench_"))
     sha, dirty = git_state(); errors = []; out_sets = {}; fixtures = {}; hidden_detail = None; mock = None; det_versions = set()
     vers = versions(pr)
@@ -611,10 +761,11 @@ def run_once(sets, holdout, glob, interp, keep, layout_model, pr, last_cases, pi
     if pick: bench["pick_cassettes"] = {}
     if kind: bench["kind_cassettes"] = {}
     if ocr: bench["ocr_cassettes"] = {}
-    code = 0; coverage = []; cls_versions = set()
+    code = 0; coverage = []; cls_versions = set(); det2_versions = set()
     try:
         per_set_mock = bool(pick or kind)
         mock = None if per_set_mock else Mock(root); env = Env(root, mock.port if mock else None, interp, layout_model, pick, figcls_model, kind); counter = [0]
+        env.layout2_model = layout2_model
         for s in sets:
             docs, msha = load_set(s, holdout, family)
             fixtures[s] = {"manifest_sha256": msha, "docs": len(docs), "cases": sum(len(d["cases"]) for d in docs)}
@@ -633,7 +784,7 @@ def run_once(sets, holdout, glob, interp, keep, layout_model, pr, last_cases, pi
                 open(env.ocr["log"], "w").close()
             n_err = len(errors)
             blk, cases_out, by_doc = run_set(s, docs, env, mock, glob, errors, counter, det_versions, family)
-            out_sets[s] = blk
+            out_sets[s] = pop_private(blk)
             if pick: bench["pick_cassettes"][s] = cassette_info(cassettes[side] if pick == "replay" else cas)
             if kind: bench["kind_cassettes"][s] = cassette_info(kind_cassettes[side] if kind == "replay" else kcas)
             if ocr: bench["ocr_cassettes"][s] = cassette_info(ocr_cassettes[side] if ocr == "replay" else env.ocr["cassette"])
@@ -651,12 +802,17 @@ def run_once(sets, holdout, glob, interp, keep, layout_model, pr, last_cases, pi
             if side == "hidden": hidden_detail = {"generated_at": None, "cases": cases_out, "by_doc": by_doc}
             if layout_model: coverage += S.layout_coverage_errors(s, blk["layout"])
             elif blk["layout"]["src"]["detector"]: log(f"bench: WARNING {s}: {blk['layout']['src']['detector']} detector pages without --layout-model (a model outside the temp home?)")
+            det2_versions |= {(parse_l2 or {}).get("detector_version") for parse_l2 in blk.get("_l2_tops", [])} - {None}
+            if isinstance(blk.get("layout2"), dict):
+                if layout2_model: coverage += S.layout2_coverage_errors(s, blk["layout2"])
+                elif blk["layout2"]["src"].get("heron"): log(f"bench: WARNING {s}: heron pages without --layout2-model (a model outside the temp home?)")
             if family == "gap":
                 cls_versions |= set(blk["blockcls"].get("classifier_version") or [])
                 if figcls_model: coverage += blockcls_coverage_errors(s, blk["blockcls"])
                 elif (blk["blockcls"].get("status") or {}).get("ok"): log(f"bench: WARNING {s}: classifier on without --figcls-model (a model outside the temp home?)")
         vers["layout_model"] = sorted(det_versions)[0] if len(det_versions) == 1 else (sorted(det_versions) or None)
         if family == "gap": vers["figcls_model"] = sorted(cls_versions)[0] if len(cls_versions) == 1 else (sorted(cls_versions) or None)
+        vers["layout2_model"] = sorted(det2_versions)[0] if len(det2_versions) == 1 else (sorted(det2_versions) or None)   # A4.4: detector2_version or null
         for m in coverage:
             errors.append({"case_id": None, "code": "layout_coverage", "message": m}); log(f"bench: COVERAGE FAIL {m}")
         if errors: code = 5 if coverage and len(errors) == len(coverage) else 3
@@ -732,10 +888,13 @@ def summary(bench):
             print(f"{s}: {name} {k['score']} ({k['hits']}/{k['gt']}) precision {k['precision']} ({k['matched']}/{k['pred']}) | wrong_type {json.dumps(k['wrong_type'], sort_keys=True)} "
                   f"| prose_decoys {k['prose_decoys']['kept']}/{k['prose_decoys']['n']} | spurious_on_decoy {k['spurious_on_decoy']} | by_gap "
                   + " ".join(f"{g} {v['score']} ({v['hits']}/{v['n']})" for g, v in k["by_gap"].items())
-                  + (f" | requests {k['requests']} replay_miss {k['replay_miss']}{' STALE' if k['stale'] else ''} job_timeouts {k['job_timeouts']}" if name == "kind_vlm" else ""))
+                  + (f" | requests {k['requests']} replay_miss {k['replay_miss']}{' STALE' if k['stale'] else ''} job_states {json.dumps(k.get('job_states'), sort_keys=True)} skipped {k.get('skipped')}" if name == "kind_vlm" else ""))
         rw = b.get("image_table_rows")
         if rw: print(f"{s}: image_table_rows {rw['score']} ({rw['hits']}/{rw['n']})" + (f" not scored: {rw['not_scored']}" if rw.get("not_scored") else
                                                                                        f" miss {json.dumps(rw['miss_reasons'], sort_keys=True)} replay_miss {rw.get('replay_miss')}"))
+        l2 = b.get("layout2")
+        if l2: print(f"{s}: layout2 pages {l2['pages']} routed {l2['routed']} by_rule {json.dumps(l2['by_rule'])} src {json.dumps(l2['src'], sort_keys=True)} added {l2['added']} "
+                     f"structural {l2['structural']} reasons {json.dumps(l2['reasons'], sort_keys=True)} | heron ms/page p50 {l2['ms']['p50']} p95 {l2['ms']['p95']} | load_ms max {l2['load_ms']['max']}")
         bc = b.get("blockcls")
         if bc: print(f"{s}: blockcls status {json.dumps(bc['status'], sort_keys=True)} pages {bc['pages']} candidates {bc['candidates']} by_stage {json.dumps(bc['by_stage'], sort_keys=True)} "
                      f"by_outcome {json.dumps(bc['by_outcome'], sort_keys=True)} | stage B ms/candidate p50 {bc['ms']['p50']} p95 {bc['ms']['p95']} | ms/page p50 {bc['ms_page']['p50']} p95 {bc['ms_page']['p95']}")
@@ -770,6 +929,7 @@ def main():
     ap.add_argument("--pick-upstream", help="proxy upstream, loopback only (default $MOCK_PICK_UPSTREAM or http://127.0.0.1:11434)")
     ap.add_argument("--family", default="default", choices=("default", "gap"), help="gap: the Phase 6 gap fixtures and the kind score")
     ap.add_argument("--app-repo", help="app checkout to measure (its src/speakeasy and src/docmap.py; default: this tree). bench.json commit is that tree's HEAD")
+    ap.add_argument("--layout2-model", help="verified docling_layout_heron.onnx, passed as SPEAKEASY_LAYOUT2_MODEL (Amendment 3; default: the caller's SPEAKEASY_LAYOUT2_MODEL)")
     ap.add_argument("--figcls-model", help="verified docling_figure_classifier_v2_5.onnx, passed as SPEAKEASY_FIGCLS_MODEL (default: the caller's SPEAKEASY_FIGCLS_MODEL)")
     ap.add_argument("--kind", choices=("replay", "proxy"), help="stage C replay mode (gap family; scored separately, never gated)")
     ap.add_argument("--kind-cassette", help="public kind cassette (default tests/audit/bench/kind_cassette.json)")
@@ -784,7 +944,7 @@ def main():
         if not os.path.isfile(os.path.join(os.path.expanduser(a.app_repo), "src", "docmap.py")): log(f"bench: --app-repo has no src/docmap.py: {a.app_repo}"); sys.exit(2)
         set_app(a.app_repo); log(f"bench: app tree {APP}")
     gap = a.family == "gap"
-    if not gap and (a.kind or a.ocr or a.figcls_model): log("bench: --kind, --ocr and --figcls-model need --family gap"); sys.exit(2)
+    if not gap and (a.kind or a.ocr): log("bench: --kind and --ocr need --family gap"); sys.exit(2)
     if gap and a.pick: log("bench: --pick is not a gap-family mode"); sys.exit(2)
     interp = os.path.abspath(a.doc_python) if a.doc_python else sys.executable
     pr = probe(interp)
@@ -800,7 +960,14 @@ def main():
         log(f"bench: layout model {layout_model} (onnxruntime {pr.get('onnxruntime')})")
     else:
         log("bench: no layout model: this run measures the heuristic fallback")
-    figcls_model = a.figcls_model or (os.environ.get("SPEAKEASY_FIGCLS_MODEL") if gap else None) or None
+    figcls_model = a.figcls_model or os.environ.get("SPEAKEASY_FIGCLS_MODEL") or None
+    layout2_model = a.layout2_model or os.environ.get("SPEAKEASY_LAYOUT2_MODEL") or None
+    if layout2_model:
+        layout2_model = os.path.abspath(os.path.expanduser(layout2_model))
+        if not os.path.isfile(layout2_model): log(f"bench: second-detector model not found: {layout2_model}"); sys.exit(2)
+        if not (pr.get("import_onnxruntime") and pr.get("import_numpy")):
+            log(f"bench: --layout2-model needs onnxruntime and numpy in {interp} (the run would silently measure the fallback)"); sys.exit(2)
+        log(f"bench: second-detector model {layout2_model}")
     if figcls_model:
         figcls_model = os.path.abspath(os.path.expanduser(figcls_model))
         if not os.path.isfile(figcls_model): log(f"bench: classifier model not found: {figcls_model}"); sys.exit(2)
@@ -871,7 +1038,7 @@ def main():
         signal.signal(sig, lambda *_: (_ for _ in ()).throw(KeyboardInterrupt()))
     lc = os.path.abspath(os.path.expanduser(a.last_cases_out)) if a.last_cases_out else None
     pk = dict(pick=a.pick, cassettes=cassettes, upstream=upstream, family=a.family, figcls_model=figcls_model, kind=a.kind, kind_cassettes=kind_cassettes,
-              kind_upstream=kind_upstream, ocr=a.ocr, ocr_cassettes=ocr_cassettes, ocr_helper=os.path.abspath(os.path.expanduser(a.ocr_helper)) if a.ocr_helper else None)
+              kind_upstream=kind_upstream, ocr=a.ocr, ocr_cassettes=ocr_cassettes, layout2_model=layout2_model, ocr_helper=os.path.abspath(os.path.expanduser(a.ocr_helper)) if a.ocr_helper else None)
     bench, code = run_once(sets, holdout, a.cases, interp, a.keep_temp, layout_model, pr, lc, **pk)
     atomic_json(a.out, bench); summary(bench)
     if code: sys.exit(code)

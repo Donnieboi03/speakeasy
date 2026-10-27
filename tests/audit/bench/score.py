@@ -511,7 +511,8 @@ def rows_summary(hits, n, reasons, stale=False, reason=None):
 # ---------------------------------------------------------------- blockcls cost block (12.3, 14.4)
 def blockcls_summary(parses):
     """sets.<set>.blockcls from the parse outputs (counts, enums and ms only). parses: parse-pdf JSON dicts."""
-    pages = 0; cand = 0; by_stage = {}; by_outcome = {}; ms_c = []; ms_p = []; status = {}; versions = set(); per_page = []
+    pages = 0; cand = 0; by_stage = {}; by_outcome = {}; ms_c = []; ms_p = []; status = {}; versions = set(); per_page = []; events = {}
+    l2 = {"pages": 0, "added": 0, "structural": 0, "unavailable": {}}
     for d in parses:
         top = d.get("blockcls") if isinstance(d.get("blockcls"), dict) else {}
         status[str(top.get("status"))] = status.get(str(top.get("status")), 0) + 1
@@ -523,9 +524,16 @@ def blockcls_summary(parses):
             if n and isinstance(k.get("ms"), (int, float)) and not isinstance(k.get("ms"), bool): ms_p.append(k["ms"])
         for e in d.get("blockcls_events") or []:
             if not isinstance(e, dict): continue
+            if e.get("event") == "layout2_page":     # Amendment 4 A4.4: second-detector records are counted here, never as stages
+                l2["pages"] += 1; l2["added"] += e.get("added") or 0; l2["structural"] += e.get("structural") or 0; continue
+            if e.get("event") == "layout2_unavailable":
+                r = str(e.get("reason")); l2["unavailable"][r] = l2["unavailable"].get(r, 0) + 1; continue
+            if e.get("event") != "block_kind":
+                n_ev = str(e.get("event")); events[n_ev] = events.get(n_ev, 0) + 1; continue
             s = str(e.get("stage")); o = str(e.get("outcome")); by_stage[s] = by_stage.get(s, 0) + 1; by_outcome[o] = by_outcome.get(o, 0) + 1
             if e.get("stage") == "classifier" and isinstance(e.get("ms"), (int, float)) and not isinstance(e.get("ms"), bool): ms_c.append(e["ms"])
-    return {"pages": pages, "candidates": cand, "by_stage": dict(sorted(by_stage.items())), "by_outcome": dict(sorted(by_outcome.items())),
+    return {"pages": pages, "candidates": cand, "by_stage": dict(sorted(by_stage.items())), "by_outcome": dict(sorted(by_outcome.items())), "events": dict(sorted(events.items())),
+            "layout2": dict(l2, unavailable=dict(sorted(l2["unavailable"].items()))),
             "status": dict(sorted(status.items())), "classifier_version": sorted(versions) or None,
             "candidates_per_page": {"p50": nearest_rank(per_page, 0.5), "max": max(per_page) if per_page else None},
             "ms": {"p50": nearest_rank(ms_c, 0.5), "p95": nearest_rank(ms_c, 0.95), "n": len(ms_c)},
@@ -533,8 +541,49 @@ def blockcls_summary(parses):
 
 
 def _no_ms(d):
-    if isinstance(d, dict): return {k: _no_ms(v) for k, v in d.items() if k not in ("ms", "ms_page")}
+    """Drop timing fields (ms, ms_page and any *_ms) before the determinism comparison."""
+    if isinstance(d, dict): return {k: _no_ms(v) for k, v in d.items() if k not in ("ms", "ms_page") and not k.endswith("_ms")}
     return d
+
+
+# ---------------------------------------------------------------- second detector (Amendment 3 A3.2, A3.4)
+LAYOUT2_RULES = ("R1", "R2", "R3")
+
+
+def layout2_summary(parses):
+    """sets.<set>.layout2 from parse outputs (counts, enums and ms only): pages with a layout2 field, routed pages, routed pages by
+    rule (a page routed by several rules counts once per rule), by src, heron ms per routed page (p50/p95), session load_ms per parse
+    with a loaded detector, unavailable reasons (top-level layout2.reason and layout2_unavailable events), candidates added by heron,
+    structural candidates, and routed pages with a fallback reason (A4.4 coverage)."""
+    pages = routed = added = structural = 0; routed_unavail = {}; by_rule = {r: 0 for r in LAYOUT2_RULES}; src = {}; ms = []; load = []; reasons = {}; ev_reasons = {}
+    for d in parses:
+        top = d.get("layout2") if isinstance(d.get("layout2"), dict) else {}
+        if top.get("reason"): reasons[str(top["reason"])] = reasons.get(str(top["reason"]), 0) + 1
+        if isinstance(top.get("load_ms"), (int, float)) and not isinstance(top.get("load_ms"), bool): load.append(top["load_ms"])
+        for e in d.get("blockcls_events") or []:
+            if isinstance(e, dict) and e.get("event") == "layout2_unavailable": r = str(e.get("reason")); ev_reasons[r] = ev_reasons.get(r, 0) + 1
+        for pg in d.get("pages") or []:
+            l2 = pg.get("layout2") if isinstance(pg, dict) else None
+            if not isinstance(l2, dict): continue
+            pages += 1
+            if not l2.get("routed"): continue
+            routed += 1; sv = str(l2.get("src")); src[sv] = src.get(sv, 0) + 1
+            for r in l2.get("by") or []: by_rule[r] = by_rule.get(r, 0) + 1
+            added += l2.get("added") or 0; structural += l2.get("structural") or 0
+            if l2.get("src") == "heron" and isinstance(l2.get("ms"), (int, float)) and not isinstance(l2.get("ms"), bool): ms.append(l2["ms"])
+            why = l2.get("reason") or (top.get("reason") if l2.get("src") == "unavailable" else None)
+            if why and why != "over-cap": routed_unavail[str(why)] = routed_unavail.get(str(why), 0) + 1
+    return {"pages": pages, "routed": routed, "by_rule": by_rule, "src": dict(sorted(src.items())), "added": added, "structural": structural,
+            "reasons": dict(sorted(reasons.items())), "unavailable_events": dict(sorted(ev_reasons.items())), "routed_unavailable": dict(sorted(routed_unavail.items())),
+            "ms": {"p50": nearest_rank(ms, 0.5), "p95": nearest_rank(ms, 0.95), "n": len(ms)},
+            "load_ms": {"p50": nearest_rank(load, 0.5), "max": max(load) if load else None, "n": len(load)}}
+
+
+def layout2_coverage_errors(set_name, l2):
+    """A4.4: a run with --layout2-model must run heron on every routed page: [] when no routed page has a fallback reason (the
+    over-cap skip is a cap, not a fallback)."""
+    bad = (l2 or {}).get("routed_unavailable") or {}
+    return [] if not bad else [f"{set_name}: second-detector run but routed pages with layout2 reasons {json.dumps(bad, sort_keys=True)}"]
 
 
 # ---------------------------------------------------------------- determinism (9)
@@ -548,7 +597,7 @@ def determinism_view(bench):
         if "cases" in v and gated: d["cases"] = [{k: x for k, x in c.items() if k != "first_highlight_ms"} for c in v["cases"]]
         if isinstance(v.get("pick"), dict): d["pick"] = {k: x for k, x in v["pick"].items() if k != "ms"}
         if isinstance(v.get("layout"), dict): d["layout"] = {k: v["layout"].get(k) for k in ("pages", "src", "missing", "reasons")}
-        for k in ("kind", "kind_vlm", "image_table_rows", "blockcls"):                   # gap family (phase6-block-classifier.md 12.4)
+        for k in ("kind", "kind_vlm", "image_table_rows", "blockcls", "layout2"):        # gap family (12.4) and the second detector (A3.4)
             if isinstance(v.get(k), dict): d[k] = _no_ms(v[k])
         out["sets"][s] = d
     return out
@@ -636,6 +685,11 @@ def gate(bench, baselines, public_only=False, budget=300, parts_min=None):
             out.append(f"{s} speed.first_highlight_ms.{q} budget<{budget} -> {v if v is not None else 'null'} {'FAIL' if bad else 'PASS'}")
     out.append("-- informational")
     for s in sorted(bench["sets"]):
+        l2 = bench["sets"][s].get("layout2")
+        if isinstance(l2, dict):     # A5.1: router firing on the existing families is reported, not gated (supersedes A3.6 item 3)
+            ms = l2.get("ms") or {}
+            out.append(f"{s} layout2 routed {l2.get('routed')} by_rule {json.dumps(l2.get('by_rule'), sort_keys=True)} "
+                       f"heron ms p50 {ms.get('p50')} p95 {ms.get('p95')}")
         det = (baselines[s].get("detail") or {}); cur = baseline_detail(bench["sets"][s], s == "public")
         for grp in sorted(cur):
             for k, v in sorted(cur[grp].items()):

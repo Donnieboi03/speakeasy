@@ -51,7 +51,11 @@ class DocJob(threading.Thread):
         try: note_library(self.rec["doc_path_hash"], location, url_name(location) if src == "browser" else pdf_title(path) or os.path.basename(path))
         except (OSError, ValueError) as e: self._fill(library_error=type(e).__name__)   # the read goes on without a name
         if not doc: return
-        if cache in ("miss", "partial-miss", "miss-pdfkit") and doc["kind"] == "pdf": self._fill(layout_events=doc["layout_events"])
+        if cache in ("miss", "partial-miss", "miss-pdfkit") and doc["kind"] == "pdf":
+            self._fill(layout_events=doc["layout_events"])
+            if "blockcls_events" in doc: self._fill(blockcls_events=doc["blockcls_events"])
+        elif doc["kind"] == "pdf" and doc.get("kind_sidecar") and "blockcls_events" in doc: self._fill(blockcls_events=doc["blockcls_events"])
+        if doc["kind"] == "pdf": self._kind_job(path, doc)
         out = {"kind": doc["kind"], "figures": [], "page": None, "anchors": []}
         if doc["kind"] == "pdf":
             pg, meth = docmap.match_page(doc, self.sel, hint.get("title") or "")
@@ -71,6 +75,8 @@ class DocJob(threading.Thread):
                     if len(k) >= 14 and k not in seen: seen.add(k); anc.append(l)
                 out["anchors"] = [[round(v, 1) for v in a[:4]] + [a[4][:80]] for a in anc][:48]
                 self._fill(page=pg["n"], doc_parse=docmap.parse_summary(pg), figures_degenerate=sum(bool(f.get("degenerate")) for f in pg["figures"]))
+                if "kinds" in pg: self.rec["doc_parse"]["kinds"] = pg["kinds"]
+                if "layout2" in pg: self.rec["doc_parse"]["layout2"] = pg["layout2"]
                 if any(f["kind"] == "figure" for f in pg["figures"]) and vision_model() != model_name() and GROUNDER.pick_enabled():
                     prewarm([vision_model()])                       # load the picker's model while the text model speaks
         else:
@@ -91,6 +97,38 @@ class DocJob(threading.Thread):
                    if doc["kind"] == "pdf" else None)
         self.out = out
     cold = False
+    def _kind_job(self, path, doc):
+        """6.1 / A1.2: one detached kind job per parse key for a parse with routed candidates and stage C on."""
+        bc = doc.get("blockcls") or {}
+        if bc.get("kind_job") != "queued" or docmap.venv_python() is None: return
+        import blockcls
+        cache_json = docmap.cache_path(path)
+        routed_pages = blockcls.pending_pages(doc)
+        def complete():
+            s = blockcls.read_sidecar(cache_json)
+            return bool(s) and s.get("state") in ("done", "partial", "failed") and routed_pages <= blockcls.covered_pages(s)
+        was_complete = complete()
+        started = blockcls.job_should_start(cache_json, doc) and blockcls.start_job(path, cache_json, docmap.venv_python())
+        self.kind_cache = cache_json
+        self._fill(kind_job={"started": bool(started), "routed": bc.get("routed", 0)})
+        if was_complete and not started: return
+        def late_answers():
+            """An answer landing mid-run applies to chunks mapped after it (the late-update rule); no show is redrawn. Done when
+            the sidecar is final and covers this parse's routed pages (A2.5)."""
+            end = time.time() + blockcls.JOB_DEADLINE + 15
+            while time.time() < end and not state.STOP.is_set():
+                time.sleep(0.25)
+                if not complete(): continue
+                out = self.out
+                if not out or not out.get("page"): return
+                try: merged = docmap.merge_kinds(json.load(open(cache_json)), cache_json)
+                except (OSError, ValueError): return
+                pg = next((p for p in merged["pages"] if p["n"] == out["page"]["n"]), None)
+                if pg is not None:
+                    own = {id(f) for f in out["page"]["figures"]}
+                    self.out = dict(out, page=pg, figures=list(pg["figures"]) + [f for f in out["figures"] if id(f) not in own])
+                return
+        threading.Thread(target=late_answers, daemon=True).start()
     def relevant(self):
         """Figures/tables the selection mentions, is the caption of, or sits next to (within ~60 pt)."""
         d = self.out
@@ -118,6 +156,97 @@ class DocJob(threading.Thread):
             end = time.time() + wait
             while not self.done.is_set() and not self.cold and time.time() < end: self.done.wait(0.01)
         return self.out if self.done.is_set() else None
+
+def kind_job_summary(rec):
+    """Runs-log kind_job (9.3): the started flag and routed count, plus the sidecar's counts once the job has finished."""
+    kj, doc = rec.get("kind_job"), state.DOC
+    if not kj or doc is None or not getattr(doc, "kind_cache", None): return
+    import blockcls
+    try:
+        with open(blockcls.sidecar_path(doc.kind_cache)) as f: side = json.load(f)
+    except (OSError, ValueError):
+        side = None
+    entries = (side or {}).get("entries") or []
+    ms = sorted(e["ms"] for e in entries if isinstance(e.get("ms"), int))
+    kj.update(called=sum(e.get("provider") is not None for e in entries), accepted=sum(e.get("outcome") == "accepted" for e in entries),
+              outcomes=(side or {}).get("outcomes") or {}, breaker=(side or {}).get("breaker"),
+              ms={"p50": ms[len(ms) // 2] if ms else None, "max": ms[-1] if ms else None})
+
+AREA_CLASSIFY_TIMEOUT = 20.0
+
+def _png_size(path):
+    with open(path, "rb") as f: head = f.read(24)
+    if head[:8] != b"\x89PNG\r\n\x1a\n": raise ValueError("not a png")
+    return int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")
+
+class AreaClassify(threading.Thread):
+    """7.2: the detector, lexicon captions and stage B on a Read-area capture (blockcls.py capture in the doc venv), alongside the
+    run. The app's OCR lines are the text layer (A1.1 app-lines). Used only when area_pdf ends != ok; never delays a highlight."""
+    def __init__(self, png, ocr_text, line_bounds_path, capture_rect):
+        super().__init__(daemon=True)
+        self.result, self.done, self.error = None, threading.Event(), None
+        pid = os.getpid(); tmp = tempfile_dir()
+        self.png, self.ocr, self.out = (os.path.join(tmp, f"speakeasy_cap_area_{pid}.png"), os.path.join(tmp, f"speakeasy_cap_ocr_{pid}.json"),
+                                        os.path.join(tmp, f"speakeasy_cap_kinds_{pid}.json"))
+        try: self._prepare(png, ocr_text, line_bounds_path, capture_rect)
+        except BaseException:
+            for p in (self.png, self.ocr):
+                try: os.remove(p)
+                except OSError: pass
+            raise
+    def _prepare(self, png, ocr_text, line_bounds_path, capture_rect):
+        x, y, w, h = [float(v) for v in capture_rect.split(",")]
+        with open(png, "rb") as src, open(self.png, "wb") as dst: dst.write(src.read())     # the capture may be cropped or removed later
+        W, H = _png_size(self.png); scale = W / max(1.0, w)
+        lines = []
+        for e in json.load(open(line_bounds_path)):
+            t = " ".join(ocr_text[int(e["loc"]):int(e["loc"]) + int(e["len"])].split()); bx, by, bw, bh = map(float, e["rect"])
+            r = [round(min(W, max(0.0, (bx - x) * scale)), 1), round(min(H, max(0.0, (by - y) * scale)), 1),
+                 round(min(W, max(0.0, (bx + bw - x) * scale)), 1), round(min(H, max(0.0, (by + bh - y) * scale)), 1)]
+            if t and r[2] > r[0] and r[3] > r[1]: lines.append({"rect": r, "text": t, "conf": None})
+        lines.sort(key=lambda l: (l["rect"][1], l["rect"][0]))
+        with open(self.ocr, "w", encoding="utf-8") as f:
+            json.dump({"version": 1, "engine": "app-lines", "image_size": [W, H], "unit": "px", "origin": "top-left", "lines": lines, "tables": [], "ms": 0,
+                       "scale": round(scale, 4)}, f, ensure_ascii=False)
+        self.scale, self.origin, self.lines = scale, (x, y), lines
+    def run(self):
+        import blockcls, subprocess
+        try:
+            subprocess.run([docmap.venv_python(), blockcls.__file__, "capture", self.png, self.ocr, self.out], capture_output=True,
+                           timeout=AREA_CLASSIFY_TIMEOUT, check=True)
+            with open(self.out) as f: self.result = json.load(f)
+        except Exception as e:                      # the run keeps its screen-only cues
+            self.error = type(e).__name__
+        finally:
+            for p in (self.png, self.ocr, self.out):
+                try: os.remove(p)
+                except OSError: pass
+            self.done.set()
+    def ready(self):
+        return self.done.is_set() and bool(self.result) and bool(self.result.get("area_kinds"))
+    def finish(self, rec, wait=AREA_CLASSIFY_TIMEOUT):
+        """Runs-log area_kinds (geometry only) and the block_kind records, when area_pdf ended != ok; else the result is discarded."""
+        if state.STOP.is_set() and not self.done.is_set(): return
+        self.done.wait(wait)
+        if rec.get("area_pdf") == "ok": return
+        if not self.ready():
+            if self.error: rec["area_kinds_error"] = self.error
+            return
+        import blockcls
+        rec["area_kinds"] = self.result["area_kinds"]
+        blockcls.log_records([dict(e, ts=round(time.time(), 3)) for e in self.result.get("events") or []])
+
+def start_area_classify(args, ocr_text):
+    """Start the 7.2 capture classify for an area run, or None (Phase 6 off, no doc venv, no capture or line bounds)."""
+    import blockcls
+    if blockcls.blockcls_off() or docmap is None or docmap.venv_python() is None: return None
+    if not (args.image and os.path.isfile(args.image) and args.line_bounds and args.capture_rect): return None
+    try:
+        job = AreaClassify(args.image, ocr_text, args.line_bounds, args.capture_rect)
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+    job.start()
+    return job
 
 def doc_context_text():
     """A short figure/table label list appended to the END of the system prompt (keeps the cached prompt prefix),

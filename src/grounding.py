@@ -2,7 +2,7 @@
 The local vision model always answers first; with SPEAKEASY_GROUND=openrouter the same marked crop and prompt go to
 OpenRouter only once the local picker is unavailable or gives no logprobs (phase5-parts.md A2.9)."""
 import base64, itertools, json, os, queue, re, subprocess, tempfile, threading, time, urllib.error, urllib.request
-import partpick, provider
+import blockcls, partpick, provider
 import speakeasy_state as state
 from speakeasy_state import docmap
 from selog import DEFAULT_URL
@@ -43,6 +43,15 @@ class PickFuture:
                 "called": self.called, "outcome": self.outcome or "timeout", "applied": self.applied, "drop": self.drop,
                 "ms": self.ms, "queue_ms": self.queue_ms, "model": self.model or vision_model(), "provider": self.provider,
                 "fallback_from": self.fallback_from, "confidence": self.confidence}
+
+def _mark_busy(busy):
+    """vlm_busy holds this run's pid while a pick is queued or in flight: a kind job sends nothing meanwhile (phase6 6.1)."""
+    try:
+        if busy:
+            with open(blockcls.busy_path(), "w") as f: f.write(str(os.getpid()))
+        elif os.path.exists(blockcls.busy_path()): os.remove(blockcls.busy_path())
+    except OSError:
+        pass
 
 def ollama_base():
     """SPEAKEASY_LLM_URL without a trailing /v1 (the native Ollama API root)."""
@@ -98,6 +107,7 @@ class Grounder:
         self.picks, self.pick_q, self.pick_thread, self.pick_n = [], queue.Queue(), None, itertools.count(1)
         self.breaker = {"local": None, "openrouter": None}
         self.fallback = {"unavailable": 0, "no-logprobs": 0}
+        self.t0 = time.time()                                   # a kind job's breaker tripped after this also stops picks
         self.transport = fetch                                  # (url, body, headers, timeout) -> reply; tests stub it
     def enabled(self):
         if os.environ.get("SPEAKEASY_GROUND", "auto").lower() in GROUND_OFF or docmap is None: return False
@@ -114,12 +124,14 @@ class Grounder:
         """Queue one pick (FIFO, one in flight per run); never blocks."""
         fut = PickFuture(page, scope, cands, phrase, meta, region)
         if self.breaker["local"] and self._openrouter_mode(): fut.deadline = fut.t_submit + OR_DEADLINE
-        self.picks.append(fut); self.pick_q.put(fut)
+        self.picks.append(fut); self.pick_q.put(fut); _mark_busy(True)
         if self.pick_thread is None:
             self.pick_thread = threading.Thread(target=self._pick_loop, daemon=True); self.pick_thread.start()
         return fut
     def _pick_loop(self):
-        while True: self._pick(self.pick_q.get())
+        while True:
+            self._pick(self.pick_q.get())
+            if self.pick_q.empty(): _mark_busy(False)
     def render(self, fut, png):
         """The marked crop in the doc venv: (palette name, base64 PNG)."""
         r = subprocess.run([docmap.venv_python(), partpick.__file__, "render", state.DOC.path, str(fut.page), json.dumps(fut.scope), json.dumps(fut.cands), png],
@@ -130,6 +142,7 @@ class Grounder:
         png = os.path.join(tempfile.gettempdir(), f"speakeasy_cap_pick_{os.getpid()}_{next(self.pick_n)}.png")
         try:
             if state.STOP.is_set() or t0 >= fut.deadline: fut.outcome = "timeout"; return
+            if self.breaker["local"] is None: self.breaker["local"] = blockcls.shared_breaker(self.t0)
             to_or = self.breaker["local"] is not None
             if to_or and not self._openrouter_mode(): fut.outcome = self.breaker["local"]; return
             if to_or and self.breaker["openrouter"]: fut.outcome, fut.provider = self.breaker["openrouter"], "openrouter"; return
@@ -142,7 +155,7 @@ class Grounder:
             if not to_or:
                 self._ask_local(fut, prompt, b64)
                 if fut.outcome in ("unavailable", "no-logprobs"):
-                    self.breaker["local"] = fut.outcome
+                    self.breaker["local"] = fut.outcome; blockcls.trip_shared_breaker(fut.outcome)
                     if self._openrouter_mode():                  # the pick that tripped the breaker goes to OpenRouter once
                         self.fallback[fut.outcome] += 1; fut.fallback_from = fut.outcome; fut.deadline = fut.t_submit + OR_DEADLINE
                         to_or = True

@@ -21,6 +21,16 @@ rm -rf "$RES/models"; mkdir -p "$RES/models"
 cp "$MODELS_CACHE/pp_doclayout_s.onnx" "$RES/models/"
 "$PY" -c 'import sys; sys.path.insert(0, "../src"); import layoutdet; sys.exit(not layoutdet.model_verified(sys.argv[1]))' "$RES/models/pp_doclayout_s.onnx" \
   || { echo "ERROR: layout model copy in $RES/models failed verification"; exit 1; }
+# Block classifier model (Docling DocumentFigureClassifier-v2.5, MIT): same rules
+"$PY" ../src/blockcls.py fetch "$MODELS_CACHE" || { echo "ERROR: bundle needs a verified block classifier model; not building $APP"; exit 1; }
+cp "$MODELS_CACHE/docling_figure_classifier_v2_5.onnx" "$RES/models/"
+"$PY" -c 'import sys; sys.path.insert(0, "../src"); import blockcls; sys.exit(not blockcls.model_verified(sys.argv[1]))' "$RES/models/docling_figure_classifier_v2_5.onnx" \
+  || { echo "ERROR: block classifier model copy in $RES/models failed verification"; exit 1; }
+# Second layout detector for gap pages (Docling layout heron, Apache-2.0, ~171 MB): same rules
+"$PY" ../src/blockcls.py fetch-layout2 "$MODELS_CACHE" || { echo "ERROR: bundle needs a verified second layout model; not building $APP"; exit 1; }
+cp "$MODELS_CACHE/docling_layout_heron.onnx" "$RES/models/"
+"$PY" -c 'import sys; sys.path.insert(0, "../src"); import blockcls; sys.exit(not blockcls.layout2_verified(sys.argv[1]))' "$RES/models/docling_layout_heron.onnx" \
+  || { echo "ERROR: second layout model copy in $RES/models failed verification"; exit 1; }
 [ "$WITH_TTS" = "--with-tts" ] && uv pip install --python "$PY" --break-system-packages -q "mlx-audio[server]" "misaki[en]" webrtcvad-wheels uvicorn fastapi python-multipart num2words
 rm -rf "$RES/backend"; mkdir -p "$RES/backend"
 cp ../src/*.py "$RES/backend/"

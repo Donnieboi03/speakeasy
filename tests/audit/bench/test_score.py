@@ -580,22 +580,156 @@ def test_mock_kind_routing_cassette_and_modes():
     finally: p.terminate(); p.wait()
 
 
-def test_ocr_stub_replay_miss_and_record():
+OCR_OUT = {"version": 1, "engine": "vision-text", "image_size": [400, 120], "unit": "px", "origin": "top-left",
+           "lines": [{"rect": [1.0, 2.0, 30.0, 10.0], "text": "North 42 12", "conf": 0.97}], "tables": [], "ms": 41}
+
+
+def test_ocr_stub_replay_miss_failure_and_record():
     import hashlib, json, subprocess, tempfile
+    sys.path.insert(0, HERE); import ocr_stub as OS
     d = tempfile.mkdtemp(prefix="se_ocr_t_"); png = os.path.join(d, "in.png"); open(png, "wb").write(b"\x89PNG table")
-    key = hashlib.sha256(b"\x89PNG table").hexdigest(); cas = os.path.join(d, "ocr.json"); lg = os.path.join(d, "ocr.jsonl")
-    out = {"lines": [{"rect": [1, 2, 30, 10], "text": "North 42 12"}], "tables": []}
-    json.dump({"header": {}, "entries": {key: {"out": out, "rc": 0}}}, open(cas, "w"))
+    key = hashlib.sha256(b"\x89PNG table").hexdigest(); bad_key = hashlib.sha256(b"\x89PNG broken").hexdigest()
+    cas = os.path.join(d, "ocr.json"); lg = os.path.join(d, "ocr.jsonl")
+    json.dump({"header": {}, "entries": {key: {"out": OCR_OUT, "rc": 0}, bad_key: {"out": None, "rc": 4}}}, open(cas, "w"))
     stub = os.path.join(HERE, "ocr_stub"); env = dict(os.environ, OCR_STUB_MODE="replay", OCR_STUB_CASSETTE=cas, OCR_STUB_LOG=lg)
-    r = subprocess.run([stub, "ocr", png, os.path.join(d, "o.json")], env=env); assert r.returncode == 0 and json.load(open(os.path.join(d, "o.json"))) == out
+    o = os.path.join(d, "o.json")
+    r = subprocess.run([stub, "ocr", png, o], env=env); assert r.returncode == 0 and json.load(open(o)) == OCR_OUT
+    png2 = os.path.join(d, "elsewhere", "renamed.png"); os.makedirs(os.path.dirname(png2)); open(png2, "wb").write(open(png, "rb").read())
+    r = subprocess.run([stub, png2, os.path.join(d, "o1.json")], env=dict(env, SOME_VAR="x")); assert r.returncode == 0       # key = bytes only: path/env ignored
+    open(o, "w").write("stale")
     open(png, "wb").write(b"\x89PNG other")
-    r = subprocess.run([stub, png, os.path.join(d, "o2.json")], env=env); assert r.returncode == 3 and not os.path.exists(os.path.join(d, "o2.json"))
-    real = os.path.join(d, "real.sh"); open(real, "w").write('#!/bin/sh\necho \'{"lines": [], "tables": []}\' > "$3"\n'); os.chmod(real, 0o755)
+    r = subprocess.run([stub, png, o], env=env); assert r.returncode == 3 and not os.path.exists(o)                    # miss: exit 3, stale file removed
+    open(png, "wb").write(b"\x89PNG broken")
+    r = subprocess.run([stub, png, o], env=env); assert r.returncode == 4 and not os.path.exists(o)                    # stored failure replays its code, no file
+    r = subprocess.run([stub, os.path.join(d, "nope.png"), o], env=env); assert r.returncode == 3                       # unreadable IN.png
+    r = subprocess.run([stub, "ocr", png], env=env); assert r.returncode == 2                                           # usage
+    real = os.path.join(d, "real.sh"); good = json.dumps(dict(OCR_OUT, lines=[]))
+    open(real, "w").write("#!/bin/sh\ncase \"$2\" in *fail*) exit 4;; esac\necho '" + good + "' > \"$3\"\n"); os.chmod(real, 0o755)
     cas2 = os.path.join(d, "rec.json"); env2 = dict(env, OCR_STUB_MODE="record", OCR_STUB_CASSETTE=cas2, OCR_STUB_REAL=real)
+    open(png, "wb").write(b"\x89PNG other")
     r = subprocess.run([stub, "ocr", png, os.path.join(d, "o3.json")], env=env2); assert r.returncode == 0
-    rec = json.load(open(cas2)); assert rec["entries"][hashlib.sha256(b"\x89PNG other").hexdigest()] == {"out": {"lines": [], "tables": []}, "rc": 0}, rec
-    res = [json.loads(x)["result"] for x in open(lg)]; assert res == ["hit", "miss", "recorded"], res
-    assert all("North" not in x for x in open(lg))                                       # the log carries hashes, never OCR text
+    fpng = os.path.join(d, "fail.png"); open(fpng, "wb").write(b"\x89PNG failing")
+    r = subprocess.run([stub, "ocr", fpng, os.path.join(d, "o4.json")], env=env2); assert r.returncode == 4 and not os.path.exists(os.path.join(d, "o4.json"))
+    rec = json.load(open(cas2))
+    assert rec["entries"][hashlib.sha256(b"\x89PNG other").hexdigest()] == {"out": dict(OCR_OUT, lines=[]), "rc": 0}, rec
+    assert rec["entries"][hashlib.sha256(b"\x89PNG failing").hexdigest()] == {"out": None, "rc": 4}, rec               # failures are recorded with their code
+    assert set(rec["header"]) == {"helper_sha256", "macos", "recorded_at"}, rec["header"]
+    res = [json.loads(x)["result"] for x in open(lg)]
+    assert res == ["hit", "hit", "miss", "hit", "unreadable", "bad-args", "recorded", "real-failed"], res
+    assert all("North" not in x for x in open(lg))                                       # the log carries hashes and codes, never OCR text
+    assert OS.schema_errors(OCR_OUT) == [] and OS.schema_errors(dict(OCR_OUT, unit="pt")) and OS.schema_errors({k: v for k, v in OCR_OUT.items() if k != "ms"})
+    assert OS.schema_errors(dict(OCR_OUT, lines=[{"rect": [1, 2, 500, 10], "text": "x", "conf": 0.5}]))                 # outside image_size
+    assert OS.schema_errors(dict(OCR_OUT, tables=[{"rect": [0, 0, 10, 10], "rows": []}]))                               # vision-text has no tables
+    tab = {"rect": [0, 0, 100, 40], "rows": [{"rect": [0, 0, 100, 20], "cells": [{"rect": [0, 0, 50, 20], "text": "North"}]}]}
+    assert OS.schema_errors(dict(OCR_OUT, engine="vision-documents", tables=[tab])) == []
+    app = dict(OCR_OUT, engine="app-lines", lines=[dict(OCR_OUT["lines"][0], conf=None)], ms=0)
+    assert OS.schema_errors(app) == []
+
+
+def _kind_home(kind_job, sidecar=None, routed=2, routed_pages=(1,)):
+    import json, tempfile
+    h = tempfile.mkdtemp(prefix="se_kj_t_"); c = os.path.join(h, "cache", "doc"); os.makedirs(c)
+    pages = [{"n": n, "kinds": {"routed": 1 if n in routed_pages else 0}} for n in (1, 2, 3)]
+    json.dump({"pages": pages, "blockcls": {"status": "unavailable", "kind_job": kind_job, "routed": routed}}, open(os.path.join(c, "0123456789abcdef0123.json"), "w"))
+    if sidecar is not None: json.dump(sidecar, open(os.path.join(c, "0123456789abcdef0123.kinds.json"), "w"))
+    return h, os.path.join(c, "0123456789abcdef0123.kinds.json")
+
+
+def test_wait_kind_job_amendment_1_rule():
+    import json, tempfile, threading, time
+    sys.path.insert(0, HERE); import run_bench as RB
+    assert RB.wait_kind_job(tempfile.mkdtemp(prefix="se_kj_e_"), 0.2)["status"] == "no-parse"
+    h, _ = _kind_home("none"); t = time.time(); assert RB.wait_kind_job(h, 5.0)["status"] == "none" and time.time() - t < 1.0    # nothing to wait for
+    h, _ = _kind_home("queued"); assert RB.wait_kind_job(h, 0.3)["status"] == "timeout"                                     # no sidecar by the cap
+    h, sp = _kind_home("queued", {"state": "running"}); assert RB.wait_kind_job(h, 0.3)["status"] == "timeout"             # not a final state
+    ent = [{"page": 1, "rect": [10.0, 20.0, 110.0, 90.0], "kind": "table", "outcome": "accepted", "p_top": 0.97, "p_margin": 0.95},
+           {"page": 1, "rect": [10.0, 120.0, 110.0, 190.0], "kind": "text", "outcome": "text"}]
+    h, sp = _kind_home("queued", {"version": 1, "state": "done", "pages": [2], "outcomes": {}, "entries": []}, routed_pages=(1, 2))
+    assert RB.wait_kind_job(h, 0.3)["status"] == "timeout"                                                                  # A2.5: pages must cover routed pages 1, 2
+    h, sp = _kind_home("queued", {"version": 1, "state": "done", "outcomes": {}, "entries": []})
+    assert RB.wait_kind_job(h, 0.3)["status"] == "timeout"                                                                  # no pages: not covering
+    h, sp = _kind_home("queued", {"version": 1, "state": "partial", "pages": [1, 3], "outcomes": {"accepted": 1, "skipped": 2}, "breaker": None, "error": None, "entries": ent})
+    info = RB.wait_kind_job(h, 1.0); j = info["jobs"][0]
+    assert info["status"] == "done" and j["state"] == "partial" and j["skipped"] == 2 and j["pages"] == [1, 3] and j["routed_pages"] == [1], info
+    assert RB.sidecar_accepted(info) == {1: [{"kind": "table", "bbox": [10.0, 20.0, 110.0, 90.0], "kind_src": "vlm"}]}
+    assert RB.sidecars_changed(info) == []
+    json.dump({"state": "done", "pages": [1], "entries": []}, open(sp, "w")); assert RB.sidecars_changed(info) == [j["key"]]               # a second job rewrote it
+    h, sp = _kind_home("queued", {"state": "failed", "pages": [1], "error": "RuntimeError", "entries": []})
+    info = RB.wait_kind_job(h, 1.0); assert info["status"] == "failed" and info["jobs"][0]["error"] == "RuntimeError", info
+    h, sp = _kind_home("queued")                                                                                            # sidecar lands mid-wait
+    threading.Timer(0.3, lambda: json.dump({"state": "done", "pages": [1], "outcomes": {}, "entries": []}, open(sp, "w"))).start()
+    assert RB.wait_kind_job(h, 3.0)["status"] == "done"
+    assert RB._accepted_set({1: [{"kind": "table", "bbox": [10.04, 20, 110, 90]}]}) == RB._accepted_set({1: [{"kind": "table", "bbox": [10.0, 20.0, 110.0, 90.0]}]})
+
+
+def test_ocr_helper_env_amendment_2_6():
+    sys.path.insert(0, HERE); import run_bench as RB
+    root = __import__("tempfile").mkdtemp(prefix="se_env_t_"); e = RB.Env(root, 1, sys.executable)
+    g = e.env(os.path.join(root, "h"), os.path.join(root, "t"))
+    assert "SPEAKEASY_OCR_BIN" not in g and not os.path.exists(g["SPEAKEASY_TRACKER"]), g.get("SPEAKEASY_TRACKER")   # gated: OCR unavailable
+    e.ocr = {"mode": "replay", "cassette": "c.json", "log": "l.jsonl", "tag": "", "real": None}
+    g = e.env(os.path.join(root, "h"), os.path.join(root, "t"))
+    assert g["SPEAKEASY_OCR_BIN"] == RB.OCR_STUB and os.access(RB.OCR_STUB, os.X_OK) and g["OCR_STUB_MODE"] == "replay"
+    os.environ["SPEAKEASY_OCR_BIN"] = "/elsewhere"
+    try: assert "SPEAKEASY_OCR_BIN" not in RB.Env(root, 1, sys.executable).env("h", "t")                                # the caller's value never leaks in
+    finally: os.environ.pop("SPEAKEASY_OCR_BIN")
+
+
+def _l2page(n, routed=False, by=(), src=None, ms=0, added=0, structural=0, reason=None):
+    d = {"routed": routed, "by": list(by), "src": src, "ms": ms, "boxes": {"figure": 0, "table": 0}, "added": added, "structural": structural}
+    if reason: d["reason"] = reason
+    return {"n": n, "layout2": d}
+
+
+def test_layout2_summary_counts_rules_src_ms_and_reasons():
+    import json
+    heron = {"layout2": {"status": "ok", "detector_version": "docling-heron/59c81a3a2923", "reason": None, "load_ms": 133, "routed": 2},
+             "pages": [_l2page(1, True, ("R1",), "heron", 405, 0, 1), _l2page(2, True, ("R1", "R2", "R3"), "heron", 419, 3), _l2page(3)],
+             "blockcls_events": [{"event": "layout2_page", "page": 1}, {"event": "block_kind", "stage": "classifier", "outcome": "accepted", "ms": 9}]}
+    miss = {"layout2": {"status": "unavailable", "detector_version": None, "reason": "model-missing", "load_ms": None, "routed": 1},
+            "pages": [_l2page(1, True, ("R2",), "unavailable", 11, reason="model-missing")],
+            "blockcls_events": [{"event": "layout2_unavailable", "reason": "model-missing", "error": None, "detector_version": None, "page": None}]}
+    l2 = S.layout2_summary([heron, miss, {"pages": [{"n": 1}]}])
+    assert (l2["pages"], l2["routed"], l2["by_rule"], l2["src"]) == (4, 3, {"R1": 2, "R2": 2, "R3": 1}, {"heron": 2, "unavailable": 1}), l2
+    assert (l2["added"], l2["structural"], l2["routed_unavailable"]) == (3, 1, {"model-missing": 1}), l2
+    assert l2["ms"] == {"p50": 405, "p95": 419, "n": 2} and l2["load_ms"] == {"p50": 133, "max": 133, "n": 1}, l2   # unavailable pages are not heron ms
+    assert l2["reasons"] == {"model-missing": 1} and l2["unavailable_events"] == {"model-missing": 1}, l2
+    assert S.layout2_coverage_errors("public-gap", l2) == ['public-gap: second-detector run but routed pages with layout2 reasons {"model-missing": 1}']
+    assert S.layout2_coverage_errors("public-gap", S.layout2_summary([heron])) == []
+    failed = {"layout2": {"status": "ok", "reason": None, "routed": 2}, "pages": [_l2page(1, True, ("R1",), "unavailable", 0, reason="inference-failed"),
+                                                                              _l2page(2, True, ("R2",), "skipped", 0, reason="over-cap")]}
+    assert S.layout2_summary([failed])["routed_unavailable"] == {"inference-failed": 1}                          # any fallback reason; the cap is not one
+    b = S.blockcls_summary([heron, miss])
+    assert b["by_stage"] == {"classifier": 1} and b["by_outcome"] == {"accepted": 1} and "None" not in b["by_stage"], b
+    assert b["events"] == {} and b["layout2"] == {"pages": 1, "added": 0, "structural": 0, "unavailable": {"model-missing": 1}}, b
+    heron["blockcls_events"][0].update(added=4, structural=2, ms=400)
+    assert S.blockcls_summary([heron])["layout2"] == {"pages": 1, "added": 4, "structural": 2, "unavailable": {}}
+    assert "ms" not in json.dumps(S._no_ms(S.blockcls_summary([heron])["layout2"]))
+
+
+def test_layout2_determinism_and_existing_family_gate():
+    b, bl = bench_and_baseline()
+    b["sets"]["public"]["layout2"] = {"pages": 29, "routed": 0, "by_rule": {"R1": 0, "R2": 0, "R3": 0}, "ms": {"p50": None}, "load_ms": {"p50": None, "max": None, "n": 0}}
+    # A5.1 pin update: existing-family routing is an informational count, never a gate failure (scores vs B5' stay the blocker)
+    code, out = S.gate(b, {"public": bl}); assert code == 0 and 'public layout2 routed 0 by_rule {"R1": 0, "R2": 0, "R3": 0} heron ms p50 None p95 None' in out, out
+    b2 = copy.deepcopy(b); b2["sets"]["public"]["layout2"]["routed"] = 1
+    code, out = S.gate(b2, {"public": bl}); assert code == 0 and out.index("-- informational") < out.index(next(l for l in out if l.startswith("public layout2 routed 1"))), out
+    assert not any("layout2" in l and ("FAIL" in l or "PASS" in l) for l in out), out
+    b3 = copy.deepcopy(b); b3["sets"]["public"]["layout2"]["load_ms"] = {"p50": 150, "max": 150, "n": 1}; b3["sets"]["public"]["layout2"]["ms"] = {"p50": 400}
+    assert S.diff_paths(S.determinism_view(b), S.determinism_view(b3)) == []                                       # timing is not determinism-covered
+    assert S.diff_paths(S.determinism_view(b), S.determinism_view(b2)) == ["$.sets.public.layout2.routed"]
+    nb, _ = bench_and_baseline(); assert "layout2" not in S.determinism_view(nb)["sets"]["public"]                 # B5'-era benches unchanged
+
+
+def test_layout2_model_env_passthrough():
+    sys.path.insert(0, HERE); import run_bench as RB
+    root = __import__("tempfile").mkdtemp(prefix="se_env_l2_"); e = RB.Env(root, 1, sys.executable)
+    os.environ["SPEAKEASY_LAYOUT2_MODEL"] = "/caller/heron.onnx"; os.environ["SPEAKEASY_LAYOUT2"] = "off"
+    try:
+        g = e.env("h", "t"); assert "SPEAKEASY_LAYOUT2_MODEL" not in g and "SPEAKEASY_LAYOUT2" not in g, g           # the scrub drops the caller's values
+        e.layout2_model = "/tmp/p6models/docling_layout_heron.onnx"
+        assert e.env("h", "t")["SPEAKEASY_LAYOUT2_MODEL"] == "/tmp/p6models/docling_layout_heron.onnx"
+    finally: os.environ.pop("SPEAKEASY_LAYOUT2_MODEL"); os.environ.pop("SPEAKEASY_LAYOUT2")
 
 
 def test_merge_preds_adds_vlm_rects_once():

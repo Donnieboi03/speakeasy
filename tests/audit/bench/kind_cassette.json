@@ -1,0 +1,76 @@
+{
+ "entries": {
+  "ccf7a9787c24c3f95a891e45d0b99c2e67fe333d6248219f1230cbf21347cb91": {
+   "top_logprobs": [
+    {
+     "logprob": -1e-06,
+     "token": "D"
+    },
+    {
+     "logprob": -14.495927,
+     "token": "E"
+    },
+    {
+     "logprob": -15.756581,
+     "token": "C"
+    },
+    {
+     "logprob": -15.861588,
+     "token": "A"
+    },
+    {
+     "logprob": -16.700256,
+     "token": "B"
+    },
+    {
+     "logprob": -19.610279,
+     "token": " D"
+    },
+    {
+     "logprob": -25.3186,
+     "token": "F"
+    },
+    {
+     "logprob": -25.800474,
+     "token": "G"
+    },
+    {
+     "logprob": -28.472824,
+     "token": "K"
+    },
+    {
+     "logprob": -28.493969,
+     "token": "L"
+    },
+    {
+     "logprob": -28.632397,
+     "token": "N"
+    },
+    {
+     "logprob": -28.65909,
+     "token": "J"
+    },
+    {
+     "logprob": -28.784241,
+     "token": "H"
+    },
+    {
+     "logprob": -15.636462,
+     "token": "<other>"
+    }
+   ]
+  }
+ },
+ "header": {
+  "commit": "ac83185038cb9026d947d516adbd4be5825b11d9",
+  "figcls_model": "docling_figure_classifier_v2_5.onnx",
+  "model": "qwen3-vl:4b-instruct",
+  "model_digest": "84f7ed8042fa7cdbd902f7dcb7d0370e032095047cc3244179f263b77b5bc318",
+  "ollama_version": "0.40.10",
+  "pillow": "13.0.0",
+  "prompt_sha": "8bb31d0630f7b6ef43ccad3872f057cc3c419449e9eae5b4b43829e80dc2ac1a",
+  "pypdfium2": "5.14.0",
+  "recorded_at": "2026-10-27T02:52:42Z",
+  "src_sha": "3f46311a29328cd9d75ebb0dd9fa8daa71036725dd5be8fa8ca8aeb9bdc10efc"
+ }
+}

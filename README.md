@@ -80,6 +80,13 @@ box targets the exact line, figure or panel; the live tracker maps page coordina
   **Apache-2.0**; ONNX export [stefanj0/PP-DocLayout-S-ONNX](https://huggingface.co/stefanj0/PP-DocLayout-S-ONNX)) on
   [onnxruntime](https://github.com/microsoft/onnxruntime) (MIT). `install.sh` fetches the pinned file into
   `~/.speakeasy/models/` and checks its sha256; without it, or with `SPEAKEASY_LAYOUT=off`, the parse uses its heuristics.
+- Figures and tables without a usual caption (slides, `Abb. 2`, `TABLE IV`, scanned pages, tables embedded as images) are typed by
+  Docling's [DocumentFigureClassifier-v2.5](https://huggingface.co/docling-project/DocumentFigureClassifier-v2.5) (IBM /
+  docling-project, **MIT**) on onnxruntime, fetched and checked like the layout model; unsure regions go to the local vision model
+  in the background when `SPEAKEASY_BLOCKCLS_VLM=auto|local` (default `off` until its threshold is frozen). Text without a text layer comes from Apple Vision
+  (`speakeasy-track ocr`). Slides, scans and graphics-heavy pages also get a second layout detector, Docling's
+  [docling-layout-heron-onnx](https://huggingface.co/docling-project/docling-layout-heron-onnx) (docling-project, **Apache-2.0**,
+  about 171 MB, fetched and checked like the others; `SPEAKEASY_LAYOUT2=off` turns it off). `SPEAKEASY_BLOCKCLS=off` turns all of it off.
 
 ### Figures: panels and sub-objects (phase 3)
 
@@ -144,7 +151,7 @@ A small navy bar sits at the bottom centre of the display, 8 pt above the Dock (
 
 - [open-wispr](https://github.com/human37/open-wispr) (MIT): the menu-bar app's package layout, status-bar controller and the floating panel the bar grew from. See `app/NOTICE`.
 - Fonts bundled in the app under the SIL Open Font License 1.1: [Source Serif 4](https://github.com/adobe-fonts/source-serif) (Adobe), [IBM Plex Sans and Plex Mono](https://github.com/IBM/plex) (IBM). Licence texts and file hashes: `app/NOTICE`.
-- [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT), [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0/BSD), [PP-DocLayout-S](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0) via [onnxruntime](https://github.com/microsoft/onnxruntime) (MIT), [Kokoro](https://github.com/hexgrad/kokoro) via [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Ollama](https://ollama.com), [python-build-standalone](https://github.com/astral-sh/python-build-standalone).
+- [KeyboardShortcuts](https://github.com/sindresorhus/KeyboardShortcuts) (MIT), [pypdfium2](https://github.com/pypdfium2-team/pypdfium2) (Apache-2.0/BSD), [PP-DocLayout-S](https://github.com/PaddlePaddle/PaddleOCR) (Apache-2.0) and [Docling DocumentFigureClassifier-v2.5](https://huggingface.co/docling-project/DocumentFigureClassifier-v2.5) (IBM / docling-project, MIT) and [docling-layout-heron](https://huggingface.co/docling-project/docling-layout-heron-onnx) (docling-project, Apache-2.0) via [onnxruntime](https://github.com/microsoft/onnxruntime) (MIT), [Kokoro](https://github.com/hexgrad/kokoro) via [mlx-audio](https://github.com/Blaizzy/mlx-audio), [Ollama](https://ollama.com), [python-build-standalone](https://github.com/astral-sh/python-build-standalone).
 
 ## Optional cloud (OpenRouter)
 

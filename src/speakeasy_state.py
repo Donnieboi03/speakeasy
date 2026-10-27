@@ -14,3 +14,4 @@ FOCUS = None                 # focus.Focus while a run can show the focus box
 SPEAKER = None               # tts.Speaker of the current read (the target of the app's pause / next signals)
 DOC = None                   # document.DocJob: the source document (PDF / Markdown) read in the background
 AREA_FIT = None              # Read area on a PDF: (scale, dx, dy, rms) page -> screen from the OCR lines
+AREA_KINDS = None            # document.AreaClassify: figure / table rects of a Read-area capture with no document page

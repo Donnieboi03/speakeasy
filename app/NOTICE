@@ -7,6 +7,12 @@ Speakeasy.app
   (https://github.com/PaddlePaddle/PaddleOCR), Apache License 2.0 (https://www.apache.org/licenses/LICENSE-2.0),
   unmodified ONNX export from https://huggingface.co/stefanj0/PP-DocLayout-S-ONNX (revision 7e851b9e5ad6).
   Run with ONNX Runtime by Microsoft, https://github.com/microsoft/onnxruntime, MIT License.
+- Block classifier model (Contents/Resources/models/docling_figure_classifier_v2_5.onnx): DocumentFigureClassifier-v2.5 by
+  Docling (IBM / docling-project), https://huggingface.co/docling-project/DocumentFigureClassifier-v2.5, MIT License,
+  unmodified model.onnx at revision f859dfbff5c9. Run with ONNX Runtime (MIT, above).
+- Second layout model (Contents/Resources/models/docling_layout_heron.onnx): docling-layout-heron-onnx by Docling (docling-project),
+  https://huggingface.co/docling-project/docling-layout-heron-onnx, Apache License 2.0, unmodified model.onnx at revision
+  40bde044036b. Run with ONNX Runtime (MIT, above).
 - Fonts (Contents/Resources/Fonts), unmodified, each under the SIL Open Font License 1.1 (full texts below and in
   Contents/Resources/Fonts/OFL-*.txt):
   - Source Serif 4 (Semibold, Regular), Copyright 2014 - 2023 Adobe (http://www.adobe.com/), with Reserved Font Name

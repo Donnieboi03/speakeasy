@@ -137,6 +137,11 @@ PICK_PROMPT = ("This image is part of a figure. {n} regions are outlined in {col
                "letters A to {last}. Which region shows \"{phrase}\"? Answer with the letter only. "
                "If no single region shows it, answer 0.")
 
+# Phase 6 stage C: no document text, fixed options in a fixed order, the letter only
+KIND_PROMPT = ("This image is a region cropped from a document page. Which option describes it best? "
+               "A: figure, diagram, illustration or photo. B: chart or plot of data. C: table. "
+               "D: running text (paragraphs, headings, lists). E: none of these (logo, decoration, blank). Answer with the letter only.")
+
 SCREEN_INSTRUCTION = ("Explain what the user is currently looking at in their {what}. Answer in EXACTLY three short spoken sentences: "
     "first, what kind of content or app this is; second, the main thing it shows or its main point; third, one notable detail (a figure, number, or section).  Focus on the main content area; "
     "skip menus, toolbars, sidebars, tabs, and window chrome. Do not read long text verbatim and never invent details. "

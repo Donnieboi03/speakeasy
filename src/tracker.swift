@@ -979,6 +979,57 @@ func recognise(_ img: CGImage, frame: CGRect, accurate: Bool) -> [OLine] {
     }
     return out
 }
+// ---------------- `speakeasy-track ocr IN.png OUT.json` (phase6-block-classifier.md A1.1) ----------------
+// Vision settings are constants: no flag, environment or config changes the result. Recognised text never reaches stdout / stderr.
+let OCR_ACCURATE = true, OCR_LANGUAGE_CORRECTION = true, OCR_AUTO_LANGUAGE = true
+func ocrJSONString(_ s: String) -> String {
+    guard let d = try? JSONSerialization.data(withJSONObject: [s], options: [.withoutEscapingSlashes]), let a = String(data: d, encoding: .utf8) else { return "\"\"" }
+    return String(a.dropFirst().dropLast())
+}
+func ocrNum(_ v: Double) -> String { v == v.rounded() ? String(format: "%.1f", v) : String(v) }
+/// Exit 0: OUT.json written atomically (zero lines too); 2 usage; 3 IN.png unreadable; 4 Vision error. A stale OUT.json is removed first.
+/// Engine "vision-text" (VNRecognizeTextRequest); tables are [] (the caller groups lines into rows). RecognizeDocumentsRequest
+/// (macOS 26 "vision-documents") needs the macOS 26 SDK, which this toolchain does not have.
+func ocrCommand(_ args: [String]) -> Int32 {
+    guard args.count == 2 else { FileHandle.standardError.write("usage: speakeasy-track ocr IN.png OUT.json\n".data(using: .utf8)!); return 2 }
+    let inPath = args[0], outPath = args[1]
+    unlink(outPath)
+    guard let src = CGImageSourceCreateWithURL(URL(fileURLWithPath: inPath) as CFURL, nil),
+          let img = CGImageSourceCreateImageAtIndex(src, 0, nil) else { return 3 }
+    let t0 = now()
+    let req = VNRecognizeTextRequest()
+    req.recognitionLevel = OCR_ACCURATE ? .accurate : .fast
+    req.usesLanguageCorrection = OCR_LANGUAGE_CORRECTION
+    if #available(macOS 13.0, *) { req.automaticallyDetectsLanguage = OCR_AUTO_LANGUAGE }
+    do { try VNImageRequestHandler(cgImage: img, options: [:]).perform([req]) } catch { return 4 }
+    let W = Double(img.width), H = Double(img.height)
+    func clip(_ v: Double, _ m: Double) -> Double { (min(max(v, 0), m) * 10).rounded() / 10 }
+    var found: [(r: [Double], t: String, c: Double)] = []
+    for o in req.results ?? [] {
+        guard let c = o.topCandidates(1).first else { continue }
+        let t = c.string.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+        if t.isEmpty { continue }
+        let b = o.boundingBox                        // normalised, bottom-left origin
+        let r = [clip(Double(b.minX) * W, W), clip((1 - Double(b.maxY)) * H, H), clip(Double(b.maxX) * W, W), clip((1 - Double(b.minY)) * H, H)]
+        if r[0] >= r[2] || r[1] >= r[3] { continue }
+        found.append((r, t, (Double(c.confidence) * 100).rounded() / 100))
+    }
+    // rows by y0; a line whose vertical centre is within half the smaller height of the row's first line joins it; rows by x0
+    found.sort { ($0.r[1], $0.r[0]) < ($1.r[1], $1.r[0]) }
+    var rows: [[(r: [Double], t: String, c: Double)]] = []
+    for l in found {
+        if let f = rows.last?.first, abs((l.r[1] + l.r[3]) / 2 - (f.r[1] + f.r[3]) / 2) < 0.5 * min(l.r[3] - l.r[1], f.r[3] - f.r[1]) { rows[rows.count - 1].append(l) }
+        else { rows.append([l]) }
+    }
+    let ordered = rows.flatMap { $0.sorted { $0.r[0] < $1.r[0] } }
+    let lines = ordered.map { "{\"rect\": [\($0.r.map(ocrNum).joined(separator: ", "))], \"text\": \(ocrJSONString($0.t)), \"conf\": \(ocrNum($0.c))}" }
+    let ms = Int(((now() - t0) * 1000).rounded())
+    let body = "{\"version\": 1, \"engine\": \"vision-text\", \"image_size\": [\(img.width), \(img.height)], \"unit\": \"px\", \"origin\": \"top-left\", "
+        + "\"lines\": [\(lines.joined(separator: ", "))], \"tables\": [], \"ms\": \(ms)}"
+    let tmp = outPath + ".tmp\(getpid())"
+    guard FileManager.default.createFile(atPath: tmp, contents: body.data(using: .utf8)), rename(tmp, outPath) == 0 else { unlink(tmp); return 4 }
+    return 0
+}
 // Re-find the target source lines among recognised lines; returns a tight union box.
 func refind(_ lines: [OLine], target: [String], near: CGRect?) -> CGRect? {
     let tset = Set(target.flatMap { tokens($0) })
@@ -1149,6 +1200,7 @@ struct Tracker {
     // bare CLI dies with "Assertion failed: (did_initialize), function CGS_REQUIRE_INIT". So: become a (hidden,
     // never-activating) NSApplication, touch the display, run the tracker on a background task and keep the main run loop alive.
     static func main() {
+        if CommandLine.arguments.count >= 2 && CommandLine.arguments[1] == "ocr" { exit(ocrCommand(Array(CommandLine.arguments.dropFirst(2)))) }
         var a: [String: String] = [:]
         var it = CommandLine.arguments.dropFirst().makeIterator()
         while let k = it.next() { if k.hasPrefix("--") { a[String(k.dropFirst(2))] = it.next() ?? "" } }

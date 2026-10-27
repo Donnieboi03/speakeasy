@@ -119,7 +119,8 @@ implementer. `tools/kind_census.py` (section 12.6) belongs to the verifier.
   - feed `float32 [1,3,224,224]`, then softmax over the 26 logits.
 - **Deterministic:** a fixed intra-op thread count (a constant in code).
 - **Kill switch:** `SPEAKEASY_BLOCKCLS=off` (env or `config`) turns **all** of Phase 6 off, the lexicon included. The
-  parse is then byte-identical to the post-Phase-7 parse, apart from `PARSE_VERSION`. The default is `on`.
+  parse is then identical to the post-Phase-7 parse apart from `PARSE_VERSION` and the explicit
+  `blockcls` disabled key (Amendment 1, A1.3). The default is `on`.
 - **Licence line:** `app/NOTICE` and `README.md` name the model, Docling (IBM / docling-project) and MIT.
 
 ## 3. Candidates (what gets typed)
@@ -356,7 +357,7 @@ delays speech.
 
 | Field | Meaning |
 |---|---|
-| `blockcls` | `{"status": "ok"\|"unavailable", "classifier_version": str\|null, "reason": <enum>, "T_B": float, "T_C": float}` |
+| `blockcls` | `{"status": "ok"\|"unavailable", "classifier_version": str\|null, "reason": <enum>, "T_B": float, "T_C": float, "kind_job": "none"\|"queued", "routed": n}` (A1.2) |
 | `pages[].kinds` | Every detected page: `{"candidates": n, "accepted": {"figure": n, "table": n}, "routed": n, "rejected": n, "skipped": {...}, "ms": int, "no_text": bool}` |
 | `figures[]` | Gains `captioned` (bool), `printed_label`, `aliases`, `caption_src`, `kind_src` (`caption` \| `lexicon` \| `classifier` \| `vlm`), and for tables `rows_src` and `ocr_rows` |
 | `pages[].blocks[]` | Figure/table blocks gain `kind_src`. Their `src` keeps the Phase 4 `bbox_src` enum |
@@ -585,9 +586,10 @@ Read-only, aggregates only (12.1 item 2). It is the generalised form of the thro
 - **`T_B`:** the smallest T in {0.50, 0.55, …, 0.95} at which the stage-B-accepted candidates of the **public** gap set
   (gated mode) reach kind precision >= 95 with >= 10 accepted. If none qualifies: T_B = 0.95.
 - **`T_C`:** the smallest T in the same grid at which stage-C-accepted candidates of the public gap set (live sweep) reach
-  kind precision >= 95 with >= 10 decisions. If none qualifies: T_C = 0.95 and stage C ships default-off
+  kind precision >= 95 with >= 10 decisions (superseded by Amendment 2, A2.2: precision >= 90 with >= 5 accepted). If
+  none qualifies: T_C = 0.95 and stage C ships default-off
   (`SPEAKEASY_BLOCKCLS_VLM=off`).
-- Both values and the sweep tables go into **Amendment 1**. They are never re-chosen against hidden numbers. Any
+- Both values and the sweep tables go into **Amendment 2**. They are never re-chosen against hidden numbers. Any
   constant changed after a hidden run is reported with before/after hidden aggregates (Phase 4 rule).
 
 ## 14. Acceptance
@@ -675,4 +677,696 @@ Read-only, aggregates only (12.1 item 2). It is the generalised form of the thro
 - Fetching models at run time.
 - Using OpenRouter for anything but 6.4's case.
 
-Amendment 1 is reserved for `T_B`, `T_C` and the sweep tables (section 13).
+## Amendment 1: OCR output, the kind job's done signal, the kill switch (rulings, 2026-10-26)
+
+Context: `main` at `ac83185` (Phase 7 shipped, `phase6-bench` merged). B5' and B6-pre are recorded there, and
+`PARSE_VERSION` is 8 there, so Phase 6 takes **9**. The verifier's bench left three points open. These rulings bind
+both the implementer and the harness. Where they are more precise than sections 6, 7, 10 or 14, they win.
+
+### A1.1 OCR helper output (`speakeasy-track ocr`) and the Read-area lines
+
+**Command:** `speakeasy-track ocr IN.png OUT.json`. Exactly two arguments; no flags, environment or config change the
+result.
+
+- **Vision settings:** recognition level `accurate`, `usesLanguageCorrection = true`,
+  `automaticallyDetectsLanguage = true`. These are constants in `tracker.swift`.
+- **Engine:** on macOS 26+, `RecognizeDocumentsRequest` (`engine: "vision-documents"`). Below macOS 26,
+  `VNRecognizeTextRequest` (`engine: "vision-text"`).
+
+**Exit codes:**
+
+| Code | Meaning |
+|---|---|
+| 0 | Success. `OUT.json` is written atomically (temp file + rename), even with zero lines |
+| 2 | Usage error |
+| 3 | `IN.png` is unreadable |
+| 4 | Vision error |
+
+On any non-zero code, `OUT.json` is not written; a stale file at that path is removed first. The caller treats every
+non-zero code, a missing file and a file that fails the schema below as **OCR failed** (`ocr: unavailable`, section 10).
+The helper never prints recognised text to stdout or stderr.
+
+**`OUT.json`** (UTF-8, `ensure_ascii` off, keys in this order):
+
+```json
+{"version": 1, "engine": "vision-documents|vision-text|app-lines",
+ "image_size": [w_px, h_px], "unit": "px", "origin": "top-left",
+ "lines": [{"rect": [x0, y0, x1, y1], "text": "…", "conf": 0.97}],
+ "tables": [{"rect": [x0, y0, x1, y1],
+             "rows": [{"rect": [x0, y0, x1, y1], "cells": [{"rect": [x0, y0, x1, y1], "text": "…"}]}]}],
+ "ms": 41}
+```
+
+- **Coordinates:** pixels of `IN.png` as decoded, origin top-left, y downwards, `x0 < x1`, `y0 < y1`, clipped to
+  `image_size`, rounded to 0.1 px. The helper never knows page points.
+- **Caller conversion:** the caller rendered the PNG and knows its page clip and zoom, so it converts each rect to page
+  points as `clip origin + px / zoom`, rounded to 0.1 pt.
+- **`lines`:** one entry per recognised text line, with whitespace runs collapsed and the text stripped. Empty lines
+  are dropped.
+  - Order: sorted by `y0`. Two lines whose vertical centres differ by less than half the smaller line height count
+    as one row and are ordered by `x0`.
+  - `conf` is Vision's top candidate confidence, in [0, 1], 2 decimals.
+- **`tables`:** `[]` for `vision-text` and `app-lines`.
+  - For `vision-documents`: rows top to bottom, cells left to right. A row rect is the union of its cells.
+  - Section 8 uses `tables` first (`rows_src: ocr-table`), else `lines` grouped by `table_rows` (`ocr-lines`).
+- **`ms`:** wall time of the request. It is the only field allowed to differ between two calls on the same bytes.
+- **What the parse OCRs** (section 7.1): each region is rendered at the constant zoom `OCR_ZOOM` (in `blockcls.py`)
+  plus a 4 pt margin. The render goes through the same deterministic path as the stage C crops, so the PNG bytes
+  depend only on the PDF, the region, `OCR_ZOOM` and the pypdfium2 / Pillow versions.
+- **Read-area runs** (section 7.2) call **no** helper. The backend writes the app's existing OCR lines in the same
+  schema to a temp file `speakeasy_cap_ocr_<pid>.json` (deleted in `finally`) and passes it to `blockcls.py capture`:
+  - `engine: "app-lines"`;
+  - `image_size` = the capture PNG's pixel size;
+  - each rect = the line's screen rect mapped to capture pixels (screen points × backing scale, minus the capture
+    origin);
+  - `text` = the line's OCR text;
+  - `conf: null`, `tables: []`, `ms: 0`.
+
+  Area cases therefore need no OCR cassette.
+- **Privacy:** `text` exists only in `OUT.json`, the temp file and the parse cache (`ocr_rows`, OCR caption text). It
+  never reaches a log, event or `bench.json`. `OUT.json` written by the parse goes to `TMPDIR` and is deleted in
+  `finally`.
+
+**Bench replay stub (`tests/audit/bench/ocr_stub`):**
+- **Key:** `sha256` (hex) of the exact `IN.png` bytes. Nothing else enters the key: no path, no arguments, no
+  environment.
+- **Value:** the helper's `OUT.json` object as returned, plus its exit code.
+- **Replay:** writes the stored object and exits with the stored code.
+- **A key miss** exits 3 with no output. The app then follows the OCR-failed path; the harness counts a `replay_miss`
+  and marks the cassette stale (exit 6).
+- **Header:** the cassette header records the helper sha, the macOS version and the recording time. A change in
+  pypdfium2 / Pillow that changes PNG bytes surfaces as replay misses, never as silent drift.
+
+### A1.2 The kind job's done signal
+
+The real signal is the **sidecar itself, written once, atomically, with a final state**. No quiet window is needed.
+
+- **The parse output** (written before any job starts) gains `blockcls.kind_job`:
+  - `"none"`: no routed candidates, or stage C off (`SPEAKEASY_BLOCKCLS_VLM=off`, `SPEAKEASY_GROUND=off`, classifier
+    disabled). No job ever starts for this parse and no sidecar will appear.
+  - `"queued"`: routed candidates exist and stage C is enabled.
+
+  `blockcls.routed` = the number of routed candidates.
+- **The sidecar** `cache/doc/<parse key>.kinds.json`:
+  - It is written **only** by the job, **only** at its end (in `finally`), through a temp file in the same folder and
+    a rename. It is never written incrementally, and a partial file is never visible.
+  - Its top level:
+
+    ```json
+    {"version": 1, "parse_key": "<20-hex parse cache key>", "state": "done|partial|failed", "routed": n, "answered": n,
+     "outcomes": {"accepted": n, ...}, "breaker": null, "error": null, "started_ts": 0.0, "done_ts": 0.0, "done_ms": n,
+     "entries": [...]}
+    ```
+
+    - `breaker` is `null`, `"unavailable"` or `"no-logprobs"`.
+    - `error` is `null` or an exception class name.
+    - `entries` are the stage C decisions (section 6.1 key fields, outcome, kind, `p_top`, `p_margin`, rect).
+  - **`state`:**
+    - `done`: every routed candidate has a stage C outcome from a sent request;
+    - `partial`: at least one candidate is `skipped` (budget, job deadline, breaker) and the job ended normally;
+    - `failed`: the job raised before finishing. `error` is set; `entries` holds what was decided.
+  - **`done_ms`** = job wall time from start to the rename.
+- **Log record:** the same moment appends one record to `logs/blockcls.jsonl`, after the rename:
+  `{"event": "kind_job_done", "parse_key", "state", "routed", "answered", "done_ms", "breaker"}`. It holds no text.
+- **One job per parse key:** a lock file `cache/doc/<parse key>.kinds.lock` holds the job's pid while it runs.
+  - A document job that finds `kind_job: "queued"`, no sidecar and a live lock starts nothing.
+  - With a dead or missing lock, it starts the job.
+  - A sidecar in any state is never re-run. The one exception: `failed` with `breaker: "unavailable"` may be re-run by
+    a later document job at most once per 10 minutes (by `done_ts`). The harness never meets this case, because the
+    measured run follows a warm-up whose job reached a final state.
+- **Merging:** `load` merges `done` and `partial` sidecars, and nothing from `failed`.
+- **Harness rule** (it replaces the current "sidecar unchanged for 1 s" heuristic, which is retired):
+  1. after the warm-up run, read the parse cache entry;
+  2. if `blockcls.kind_job == "none"`, there is nothing to wait for;
+  3. otherwise poll for `<parse key>.kinds.json` and read it. A readable file with `state` in {done, partial, failed}
+     ends the wait.
+  4. The cap is **75 s** (job deadline 60 s plus 15 s for the start and a cold model load). At the cap it is a harness
+     error, `kind job not finished (case …)`, exit 3.
+  5. `failed` is reported as a harness error naming `error` (exit 3). `partial` is scored as it stands, with its
+     `skipped` counts reported.
+  6. After the measured run, the harness asserts that the sidecar's bytes are unchanged (no second job ran).
+- **The measured run** loads the merged parse, so its stage C blocks are fixed before any chunk maps. Scoring stage C
+  from the parse blocks (`kind_src: vlm`) and from the `blockcls.jsonl` records must give the same set.
+
+### A1.3 The kill switch (`SPEAKEASY_BLOCKCLS=off`): what "identical" means
+
+- **Name:** the switch is `SPEAKEASY_BLOCKCLS` (env or `config`), values `on` (default) and `off`.
+  `SPEAKEASY_BLOCKCLS_VLM=off` only turns stage C off and is **not** the kill switch.
+- **With `off`,** the parse output equals the pre-Phase-6 parse (post-Phase-7 `main`, `ac83185`) of the same file,
+  except for:
+  1. one added top-level key, exactly
+     `"blockcls": {"status": "unavailable", "classifier_version": null, "reason": "disabled", "T_B": <const>, "T_C": <const>, "kind_job": "none", "routed": 0}`;
+  2. `PARSE_VERSION` (9 against 8). It is not a field of the parse output; it appears only in the cache key, and so
+     in the cache file name.
+- **Nothing else is added, even as `null` or empty:** no `pages[].kinds`, no `blockcls_events`, no `captioned`,
+  `printed_label`, `aliases`, `caption_src`, `kind_src`, `rows_src` or `ocr_rows`, no new `parse_summary` keys. The
+  lexicon, candidates, stage B, the OCR helper and the kind job do not run, so no `U`-label, no lexicon caption and no
+  OCR-derived block exists.
+- **Runs log with `off`:** no `blockcls_events`, `doc_parse.kinds`, `kind_job` or `area_kinds`. The area capture
+  classify does not start.
+- **The K check** (verifier; acceptance 14.5 item 1): for every fixture of every public family (existing and gap):
+  1. parse it on `ac83185` and on the Phase 6 commit with `SPEAKEASY_BLOCKCLS=off`, same interpreter, same models;
+  2. remove from the Phase 6 output **only** the top-level `blockcls` key, after asserting it equals item 1 above;
+  3. remove from **both** outputs only the timing fields the Phase 2 / Phase 4 determinism view already excludes: keys
+     named `ms` and keys ending in `_ms`;
+  4. compare the rest by **exact JSON equality**: same keys, same order-insensitive object members, same list order,
+     same numbers as written, no tolerance.
+
+  This covers every block's `kind`, `bbox`, `src`, `id`, every figure's `label`, `fig_id`, `bbox`, `caption_bbox`,
+  `bbox_src`, `caption`, `panels`, `parts`, `labels`, `objects`, every page's lines and text, `layout`,
+  `layout_events` and the summary.
+  - Any other difference fails the check, and so does any key from the list above appearing in the `off` output.
+  - The hidden families get the same check, reported as a pass/fail count only.
+
+## Amendment 2: thresholds, row ties, implementer additions, known gaps (rulings, 2026-10-26)
+
+**Context.** The implementer's uncommitted tree on `ac83185` reports, for the public gap set in gated mode:
+
+| Measure | Result |
+|---|---|
+| `kind.score` | 82.61 (38/46) |
+| `kind.precision` | 100 |
+| `by_gap` | uncaptioned 64.29, lexicon 94.44, no-text 77.78, image-table 100, standard 100 |
+| Errors | `wrong_type` 0; prose decoys kept 6/6 |
+| Determinism | deterministic |
+| Stage B cost | 13 / 16 ms p50 / p95 per candidate |
+| Guardrails | B5' public unchanged; K check 17/17 identical; `PARSE_VERSION` 9 |
+| `image_table_rows` (replay) | 72.73 (8/11) |
+
+These rulings win over sections 6, 7, 8, 9, 13 and 14 where they differ.
+
+### A2.1 `T_B` (frozen)
+
+- **`T_B = 0.50`**, frozen.
+- The public gated sweep gave 14 stage-B accepts at 100 % precision at every T from 0.50 to 0.95. The smallest
+  qualifying T under section 13's rule (precision >= 95, >= 10 accepted) is 0.50.
+- **Sweep table** (public gap set, gated):
+
+  | T | Accepted | Precision |
+  |---|---|---|
+  | 0.50 … 0.95 (every grid step) | 14 | 100.0 |
+
+- It is never re-chosen against hidden numbers.
+
+### A2.2 `T_C` (frozen from the verifier's public live sweep)
+
+- **Rule** (replaces section 13's `T_C` line; Phase 5 8.2 style, because the routed set is small): `T_C` = the
+  smallest T in {0.40, 0.45, …, 0.95} at which the verifier's **public** live sweep (`tools/kind_eval.py --sweep`)
+  gives stage-C-accepted kind precision >= 90 with >= 5 accepted.
+- **Recording:** the verifier appends the chosen value and the full sweep table (T, accepted, correct, precision) to
+  this amendment as **A2.2a**. Until then, the provisional `T_C = 0.95` stands.
+- **No T qualifies** → `T_C = 0.95` and stage C ships **default-off** (`SPEAKEASY_BLOCKCLS_VLM` default `off`). This
+  is acceptable: stage B plus the lexicon alone meet the kind target on public (82.61 >= 80, precision 100 >= 90).
+- **Default-on** still also requires section 14 item 3:
+  - public `kind_vlm.score >= kind.score − 1` and `kind_vlm.precision >= 95`;
+  - hidden `kind_vlm.precision >= 90`.
+
+  If either fails, stage C ships default-off and the number is reported without re-tuning.
+- **Unchanged:** section 14 item 2 (gated `kind`, both sets) remains the phase gate; the hidden gated `kind` result is
+  still required.
+
+#### A2.2a `T_C` frozen: 0.95, stage C default-off (verifier's live public sweep, 2026-10-26)
+
+- **Sweep result:** only **2** stage C answers fell on kind-scored pages. Both were `kind: text` with `p_top` 1.00:
+  - 1 was correct;
+  - 1 was a GT figure/table wrongly typed as text (no block; the region stays as Phase 4 left it).
+
+  | T | Figure/table accepted | Correct | Precision |
+  |---|---|---|---|
+  | 0.40 … 0.95 (every grid step) | 0 | 0 | null |
+
+- **Ruling:**
+  - No T qualifies (A2.2 needs >= 5 accepted at precision >= 90), so **`T_C = 0.95`** (frozen).
+  - Stage C ships **default-off** for Phase 6 (`SPEAKEASY_BLOCKCLS_VLM` default `off`). Section 14 item 3's default-on
+    test is moot.
+- **What still ships:** the stage C code, the kind job, its events, the done signal (A1.2, A2.5) and every section 10
+  fallback. They are verified as usual:
+  - the replay mode runs;
+  - fallback runs with `SPEAKEASY_BLOCKCLS_VLM=local`;
+  - privacy and unit tests.
+
+  A user can opt in with `SPEAKEASY_BLOCKCLS_VLM=local` (or `auto`).
+- **Small sample:** the public routed set is only 2 candidates. This is a small-sample decision. It is revisited, under
+  the A2.2 rule on the public set only, once more gap documents exist (enough routed candidates for >= 5 figure/table
+  decisions). It is never re-chosen against hidden numbers.
+
+### A2.3 `image_table_rows` (72.73 vs 80): gated, and the header tie is in scope
+
+- **Gated.** It is an acceptance target (section 14 item 3). It is not a `bench_gate.py` metric, but the phase does
+  not pass below 80 on either set.
+- **The tie belongs to Phase 6**, fixed for OCR-row tables only. Tables with `rows_src` `ocr-table` or `ocr-lines`:
+  - When `match_row` finds the header row (`rows[0]`) and a later row with an **equal** best score, the later (data)
+    row wins.
+  - A header row is a row-band target only when it scores **strictly** higher than every data row.
+  - Forward-only order, the header tint and every other `match_row` rule are unchanged.
+- **PDF-text tables** (`table_rows` from PDF lines) keep the Phase 2 rule unchanged. The K check and B5' stay valid.
+- **Constraints:**
+  - No fixture-specific constants. The rule is the one sentence above.
+  - Unit tests (new file): a tie goes to the data row; a strict header win stays the header; a PDF-text table is
+    unchanged.
+- **After the fix,** below 80 → report the ceiling with the misses by cause (`ocr-miss`, `row-grouping`, `match`,
+  `gt-convention`), with no further tuning.
+
+### A2.4 Implementer additions beyond the contract
+
+- **`_pair_typed`: accepted, for lexicon captions only.**
+  - A lexicon caption with no body of its detector kind may take an adjacent **unpaired** detector body box of
+    another class when stage B types that box as the caption's kind.
+  - Conditions:
+    - `p_top >= T_B`;
+    - not `textish`;
+    - not `decoration`;
+    - Phase 4 4.2's side, column, overlap and gap limits all hold.
+  - The box is then not a section 3 candidate. Its `block_kind` record has `anchor: "lexicon-caption"` and
+    `kind_src: lexicon`.
+  - **Standard captions never use it** ("caption regex first, unchanged"; B5' and the K check depend on it).
+- **Class-agnostic de-dup at IoU 0.5 in `filter_candidates`: accepted.** It is the candidate-side twin of Phase 4's
+  `DUPLICATE_IOU`. The higher detector score is kept (ties: the earlier box in reading order). The dropped box is
+  logged `skipped` (`duplicate`).
+- **Container drop: accepted, with this definition.**
+  - A candidate is dropped when **two or more** other candidates each have >= 90 % of their own area inside it. The
+    inner boxes stay candidates.
+  - The 90 % is a constant in `blockcls.py`.
+  - The drop is logged `skipped` (`container`).
+  - It never removes a captioned body or a Phase 5 panel.
+- **`anchor: "lexicon-caption"`: accepted.** The `block_kind.anchor` enum (9.2) is now `uncaptioned |
+  ambiguous-caption | lexicon-caption | no-text | area`. `skipped` reasons are `over-cap | budget | duplicate |
+  container | area-no-vlm`.
+  - `tests/audit/SCHEMA.md` and the `privacy_audit.py` pins take the new values as a pure pin update.
+
+### A2.5 Known gaps
+
+| Gap | Ruling |
+|---|---|
+| No macOS 26 `RecognizeDocumentsRequest` (the build SDK is 15.2) | **Known limitation, accepted.** The helper reports `engine: "vision-text"`, `tables: []` (A1.1), and section 8 uses `rows_src: ocr-lines`. Adding the macOS 26 engine is a follow-up once the build SDK has it; it requires re-recording both OCR cassettes |
+| Stage C not run for area-capture candidates | **Known limitation, accepted.** Section 7.2's "may run" becomes "does not run in Phase 6". Routed area candidates get no cue (precision first), with `outcome: skipped` and reason `area-no-vlm`. Area cases are scored in gated mode, where stage C is off anyway |
+| Stage C figures merged in-process get no `objects` / `parts` | **Known limitation while stage C ships default-off; required fix before it may ship default-on.** The fix: the kind job (doc venv) computes the Phase 5 hierarchy (`objects`, `parts`, `panels: []`) for each figure it accepts and stores it in the sidecar entry, so `load` merges it with the box. Until then a stage C figure is a figure box only: no picker scope (`part_picks.skipped["no-parts"]`) and no part ovals |
+| A partial re-parse (`--sel`, then `--prev`) keeps the same parse key, so an existing sidecar blocks stage C for pages parsed later | **Required fix** (it corrupts the done signal for the app). The fix is below |
+
+**The partial re-parse fix:**
+- The sidecar gains `pages`: the sorted list of pages whose routed candidates the job covered.
+- The parse sets `blockcls.kind_job: "queued"` when routed candidates exist on pages not yet in an existing
+  sidecar's `pages`; otherwise `"none"`.
+- A document job that starts on `"queued"` runs stage C **only for the uncovered pages**. At its end it rewrites the
+  sidecar atomically as the union:
+  - earlier entries are kept;
+  - `pages` is the union of the old and new pages;
+  - `state` is the new job's state;
+  - `done_ms` / `done_ts` are the new job's.
+- A1.2's harness rule becomes: the wait ends when the sidecar's `pages` ⊇ the routed pages of the current parse **and**
+  its `state` is final.
+- The bench parses every page with no `--sel`, so its numbers are unaffected. A unit test covers the two-step parse.
+
+### A2.6 OCR helper resolution (one rule; reconciles section 12.4 and A1.1)
+
+- **Path:** first match wins.
+  1. `SPEAKEASY_OCR_BIN` (tests, bench stub). When it is set but is not an executable file, OCR is **unavailable**,
+     with no fall-through.
+  2. Otherwise the tracker binary the backend already resolves: `SPEAKEASY_TRACKER` when set, else
+     `$SPEAKEASY_HOME/bin/speakeasy-track`.
+  3. Not an executable file → OCR unavailable (`ocr: unavailable`).
+- **Invocation:** always `<path> ocr IN.png OUT.json`, with the output format and exit codes of A1.1. The bench stub
+  accepts the same argument list.
+- **Bench:**
+  - gated mode leaves `SPEAKEASY_OCR_BIN` unset and points `SPEAKEASY_TRACKER` at a nonexistent path, so OCR is
+    unavailable;
+  - `--ocr replay|record` sets `SPEAKEASY_OCR_BIN` to `tests/audit/bench/ocr_stub`.
+- **Read-area runs** call no helper (A1.1).
+
+## Amendment 3: one generalization round (second detector on gap pages, structural fallback), 2026-10-26
+
+**Context** (non-gated indicative runs on the implementer's tree):
+
+| Set | `kind.score` | `kind.precision` | Uncaptioned | No-text | Lexicon | Image-table |
+|---|---|---|---|---|---|---|
+| Public gap | 82.61 | 100 | 64.29 | 77.78 | 94.44 | 100 |
+| Hidden gap | **68.09** | **88.89** | 42.86 (6/14) | 33.33 (3/9) | 94.74 | 100 |
+
+- Hidden stage C routed 0 candidates.
+- The implementer's diagnosis: most misses are **detector misses**. PP-DocLayout-S never proposes the box, so stage B
+  never sees it.
+- The user chose **one** generalization round. This amendment is that round. It wins over sections 3, 7, 12 and 14
+  where they differ.
+
+### A3.1 Prior art (checked 2026-10-26; measured on the PUBLIC gap set only)
+
+Measurement: page renders at zoom 1, 640 × 640 bilinear, onnxruntime 1.31 CPU, 4 intra-op threads. The score is the
+recall of the 42 GT figure/table page regions of the public gap set (area cases excluded) at IoU >= 0.5, before
+candidate filters and stage B. Scripts: `/tmp/p6/det_compare*.py`.
+
+| Model | Source / licence | Size | Same-kind recall | Any body | Unmatched body boxes | CPU per page (p50 / max) | Load |
+|---|---|---|---|---|---|---|---|
+| PP-DocLayout-S (today) | Apache-2.0 (Phase 4) | 4.9 MB | 34/42 | 36/42 | 1 | 22 / 27 ms | — |
+| **Docling `docling-layout-heron-onnx`** (RT-DETRv2) | **official** (`docling-project`), Apache-2.0 | 171.2 MB | **42/42** | 42/42 | 7 | 388 / 448 ms | 128 ms |
+| Docling egret-medium, community ONNX `ningpp/docling-layout-egret-medium-ONNX` (D-FINE) | single-maintainer export, card says Apache-2.0 (base model Apache-2.0) | 78.5 MB | 41/42 | 41/42 | 6 | 193 / 210 ms | 515 ms |
+| PP-DocLayout_plus-L (official ONNX) / PP-DocLayout-M | Apache-2.0 | 130 MB / smaller | not measured | — | — | — | — |
+
+- Repeated runs on the same input are bit-identical for heron and egret.
+- egret's input must **not** be ImageNet-normalised: with normalisation it found 6/42. Its
+  `preprocessor_config.json` has `do_normalize: false`.
+
+**Decision: build on top, using the official heron ONNX as a second detector, on gap pages only (A3.2).**
+- Reasons:
+  - it is the only Docling layout model with official ONNXRuntime support (Docling's model catalog), it is
+    Docling-maintained and widely used (about 140 k downloads);
+  - it had the best recall: 42/42 public, against 34/42 for PP-S;
+  - its cost is paid only on routed pages.
+- **Rejected as primary:**
+  - egret-medium community export: provenance (one maintainer, 53 downloads, not Docling's), although it is half the
+    size and twice as fast. It stays the documented alternative if the user rejects heron's bundle size. The same
+    adapter takes it, with its own pin and input contract (below);
+  - PP-DocLayout_plus-L / -M: the same model family whose misses this round targets, and not measured.
+
+**Pin:**
+
+| Item | Value |
+|---|---|
+| File | `docling_layout_heron.onnx` |
+| Source | `https://huggingface.co/docling-project/docling-layout-heron-onnx/resolve/40bde044036bb181c130ddf6c51792187268748f/model.onnx` |
+| Size | 171,220,471 bytes |
+| sha256 | `59c81a3a2923042d85034ffc487f8f47e4854117e879aef89b2b9f728fb4922a` |
+| `detector2_version` | `docling-heron/59c81a3a2923` |
+
+**Input/output contract (heron):**
+- Inputs:
+  - `images`: `uint8 [1,3,640,640]`, RGB, the page render bilinear-resized to 640 × 640, with no rescale and no
+    normalisation;
+  - `orig_target_sizes`: `int64 [[W, H]]`, the render size in pixels.
+- Outputs, post-processed inside the graph:
+  - `labels [1,300]`;
+  - `boxes [1,300,4]`, `x0, y0, x1, y1` in render pixels;
+  - `scores [1,300]`.
+- Classes (`config.json` `id2label`): `caption`, `footnote`, `formula`, `list_item`, `page_footer`, `page_header`,
+  `picture`, `section_header`, `table`, `text`, `title`, `document_index`, `code`, `checkbox_selected`,
+  `checkbox_unselected`, `form`, `key_value_region`.
+- Only `picture` (→ figure family) and `table` (→ table family) seed candidates. The text-like classes (`text`,
+  `list_item`, `section_header`, `title`, `caption`, `footnote`) count as text evidence (A3.3).
+- `HERON_SCORE_MIN` is one constant in `[0.3, 0.6]`, chosen under A3.5.
+
+**egret alternative (only if heron is rejected):**
+- Pin: revision `06b27d85c5a004eb024ca82f78e094fb7bf47e47`, 78,481,216 bytes, sha256
+  `e64ebaa061f6f8b4c049fa109590876532a67b77a4f6c00508a7def24844757b`.
+- Input: `pixel_values float32 [1,3,640,640]` = RGB / 255, not normalised.
+- Outputs: `logits [1,Q,17]` (sigmoid, arg-max class) and `pred_boxes [1,Q,4]` (normalised cx, cy, w, h). Labels as
+  heron's.
+
+### A3.2 Routing: heron runs only on gap pages, defined from page structure
+
+The router runs in the parse on every detected page, after PP-DocLayout-S. It uses the page's own text layer,
+geometry and PP-S boxes, never doc ids, file names or page numbers.
+
+A page is a **gap page** when **any** of these holds:
+
+| Rule | Condition |
+|---|---|
+| **R1 no or near-empty text layer** | fewer than 3 text lines, **or** the text-line boxes cover < 2 % of the page area |
+| **R2 slide-like** | landscape (`W / H >= 1.2`) **and** fewer than 25 text lines |
+| **R3 unexplained graphics** | the union of raster images and clustered vector drawings is at least 8 % of the page area, counting only items with both sides >= 24 pt that cover < 90 % of the page and have < 50 % of their area inside any PP-S body box, PP-S paragraph box or captioned body |
+
+- On a gap page, heron runs once.
+  - Its `picture` / `table` boxes join section 3 as candidates (`det: heron`) when they overlap no PP-S body box at
+    IoU >= 0.5 and no captioned body or paragraph block by more than 30 %.
+  - Section 3's filters, A2.4's de-dup and container rules, the caps and stage B then apply unchanged.
+- PP-S stays the only source of captions, pairing, paragraphs and headings, on every page.
+- Heron never changes a block that PP-S or a caption produced. It can only **add** candidates.
+- **Never on normal papers:** acceptance A3.6 requires that the router fires on **0** pages of the existing families
+  (public and hidden). If R3 fires on any existing-family page during public development, R3's constants are
+  tightened on public data. Hidden counts are reported as a number only.
+- **Caps:**
+  - at most 8 routed pages per parse, in page order; the rest are `layout2.src: "skipped"` (`over-cap`);
+  - with `--sel`, routing applies only to the pages the parse detects.
+
+### A3.3 Structural fallback for no-text pages
+
+On an **R1 page** where PP-S and heron together leave no body candidate over a region with ink, candidate regions come
+from page structure:
+
+1. Render the page at zoom 1 to grayscale. **Ink** = pixels at least 48 levels darker than the page's median
+   (background) value. Dilate by 6 px.
+2. **Remove text evidence**, padded by 2 pt:
+   - the OCR line boxes when the OCR helper is available (A2.6);
+   - otherwise, the text-like detector boxes of PP-S (`text`, `paragraph_title`, `doc_title`, `abstract`, `content`,
+     `reference`, `footnote`, `aside_text`) and of heron (A3.1).
+3. Connected components of the remaining ink are **candidates** when:
+   - both sides are >= 36 pt;
+   - the area is >= 2 % of the page;
+   - ink density inside is >= 3 %;
+   - they overlap no existing candidate or body at IoU >= 0.3.
+
+   At most 4 per page, largest first.
+4. **Stage B types them** as in section 5, and routing B1–B4 applies. Stage C is off (A2.2a), so only B5 accepts. The
+   `block_kind` record has `anchor: "no-text-structural"`, `det_cls: "ink"` and `det_score: null`.
+5. **Never on a page with a text layer:** R1 must hold. Measured risk: stage B read 20 of 44 text crops as `table`.
+   That is why text evidence is removed first, and why the fallback is limited to R1 pages.
+
+The ink threshold, dilation, size, density and cap are constants in `blockcls.py`, chosen under A3.5.
+
+### A3.4 Install, fallback, events, budget
+
+- **Install and bundle:** exactly as section 2 / Phase 4 section 1, for the A3.1 pin:
+  - install path `$SPEAKEASY_HOME/models/docling_layout_heron.onnx`;
+  - override `SPEAKEASY_LAYOUT2_MODEL` (set but missing → `model-missing`, no fall-through);
+  - `bundle_python.sh` fails the build on a mismatch;
+  - `app/NOTICE` and `README.md` name docling-layout-heron (docling-project, Apache-2.0);
+  - the bundle grows by about 171 MB, which the user should know at the release step.
+- **Kill switches:** `SPEAKEASY_LAYOUT2=off` turns off heron and the structural fallback. `SPEAKEASY_BLOCKCLS=off`
+  turns off all of Phase 6, these included, so the K check (A1.3) is unchanged.
+- **Fallback reasons** (`layout2.reason`, Phase 4 enum): `disabled`, `no-onnxruntime`, `model-missing`,
+  `model-mismatch`, `load-failed`, plus `inference-failed` per page.
+  - Any of them → **today's path**: PP-S candidates only. The structural fallback still runs on R1 pages, because it
+    needs no model.
+  - One stderr line per parse: `layout2: detector unavailable (<reason>)`.
+- **Events and fields** (no text, whatever `SPEAKEASY_LOG_TEXT` is):
+  - `pages[].layout2`: `{"routed": bool, "by": ["R1"|"R2"|"R3", ...], "src": "heron"|"skipped"|"unavailable"|null,
+    "ms": int, "boxes": {"figure": n, "table": n}, "added": n, "structural": n}`;
+  - `layout2_page`: `{"event", "page", "by", "ms", "added", "structural", "detector_version"}`, one per routed page,
+    in `blockcls_events`;
+  - `layout2_unavailable`: `{"event", "reason", "error", "detector_version", "page"}`;
+  - runs log `doc_parse.layout2` = the matched page's `pages[].layout2`;
+  - bench `sets.<set>.layout2` = `{"pages", "routed", "by_rule", "ms": {"p50", "p95"}}`. `ms` is not
+    determinism-covered.
+
+  The A2.4 enums gain `anchor: "no-text-structural"` and `det_cls: "ink"`. These keys hold no text, so the Phase 7
+  scrub learns nothing new (9.4). SCHEMA and the privacy pins are updated as a pure pin update.
+- **Per-page budget** (CPU, 4 threads; reported, and gated on public):
+
+  | Item | Budget | Measured |
+  |---|---|---|
+  | Router, every detected page | <= 2 ms p95 | — |
+  | Heron, per routed page | <= 600 ms p95 | 388 ms p50 / 448 ms max |
+  | Heron session load, once per parse with a routed page | <= 300 ms | 128 ms |
+  | Structural fallback, per R1 page | <= 50 ms p95 | — |
+  | Unrouted pages | zero heron cost | — |
+
+  The document-ready check must still pass with no more retries than at B5'.
+
+### A3.5 Anti-overfitting (binding for this round)
+
+- **Where constants may be chosen.** Every new or changed constant may be chosen **only** on the public gap set or on
+  **generated variants** of the public gap specs. Constants include R1–R3, `HERON_SCORE_MIN`, the fallback constants,
+  the caps, and any filter retouched in this round.
+  - Variants are new spec files made with the verifier's generator: different seeds, texts and layout parameters,
+    never the hidden specs. They live under `tests/audit/bench/specs-gap-variants/` (verifier-owned).
+  - Results on the variants are reported next to public.
+- **No identifying constants:** no doc ids, file names, page numbers or fixture-specific constants in code.
+- **Hidden set:**
+  - read as aggregates only (`by_gap`, miss-cause counts);
+  - **run once, at the gate of this round**. The first hidden result decides shipping (A3.6);
+  - no constant is changed in response to it;
+  - any later change is reported with before/after hidden aggregates and does not re-open the ship decision.
+- **One round:** there is no Amendment 4 tuning loop on the gap family. Further gains wait for more gap documents
+  (A2.2a).
+
+### A3.6 Acceptance for this round
+
+1. **Target:** hidden gated `kind.score >= 80` **and** `kind.precision >= 90`. Public stays at `kind.score >= 81.61`
+   (today's 82.61 − 1) with `kind.precision >= 90`.
+2. **Ship rule if the target is missed:**
+   - ship when hidden `kind.score >= 73.09` (68.09 + 5) with hidden `kind.precision >= 90`, items 3–6 holding;
+   - record the ceiling: the best honest hidden and public scores, `by_gap`, and public misses by cause
+     (`detector-miss` by both detectors, `router-not-fired`, `filtered`, `structural-miss`, `classifier-wrong`,
+     `ocr-miss`, `gt-convention`) with hidden cause counts only;
+   - otherwise ship with `SPEAKEASY_LAYOUT2` default `off` and report.
+3. **The existing families are byte-equal:**
+   - `run_bench.py --set all` on the existing families gives `boxes`, `lines`, `parts` and their `by_kind` /
+     `by_subset` blocks **exactly equal** to B5' (not "within 1");
+   - first-highlight p50/p95 < 300 ms;
+   - `bench_gate.py` PASS;
+   - `sets.*.layout2.routed == 0` on both sets.
+4. **K check unchanged:** A1.3 still passes 17/17 (or its current count) with `SPEAKEASY_BLOCKCLS=off`.
+5. **Gap-family guardrails:**
+   - `--check-determinism` exits 0;
+   - prose decoys all kept;
+   - `kind.wrong_type` total <= 2;
+   - `image_table_rows >= 80` (A2.3);
+   - A3.4's per-page budget met on public;
+   - first-highlight p50/p95 < 300 ms.
+6. **Fallback and privacy:**
+   - each A3.4 reason, checked as in Phase 4 (env off, missing override, corrupted copy, a non-ONNX file with the
+     patched hash, one failing page), gives the reason event, `layout2.src` and blocks identical to a
+     `SPEAKEASY_LAYOUT2=off` run;
+   - `privacy_audit.py` finds no text in the new keys;
+   - unit tests in new files cover R1–R3 vectors (a portrait paper page is never routed), the structural fallback
+     removing text evidence, and heron's class mapping.
+
+## Amendment 4: rulings after implementer round 5 (heron), 2026-10-26
+
+**Context.** The implementer's tree is stable. Public gap set, gated mode, with heron:
+
+| Measure | Result |
+|---|---|
+| `kind.score` / `kind.precision` | 91.30 (42/46) / 100 |
+| Uncaptioned / no-text | 78.57 / 88.89 |
+| Heron missing (`model-missing`) | 86.96 |
+| `image_table_rows` | 100 |
+| B5' main bench | equal; heron routes 0/29 main pages |
+| K check | 17/17 |
+| Heron cost | 396–458 ms p50 per routed page; load about 210 ms, sha check included |
+| Router / structural fallback | 0.21 ms max / 5–14 ms per page |
+
+These rulings win over Amendment 3 where they differ. The hidden gap set is still run **once**, at the gate (A3.5).
+
+### A4.1 Structural fallback vs the `SPEAKEASY_LAYOUT2` switch (A3.4 vs A3.6 item 6)
+
+Adopted, with one narrowing.
+- **A3.4 wins:** the structural fallback (A3.3) still runs when heron is unavailable (`no-onnxruntime`,
+  `model-missing`, `model-mismatch`, `load-failed`, and on an `inference-failed` page). It needs no model.
+- **`SPEAKEASY_LAYOUT2=off` is the kill switch** for this round. It disables **both** heron and the structural
+  fallback. `SPEAKEASY_BLOCKCLS=off` still disables all of Phase 6 (A1.3, K check unchanged).
+- **A3.6 item 6 restated:** for each heron unavailable reason, the parse's blocks equal a `SPEAKEASY_LAYOUT2=off` run,
+  except for blocks whose `block_kind.anchor` is `no-text-structural`, on **R1 pages only**. The reason event,
+  `layout2.src: "unavailable"` and the stderr line are required as before.
+- **Narrowing:** Chat's wording "routed no-text/slide pages" is narrowed to R1 pages. A3.3 limits the fallback to R1
+  (no or near-empty text layer), and an R2-only slide page has a text layer, where stage B misreads text crops.
+
+### A4.2 Structural fallback text evidence: detector boxes, not OCR
+
+Accepted.
+- A3.3 step 2 uses **only** the text-like detector boxes of PP-S and heron (when heron ran), **never** OCR, in every
+  mode.
+- Reason: a full-page OCR measured 2.8–3.6 s per page. That breaks document readiness (Read-area's 4 s wait,
+  benchmark 5.2) and A3.4's 50 ms fallback budget.
+- OCR text evidence stays a later option. If it is ever added, it runs in the kind job (background), never in the
+  parse.
+- A3.3's other constants are unchanged.
+
+### A4.3 Round-4 additions (lexicon captions only)
+
+**Accepted**, each under these conditions:
+- it acts only on lexicon captions (`caption_src` `lexicon` / `lexicon+in-box`);
+- it never changes a standard caption or its body, so B5' and the K check depend on none of them;
+- it is off with `SPEAKEASY_BLOCKCLS=off`;
+- its constants are named in code and were chosen on the public gap set or its generated variants (A3.5).
+
+| Addition | Accepted behaviour |
+|---|---|
+| `WEAK_CAPTION_MIN = 0.2` (`layoutdet.py`) | Detector caption boxes scoring between 0.2 and `SCORE_MIN` are kept aside **only** as in-box text evidence for 4.1's polluted-line match and evidence rule. They never create a block, never extend a caption block (Phase 4 4.1) and never pair a body |
+| `_widen_spanning` | On a two-column page, a lexicon caption crossing the midline keeps a full-width body (the body is widened to the caption's span when it is narrower than 75 % of it) |
+| `_kind_by_layout` / `_cell_rows` | Amends 4.2's kind order for an ambiguous noun: stage B family → detector class family → **layout cue** → `figure`. The layout cue is, in order: >= 2 rows of multi-fragment cell lines adjacent to the caption → `table`; else graphics within 60 pt above → `figure`; else graphics within 60 pt below → `table`. `kind_src: lexicon` |
+| Heuristic half rule | On a page where Phase 2's two-column rule says one column, a lexicon caption lying in one half with text beside it in the other half keeps its body in its own half |
+| Caption-under-table rule | A lexicon **table** caption with cell rows above it and none below it takes the body above it (tables captioned underneath) |
+| `_split_shared` | Two side-by-side captions over one detector box: a lexicon caption's body that reaches under the other caption is cut at the rightmost whitespace gutter between the two captions' left edges. The other part goes to the other caption only when that is a lexicon caption without a body |
+| `_pair_typed` | As A2.4 |
+
+- **Unit tests** (new files): one positive and one standard-caption-unchanged vector per row.
+
+### A4.4 Harness work (verifier-owned)
+
+Adopted.
+- **`run_bench.py --layout2-model PATH`** (and the caller's `SPEAKEASY_LAYOUT2_MODEL`):
+  - it passes the path into the scrubbed environment, like `--layout-model` / `--figcls-model`;
+  - without it the temp home has no heron, so that run measures the `model-missing` fallback;
+  - `versions` gains `layout2_model` (the `detector2_version`, or `null`);
+  - a run with `--layout2-model` whose parse reports `layout2.reason` other than null on a routed page exits 5
+    (coverage), like the classifier check.
+- **`sets.<set>.layout2`** on every family: `{"pages", "routed", "by_rule": {"R1", "R2", "R3"}, "src": {...},
+  "reasons": {...}, "structural": n, "ms": {"p50", "p95"}}`.
+  - `pages`, `routed`, `by_rule`, `src`, `reasons` and `structural` are determinism-covered; `ms` is not.
+  - On the existing families, `routed == 0` is asserted (A3.6 item 3).
+- **`score.blockcls_summary`** counts `layout2_page` records (pages, `added`, `structural`) and `layout2_unavailable`
+  records (by `reason`) from `blockcls_events`, excluding `ms` from the determinism view. A `test_score.py` case pins
+  it.
+- **The gate run** uses `--figcls-model` and `--layout2-model`. The `model-missing` run (public 86.96) is reported as
+  the fallback figure.
+
+### A4.5 Bundle size (recorded)
+
+- The bundle grows by about 171 MB with heron (A3.1). **The user accepted this size for now** (2026-10-26).
+- `README.md` and the release notes state the size.
+- The egret-medium community export (78.5 MB, pinned in A3.1) stays the documented swap behind the same adapter, if
+  size becomes a problem. Swapping needs public re-measurement under A3.5 and does not re-open the hidden run.
+
+## Amendment 5: main-bench guarantee, `picture`, absorption, layout2 fields (Chat's rulings, 2026-10-26)
+
+These rulings win over Amendments 3 and 4 where they differ.
+
+### A5.1 What blocks shipping on the existing families (restates A3.6 item 3)
+
+- **Ship blocker:** the existing-family (main bench) scores are **exactly equal** to B5' on **public and hidden**:
+  - the `boxes`, `lines` and `parts` blocks, with their `by_kind` / `by_subset` sub-blocks;
+  - `bench_gate.py` PASS;
+  - first-highlight p50/p95 < 300 ms.
+- **The router firing on an existing-family page is reported, not blocking, as long as the scores stay equal.**
+  - Report: per set, the count of routed pages, the rule(s) that fired (`by_rule`) and heron `ms` (p50/max). Hidden
+    gives aggregates only.
+  - It is recorded as a known item: heron is add-only (A3.2), and its cost stays within A3.4's 600 ms p95 per routed
+    page.
+  - `sets.*.layout2.routed == 0` on the existing families is therefore no longer asserted. The A4.4 harness reports
+    it instead.
+- **Rationale:** the verifier's partial run saw the router fire on 1 hidden main-family page.
+  - The implementer is **not** told which page: the hidden set stays blind.
+  - R1–R3 are **not** re-tuned against hidden (A3.5).
+  - Public main-family routing stays at 0/29, and any public firing is fixed on public data.
+
+### A5.2 `det_cls` gains `picture`
+
+- The `block_kind.det_cls` enum is now `image | chart | table | picture | ink`.
+- `picture` is heron's native class. It maps to the **figure** family, like `image` / `chart`, in routing rule B3
+  (section 5) and everywhere a detector family is used (4.2, A4.3). Heron's `table` keeps `det_cls: table`.
+- `tests/audit/SCHEMA.md` and the privacy pins take the value as a pure pin update.
+
+### A5.3 Absorption of orphan-line paragraphs by new bodies
+
+- When a heron or structural body is accepted as a figure/table block, any **orphan-line paragraph** (`src: "lines"`,
+  Phase 4 4.6) whose bbox centre lies inside that body is **removed** from the paragraphs. Its lines become lines inside
+  a figure/table body.
+  - This is Phase 4 4.6's existing rule (lines inside a figure or table body join no paragraph), applied to the new
+    body.
+  - Section 5's rule covers the pending case: lines of a routed, not-yet-accepted candidate join no paragraph.
+  - Chat's "per section 5" is read as these two rules together.
+- **How to read the earlier wording.** A3.2's "heron never changes a block" and A4.1's "blocks equal except
+  structural" are read as follows:
+  - no block or figure produced by PP-S, by a caption or by a standard caption changes: geometry, kind, label,
+    `fig_id`, parts and paragraphs from detector boxes (`src: "detector"`) all stay as they were;
+  - the only permitted side effect of an added body is absorbing orphan-line paragraphs whose centre lies inside it;
+  - paragraphs from detector boxes are never absorbed. A new body overlapping one by more than 30 % is not a candidate
+    (A3.2).
+- **A4.1's comparison** (heron unavailable vs `SPEAKEASY_LAYOUT2=off`) allows two kinds of difference:
+  - structural-fallback blocks on R1 pages;
+  - the orphan-line paragraphs those blocks absorb.
+
+### A5.4 `layout2` fields the suite already tolerates become spec
+
+**Top-level `layout2` object** (parse output, every PDF parse while Phase 6 is on):
+
+```json
+{"status": "ok|idle|unavailable", "detector_version": "docling-heron/59c81a3a2923"|null, "reason": <enum>|null}
+```
+
+| `status` | When | `detector_version` | `reason` |
+|---|---|---|---|
+| `idle` | No page of this parse was routed, so heron was never loaded or checked | `null` | `null` |
+| `ok` | At least one page routed and heron ran | set | `null` |
+| `unavailable` | At least one page routed and heron could not run (A3.4 reasons) | `null` | set |
+
+- **`SPEAKEASY_LAYOUT2=off`:**
+  - with nothing routed: `idle`, `reason: null`, not `disabled`. The router still evaluates pages, but nothing needed
+    heron;
+  - with any page routed: `unavailable`, `reason: "disabled"`.
+- **`SPEAKEASY_BLOCKCLS=off`:** the top-level `layout2` key is **absent**, as are all other Phase 6 keys. A1.3's list
+  gains `layout2` and `pages[].layout2`, so the K check is unchanged.
+
+**`pages[].layout2`** (A3.4):
+- the key `reason` is **optional**: it is present only when `src` is `unavailable` or `skipped` (`over-cap`);
+- consumers (scorer, `doc_parse.layout2`, tests) treat a missing `reason` as `null`;
+- all other A3.4 fields are unchanged.

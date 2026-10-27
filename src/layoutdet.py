@@ -15,6 +15,7 @@ INPUT_SIZE = 480
 RENDER_ZOOM = 1.0
 THREADS = 4                      # fixed, never from the environment: two parses of one file give identical boxes
 SCORE_MIN = 0.4                  # the one global score threshold
+WEAK_CAPTION_MIN = 0.2           # caption boxes below SCORE_MIN kept aside for Phase 6's in-box caption text only (never blocks)
 MEAN, STD = (0.485, 0.456, 0.406), (0.229, 0.224, 0.225)
 
 # tolerances, page points unless stated
@@ -72,24 +73,28 @@ def fetch_model(models_dir):
     """Installer step: a verified model at models_dir/MODEL_FILE. Exit status 0 ok, 1 checksum or size mismatch, 2
     download failure. A good file already there is kept without network access; a bad one never stays.
     SPEAKEASY_LAYOUT_MODEL_URL overrides the pinned source (tests, mirrors)."""
+    return fetch_verified(models_dir, MODEL_FILE, os.environ.get("SPEAKEASY_LAYOUT_MODEL_URL") or MODEL_URL, MODEL_SIZE, MODEL_SHA256,
+                          "Layout model", "PDF layout detection off")
+
+def fetch_verified(models_dir, file_name, url, size, sha256, what, off_note):
+    """A pinned file at models_dir/file_name with its size and sha256 checked (fetch_model's rules, shared by every model)."""
     import subprocess
-    dest = os.path.join(models_dir, MODEL_FILE); part = dest + ".part"
+    dest = os.path.join(models_dir, file_name); part = dest + ".part"
     os.makedirs(models_dir, exist_ok=True)
     if os.path.isfile(dest):
-        if model_verified(dest): print(f"Layout model present: {dest}"); return 0
+        if os.path.getsize(dest) == size and file_sha256(dest) == sha256: print(f"{what} present: {dest}"); return 0
         os.remove(dest)
-    url = os.environ.get("SPEAKEASY_LAYOUT_MODEL_URL") or MODEL_URL
     r = subprocess.run(["curl", "-fsSL", "--retry", "2", "--max-time", "300", "-o", part, url], capture_output=True, text=True)
     if r.returncode != 0:
         if os.path.exists(part): os.remove(part)
         cause = (r.stderr.strip().splitlines() or [f"curl exit {r.returncode}"])[-1]
-        print(f"WARNING: layout model download failed ({cause}); PDF layout detection off"); return 2
+        print(f"WARNING: {what[0].lower() + what[1:]} download failed ({cause}); {off_note}"); return 2
     got = file_sha256(part)
-    if os.path.getsize(part) != MODEL_SIZE or got != MODEL_SHA256:
+    if os.path.getsize(part) != size or got != sha256:
         os.remove(part)
-        print(f"ERROR: layout model checksum mismatch (expected {MODEL_SHA256}, got {got}); PDF layout detection off"); return 1
+        print(f"ERROR: {what[0].lower() + what[1:]} checksum mismatch (expected {sha256}, got {got}); {off_note}"); return 1
     os.replace(part, dest)
-    print(f"Layout model installed: {dest}"); return 0
+    print(f"{what} installed: {dest}"); return 0
 
 class Detector:
     """One per parse. The model is checked and loaded on the first detected page and reused for the rest of the parse.
@@ -147,12 +152,17 @@ class Detector:
         x = np.asarray(img.resize((INPUT_SIZE, INPUT_SIZE), Image.BILINEAR), dtype=np.float32) / 255.0
         x = ((x - np.array(MEAN, np.float32)) / np.array(STD, np.float32)).transpose(2, 0, 1)[None].astype(np.float32)
         rows, num = self.session.run(None, {"image": x, "scale_factor": np.array([[INPUT_SIZE / h, INPUT_SIZE / w]], np.float32)})
-        sx, sy, out = W / w, H / h, []
+        sx, sy, out, self.weak_captions = W / w, H / h, [], []
         for cid, score, x0, y0, x1, y1 in rows[:int(num[0])].tolist():
-            if score < SCORE_MIN: continue
             r = [round(min(max(v, 0.0), lim), 1) for v, lim in ((x0 * sx, W), (y0 * sy, H), (x1 * sx, W), (y1 * sy, H))]
-            if r[2] > r[0] and r[3] > r[1]: out.append({"cls": CLASSES[int(cid)], "role": ROLE.get(CLASSES[int(cid)], "none"), "score": score, "bbox": r})
+            if not (r[2] > r[0] and r[3] > r[1]): continue
+            role = ROLE.get(CLASSES[int(cid)], "none")
+            if score < SCORE_MIN:
+                if role == "caption" and score >= WEAK_CAPTION_MIN: self.weak_captions.append(r)
+                continue
+            out.append({"cls": CLASSES[int(cid)], "role": role, "score": score, "bbox": r})
         out.sort(key=lambda b: (-b["score"], b["bbox"], b["cls"]))
+        self.weak_captions.sort()
         return out
 
     def layout(self, n, page, lines, W, H, columns):
@@ -163,7 +173,9 @@ class Detector:
             boxes = self._detect(page, W, H)
         except Exception as e:                      # one failed page falls back alone; the other pages keep the detector
             self.failed_pages.add(n); self._unavailable("inference-failed", e, n); return None
-        return PageLayout(boxes, lines, page, W, H, columns, time.perf_counter() - t0)
+        lay = PageLayout(boxes, lines, page, W, H, columns, time.perf_counter() - t0)
+        lay.weak_captions = getattr(self, "weak_captions", [])
+        return lay
 
     def page_record(self, n, lay, blocks):
         """pages[].layout of a detected page; a detector page also gets its layout_page event."""
@@ -349,8 +361,68 @@ class PageLayout:
             if items is None: items = self._items(caption_lines)
             out.append(self._snap(r, items, caps, col))
         self.unpaired = {bi for bi, b in enumerate(self.boxes) if b["role"] in ("figure", "table") and bi not in used}
+        self.caption_rects = caps
         self.seconds += time.perf_counter() - t0
         return out
+
+    def unpaired_bodies(self, caption_lines):
+        """The unpaired body boxes (after bodies()), each snapped as a paired body is: [{"cls", "score", "bbox"}]."""
+        items = self._items(caption_lines); caps = getattr(self, "caption_rects", [])
+        return [{"cls": self.boxes[bi]["cls"], "score": self.boxes[bi]["score"],
+                 "bbox": self._snap(list(self.boxes[bi]["bbox"]), items, caps, self._column(self.boxes[bi]["bbox"]))} for bi in sorted(self.unpaired)]
+
+    def snap_box(self, r, caption_lines):
+        """A box from another detector snapped like an unpaired body (Phase 6 A3.2)."""
+        return self._snap(list(r), self._items(caption_lines), getattr(self, "caption_rects", []), self._column(r))
+
+    def caption_box_top(self, i):
+        """Line i is the top line of a detector caption box (figure_title, table_title, chart_title)."""
+        return any(b["role"] == "caption" and b["lines"] and min(b["lines"], key=lambda j: (self.lines[j][1], self.lines[j][0])) == i for b in self.boxes)
+
+    def caption_boxes(self, weak=False):
+        """Caption-class box rects; weak: also the sub-threshold ones (Phase 6 in-box caption text only)."""
+        return [b["bbox"] for b in self.boxes if b["role"] == "caption"] + (list(getattr(self, "weak_captions", [])) if weak else [])
+
+    def claim(self, box, cap, caption_lines, commit=True):
+        """bodies()' steps for one more caption and an unpaired box whose detector class does not give the caption's kind (stage B
+        types it): cut at the caption, kept in its column, snapped. commit: the box is no longer unpaired. Returns the body rect."""
+        r = list(box["bbox"])
+        if cap[1] - r[1] >= r[3] - cap[3]: r[3] = min(r[3], cap[1])
+        else: r[1] = max(r[1], cap[3])
+        col = body_column(self.lines, self.W, self.columns, cap, r)
+        r[0], r[2] = max(r[0], col[0]), min(r[2], col[1])
+        if commit: self.unpaired.discard(next(i for i, b in enumerate(self.boxes) if b is box))
+        return self._snap(r, self._items(caption_lines), getattr(self, "caption_rects", []), col)
+
+    def widen(self, body, cap, caption_lines):
+        """A body that body_column narrowed to one column although its caption spans both: the detector box it came from (the
+        same-class box overlapping it most), cut at the caption and snapped across the page width (Phase 6 lexicon captions)."""
+        boxes = [b for b in self.boxes if b["role"] in ("figure", "table") and _overlap(b["bbox"], body)]
+        if not boxes: return body
+        inter = lambda b: max(0.0, min(b[2], body[2]) - max(b[0], body[0])) * max(0.0, min(b[3], body[3]) - max(b[1], body[1]))
+        r = list(max(boxes, key=lambda b: (inter(b["bbox"]), b["score"]))["bbox"])
+        if cap[1] - r[1] >= r[3] - cap[3]: r[3] = min(r[3], cap[1])
+        else: r[1] = max(r[1], cap[3])
+        return self._snap(r, self._items(caption_lines), getattr(self, "caption_rects", []), (0.0, self.W))
+
+    def adjacent_body(self, cap, lh, unpaired_only=False):
+        """The body box (figure or table role) a caption of unknown kind would pair with under bodies()' limits, on either side:
+        (box, side "above" | "below") of the smallest gap, then the higher score; None when none qualifies."""
+        col = self._column(cap); best = None
+        for bi, b in enumerate(self.boxes):
+            r = b["bbox"]
+            if b["role"] not in ("figure", "table") or not col[0] <= _cx(r) <= col[1] or (unpaired_only and bi not in self.unpaired): continue
+            if _overlap(r, cap):                                  # a box over the caption pairs first in bodies() too
+                key = (0.0, -b["score"]); above = cap[1] - r[1] >= r[3] - cap[3]
+                if best is None or key < best[0]: best = (key, b, "above" if above else "below")
+                continue
+            if min(r[2], cap[2]) - max(r[0], cap[0]) < 0.5 * min(r[2] - r[0], cap[2] - cap[0]): continue
+            above = r[3] <= cap[1] + BLOCK_SLACK
+            gap = cap[1] - r[3] if above else r[1] - cap[3]
+            if gap < -BLOCK_SLACK or (gap > PAIR_GAP_LINES * lh and not self._empty_between(r, cap)): continue
+            key = (round(gap, 1), -b["score"])
+            if best is None or key < best[0]: best = (key, b, "above" if above else "below")
+        return best and best[1:]
 
     def _empty_between(self, r, cap):
         """No text line between box r and the caption cap (where they overlap horizontally): only whitespace separates them."""

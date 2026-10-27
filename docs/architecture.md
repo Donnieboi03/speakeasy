@@ -22,12 +22,13 @@ and the focus tracker (`speakeasy-track`, Swift). They talk through command-line
 | `docmap.py` | Document parsing and page / figure / line matching (also run by path inside the doc venv); the figure > panel > part hierarchy (labels-below and gutter panels, text parts, callouts), hairline figures and callout references in speech |
 | `pdfpage.py` | pypdfium2 page text and rendering, imported by sibling path from doc-venv subprocesses |
 | `layoutdet.py` | PDF layout detector (PP-DocLayout-S on onnxruntime, inside the doc-venv parse only): model lookup and sha256 check, caption pairing, snapping, detector paragraphs, `layout_*` events; `layoutdet.py fetch` is the installers' model download |
+| `blockcls.py` | Block classifier (Phase 6, inside the doc venv): Docling DocumentFigureClassifier-v2.5 on uncaptioned detector boxes (model lookup and sha256 check, routing), the candidate filter, the OCR helper glue (`speakeasy-track ocr`), the stage C kind job (`blockcls.py job`, sidecar `cache/doc/<key>.kinds.json`, `logs/blockcls.jsonl`) and Read-area capture typing (`blockcls.py capture`); on gap pages (router R1-R3) Docling layout heron as a second detector and the ink-region fallback; `blockcls.py fetch` / `fetch-layout2` are the installers' model downloads |
 | `provider.py` | Which endpoint a purpose (`llm`, `ground`) uses: local or OpenRouter; Keychain key lookup |
 | `selog.py` | Paths, config loading, the run log (`runs.jsonl`), log rotation, the live state file for the bar (`state.json`) |
 | `observe.py` | Capture cropping / keeping, memory and Ollama status, `speakeasy last` / `stats` output, `speakeasy logs --scrub` |
 | `stats.py` | The Reading log's metrics, schema 2 (`speakeasy stats --json`), from a whitelist of keys in `runs.jsonl`, `tracker.jsonl`, `app.jsonl` and names from `library.json` |
 | `highlight.py` | `speakeasy highlight SRC DST`: crops a screenshot to the selection-highlight pixels |
-| `tracker.swift` | The focus tracker (`speakeasy-track`): native panel, AX / OCR following, the cue tokens and margin tick, per-show `cue_result`, `cue.json`; `--render-cue` draws one cue offscreen |
+| `tracker.swift` | The focus tracker (`speakeasy-track`): native panel, AX / OCR following, the cue tokens and margin tick, per-show `cue_result`, `cue.json`; `--render-cue` draws one cue offscreen; `ocr IN.png OUT.json` is the block classifier's OCR helper |
 | `install.sh`, `speakeasy` | Installer (copies every `src/*.py` into `~/.speakeasy/bin`) and the CLI launcher |
 
 ## Menu-bar app (`app/Sources/Speakeasy`)

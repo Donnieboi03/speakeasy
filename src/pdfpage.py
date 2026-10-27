@@ -49,6 +49,14 @@ class Page:
             cur.append(k)
         if cur: blocks.append(cur)
         return lines, blocks
+    def chars_in(self, r):
+        """[(char, [x0, y0, x1, y1])] of the text layer whose box centre lies inside rect r (top-left origin), in text order."""
+        if not hasattr(self, "_chars"):
+            tp = self.p.get_textpage(); self._chars = []
+            for i in range(tp.count_chars()):
+                l, b, rr, t = tp.get_charbox(i)
+                self._chars.append((tp.get_text_range(i, 1), [l, self.H - t, rr, self.H - b]))
+        return [(c, bb) for c, bb in self._chars if r[0] <= (bb[0] + bb[2]) / 2 <= r[2] and r[1] <= (bb[1] + bb[3]) / 2 <= r[3]]
     def _walk(self, kind):
         """(object, enclosing forms' matrix) for every object of this type, including ones nested in form XObjects."""
         stack = {}

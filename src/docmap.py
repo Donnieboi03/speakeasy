@@ -19,6 +19,51 @@ REF_RE = re.compile(r"\b(fig(?:ure)?s?\.?|table)\s*(\d+)\s*(?:\(?([a-h])\)?(?![a
 PANEL_REF_RE = re.compile(r"\b(?:panel|subfigure|part)\s*\(?([a-h])\)?(?![a-z])", re.I)
 PAGE_OF_RE = re.compile(r"(?:page\s*)?(\d{1,4})\s*(?:of|/)\s*(\d{1,4})\b", re.I)
 
+# Phase 6 caption lexicon (phase6-block-classifier.md 4.1): the same separators as CAP_RE / TAB_RE, more nouns and numbers
+LEX_NOUNS = {"figure": ("figure", "fig", "figs", "chart", "graph", "diagram", "plate", "illustration", "scheme", "map", "abbildung", "abb",
+                        "bild", "figura", "figuur", "grafik", "gr\u00e1fico", "grafico", "\u56fe", "\u56f3"),
+             "table": ("table", "tab", "tabelle", "tabla", "tableau", "tabella", "tabela", "tabel", "\u8868"),
+             "ambiguous": ("exhibit", "anlage", "anexo", "annexe")}
+LEX_KIND = {n: k for k, ns in LEX_NOUNS.items() for n in ns}
+LEX_EXPAND = {"fig": "Figure", "figs": "Figure", "abb": "Abbildung", "tab": "Table"}      # abbreviations: a trailing "." is optional
+LEX_RE = re.compile(r"^\s*(?P<noun>(?i:" + "|".join(re.escape(n) for n in sorted(LEX_KIND, key=len, reverse=True)) + r"))(?P<dot>\.)?(?![^\W\d_])\s*"
+                    r"(?P<num>(?:S|[A-Z]\.)?\d+(?:[.\-]\d+)?[a-h]?|[IVXL]+)\s*(?:[.:|\u2013\u2014]|\s-\s|$)\s*(?P<rest>.*)$")
+ROMAN = {v: k + 1 for k, v in enumerate("I II III IV V VI VII VIII IX X XI XII XIII XIV XV XVI XVII XVIII XIX XX XXI XXII XXIII XXIV XXV "
+                                         "XXVI XXVII XXVIII XXIX XXX XXXI XXXII XXXIII XXXIV XXXV XXXVI XXXVII XXXVIII XXXIX XL".split())}
+
+def lexicon_match(text):
+    """A caption anchor by the lexicon: {"noun", "kind" (figure | table | ambiguous), "num", "n", "printed_label"}, else None. Roman
+    numerals I-XL count only directly after an uppercase or capitalised noun; prose ("Table 2 shows") has no separator."""
+    m = LEX_RE.match(text or "")
+    if not m: return None
+    noun, num = m.group("noun"), m.group("num")
+    if num.isalpha():
+        if num not in ROMAN or not noun[0].isupper(): return None
+        n = ROMAN[num]
+    else:
+        n = int(re.search(r"\d+", num).group(0))
+    key = noun.lower()
+    printed = LEX_EXPAND.get(key, noun)
+    sep = "" if ord(noun[0]) > 0x2e7f else " "
+    return {"noun": noun, "kind": LEX_KIND[key], "num": num, "n": n, "printed_label": f"{printed}{sep}{num}"}
+
+def caption_info(text, kind=None):
+    """A caption line's label fields with Phase 6 on: {"kind", "label", "n", "printed_label", "aliases", "src", "kind_src"}. A standard
+    caption (CAP_RE / TAB_RE) decides exactly as today; else the lexicon. kind: the decided kind of an ambiguous noun. None when no match."""
+    m = CAP_RE.match(text or ""); k = "figure"
+    if not m: m = TAB_RE.match(text or ""); k = "table"
+    lx = lexicon_match(text)
+    if m:
+        label = f"{'Figure' if k == 'figure' else 'Table'} {m.group(1)}"
+        printed = lx["printed_label"] if lx and lx["kind"] == k and lx["n"] == int(m.group(1)) else label
+        return {"kind": k, "label": label, "n": int(m.group(1)), "printed_label": printed, "aliases": list(dict.fromkeys([printed, label])),
+                "src": "regex", "kind_src": "caption"}
+    if not lx: return None
+    k = kind or lx["kind"]
+    label = f"{'Figure' if k == 'figure' else 'Table'} {lx['num']}" if k != "ambiguous" else None
+    return {"kind": k, "label": label, "n": lx["n"], "num": lx["num"], "printed_label": lx["printed_label"],
+            "aliases": list(dict.fromkeys([lx["printed_label"]] + ([label] if label else []))), "src": "lexicon", "kind_src": "lexicon"}
+
 def path_hash(p):
     return hashlib.sha256((p or "").encode()).hexdigest()[:12] if p else None
 
@@ -27,7 +72,7 @@ def cache_dir():
     os.makedirs(d, exist_ok=True)
     return d
 
-PARSE_VERSION = 8          # bump when parse_pdf output changes, so cached parses are rebuilt
+PARSE_VERSION = 9          # bump when parse_pdf output changes, so cached parses are rebuilt
 
 def _key(path):
     st = os.stat(path)
@@ -43,9 +88,9 @@ def _split_overlaps(figs):
             a, b = t["bbox"], f["bbox"]
             ix = max(0, min(a[2], b[2]) - max(a[0], b[0])); iy = max(0, min(a[3], b[3]) - max(a[1], b[1]))
             fa = max(1.0, (b[2] - b[0]) * (b[3] - b[1])); ta = max(1.0, (a[2] - a[0]) * (a[3] - a[1]))
-            if ix * iy < 0.3 * fa:
+            if ix * iy < 0.3 * fa or "caption_bbox" not in t:
                 # the reverse: a figure body that runs over a table on the same page stops at the table's edge
-                if ix * iy >= 0.3 * ta and not _inside(f["caption_bbox"], a):
+                if ix * iy >= 0.3 * ta and not ("caption_bbox" in f and _inside(f["caption_bbox"], a)):
                     if (a[1] + a[3]) / 2 < (b[1] + b[3]) / 2: b[1] = min(b[3] - 1, a[3] + 2)
                     else: b[3] = max(b[1] + 1, a[1] - 2)
                     f["bbox"] = [round(v, 1) for v in b]; f["split_from"] = t["label"]
@@ -347,14 +392,160 @@ def _hierarchy(fig, page_lines, panel_labels, ocr, page_shapes):
                      "panel": _panel_letter(p["label"], fig), "attached": p["attached"], "src": p["src"]}
                     for k, p in enumerate(parts[i] for i in rect_order([p["label"] for p in parts]))]
 
-def parse_pdf(path, fig_pages=None, prev=None):
+IN_BOX_JUNK_TOKENS = 3            # leading text-layer tokens inside a caption box that may precede its caption anchor
+
+def _in_box_caption(page, line, lay):
+    """4.1 polluted text layer: the part of a non-matching line inside a detector caption box, when that part is a caption,
+    after up to IN_BOX_JUNK_TOKENS leading tokens that are not ("ygy Fig. 3." -> "Fig. 3."). Returns (caption info, (rect of
+    the matched characters, their text)) or None."""
+    strong = lay.caption_boxes(); boxes = lay.caption_boxes(weak=True)
+    cover = lambda b: _area(_clip(line[:4], b))
+    for box in sorted(boxes, key=lambda b: (b not in strong, -cover(b), b)):        # detector boxes first, then the most of the line
+        if not _overlap(line[:4], box): continue
+        r = [max(line[0], box[0]), max(line[1], box[1]), min(line[2], box[2]), min(line[3], box[3])]
+        if r[2] - r[0] < 4: continue
+        words, cur = [], []
+        for c, bb in page.chars_in(r) + [(" ", None)]:
+            if c.isspace():
+                if cur: words.append(cur); cur = []
+            else: cur.append((c, bb))
+        for w in range(min(len(words), IN_BOX_JUNK_TOKENS + 1)):
+            t = " ".join("".join(c for c, _ in word) for word in words[w:])
+            info = caption_info(t)
+            if info:
+                rect = _union([bb for word in words[w:] for _, bb in word])
+                return dict(info, src="lexicon+in-box"), ([round(v, 1) for v in _clip(rect, r)], t)
+    return None
+
+def _cell_rows(lines, cap, lh, W, above):
+    """Rows of table cells right above / below a caption: consecutive line rows (one line band; the first within Phase 4's
+    pairing gap of 3 line heights, then gaps under 2.5) that hold two or more separate fragments, from the caption outward.
+    Returns the rows' lines."""
+    x0, x1 = cap[0] - 20, (W / 2 if cap[2] <= W / 2 + 10 else W)
+    cand = sorted((l for l in lines if l[0] < x1 and l[2] > x0 and not _overlap(l[:4], cap)
+                   and ((l[3] <= cap[1] + 1 and cap[1] - l[3] < 8 * lh) if above else (l[1] >= cap[3] - 1 and l[1] - cap[3] < 8 * lh))),
+                  key=lambda l: -l[1] if above else l[1])
+    rows = []
+    for l in cand:
+        c = (l[1] + l[3]) / 2
+        if rows and abs(c - rows[-1][0]) < 0.6 * max(4.0, l[3] - l[1]): rows[-1][1].append(l); continue
+        edge = (cap[1] if above else cap[3]) if not rows else rows[-1][2]
+        if abs(edge - (l[3] if above else l[1])) > (3.0 if not rows else 2.5) * lh: break
+        rows.append([c, [l], l[1] if above else l[3]])
+    k = 0
+    while k < len(rows) and len(rows[k][1]) >= 2: k += 1
+    return [r[1] for r in rows[:k]]
+
+def _kind_by_layout(cap, lh, gfx, lines, W):
+    """4.2 without a stage B verdict or a detector box: the body side decides. Table cells next to the caption, else graphics
+    above it (a figure), else graphics below it (a table), else figure."""
+    if len(_cell_rows(lines, cap, lh, W, False)) >= 2 or len(_cell_rows(lines, cap, lh, W, True)) >= 2: return "table"
+    overlaps = lambda g: g[0] < cap[2] and cap[0] < g[2]
+    if any(overlaps(g) and 0 <= cap[1] - g[3] < 60 for g in gfx): return "figure"
+    if any(overlaps(g) and 0 <= g[1] - cap[3] < 60 for g in gfx): return "table"
+    return "figure"
+
+def _ambiguous_kind(bc, n, page, lay, cap, lh, gfx, lines, W, H):
+    """4.2: an ambiguous noun's kind and kind_src: stage B's family on its body (not textish, p_top >= T_B), else the detector
+    class family, else the body side (_kind_by_layout). The body: the detector box it would pair with, else the nearest graphics
+    above / below (60 pt)."""
+    import blockcls
+    if lay:
+        adj = lay.adjacent_body(cap, lh)
+        if adj:
+            box = adj[0]
+            fam = bc.body_family(n, page, lay.claim(box, cap, set(), commit=False), W, H, box["cls"], box["score"])
+            return (fam, "classifier") if fam else (blockcls.DETECTOR_FAMILY[box["cls"]], "lexicon")
+    else:
+        near = [(cap[1] - g[3], g) for g in gfx if 0 <= cap[1] - g[3] < 60 and g[0] < cap[2] and cap[0] < g[2]]
+        near += [(g[1] - cap[3], g) for g in gfx if 0 <= g[1] - cap[3] < 60 and g[0] < cap[2] and cap[0] < g[2]]
+        fam = bc.body_family(n, page, min(near)[1], W, H, None, None) if near else None
+        if fam: return fam, "classifier"
+    return _kind_by_layout(cap, lh, gfx, lines, W), "lexicon"
+
+def _pair_typed(bc, n, page, lay, found, paired, lrect, lines, W, H):
+    """A2.4: a lexicon caption the detector classes leave unpaired takes the unpaired body box next to it (Phase 4 4.2's column,
+    overlap and gap limits) when stage B types that box as the caption's kind at p_top >= T_B (TABLE I over a box the detector
+    calls an image). Standard captions never do."""
+    cap_lines = {i for bl, _, _ in found for i in bl}
+    out = list(paired)
+    for k, ((bl, info, kind), body) in enumerate(zip(found, paired)):
+        if body is not None or info["src"] not in ("lexicon", "lexicon+in-box"): continue
+        cap = _union([lrect(i) for i in bl]); lh = sorted(lines[i][3] - lines[i][1] for i in bl)[len(bl) // 2]
+        adj = lay.adjacent_body(cap, lh, unpaired_only=True)
+        if not adj: continue
+        box = adj[0]; rect = lay.claim(box, cap, cap_lines, commit=False)
+        if bc.body_family(n, page, rect, W, H, box["cls"], box["score"], anchor="lexicon-caption") == kind: out[k] = lay.claim(box, cap, cap_lines)
+    return out
+
+def _widen_spanning(lay, found, paired, lrect, W):
+    """A lexicon caption across both columns of a two-column page keeps a full-width body: Phase 4's beside-prose narrowing
+    reads column-width text inside a wide figure as the other column. Standard captions keep Phase 4's rule."""
+    if lay.columns != 2: return paired
+    cap_lines = {i for bl, _, _ in found for i in bl}
+    out = list(paired)
+    for k, ((bl, info, _), body) in enumerate(zip(found, paired)):
+        cap = _union([lrect(i) for i in bl])
+        if body is None or info["src"] == "regex" or not (cap[0] < W / 2 - 10 and cap[2] > W / 2 + 10): continue
+        if body[2] - body[0] < 0.75 * (cap[2] - cap[0]): out[k] = lay.widen(body, cap, cap_lines)
+    return out
+
+def _split_shared(found, paired, lrect, lines, gfx):
+    """Side-by-side captions over one detector box (two tables the detector saw as one): a lexicon caption's body that reaches
+    under another caption of its row is cut at the rightmost whitespace gutter between the two captions' left edges. The other
+    side goes to that caption when it is a lexicon caption without a body. Standard captions' bodies are never changed."""
+    cap_lines = {i for bl, _, _ in found for i in bl}
+    caps = [_union([lrect(i) for i in bl]) for bl, _, _ in found]
+    out = list(paired)
+    for k, (_, info, _) in enumerate(found):
+        b = out[k]
+        if b is None or info["src"] == "regex": continue
+        for j, (_, info_j, _) in enumerate(found):
+            ck, cj = caps[k], caps[j]
+            h = max(ck[3] - ck[1], cj[3] - cj[1])
+            if j == k or abs(ck[1] - cj[1]) > 2 * h or _overlap([ck[0], 0, ck[2], 1], [cj[0], 0, cj[2], 1]) or not b[0] < (cj[0] + cj[2]) / 2 < b[2]: continue
+            items = [_clip(l[:4], b) for i, l in enumerate(lines) if i not in cap_lines and _overlap(l[:4], b)] + [_clip(g, b) for g in gfx if _overlap(g, b)]
+            left, right = (ck, cj) if ck[0] < cj[0] else (cj, ck)
+            cuts = [x for x in _gutters(b, items, 0) if left[0] < x <= right[0] + 2]
+            if not cuts: continue
+            x = round(max(cuts), 1)
+            mine, other = ([b[0], b[1], x, b[3]], [x, b[1], b[2], b[3]]) if ck is left else ([x, b[1], b[2], b[3]], [b[0], b[1], x, b[3]])
+            out[k] = b = mine
+            if out[j] is None and info_j["src"] != "regex": out[j] = other
+    return out
+
+def _image_table(page, lines, bbox):
+    """Section 8: fewer than 2 PDF text lines inside the body and a raster image covering >= 50 % of it."""
+    if sum(1 for l in lines if _inside(l[:4], bbox, 2)) >= 2: return False
+    try: imgs = page.images()
+    except (RuntimeError, ValueError, OSError): return False
+    a = max(1.0, _area(bbox))
+    return any(_area(_clip(r, bbox)) >= 0.5 * a for r in imgs if _overlap(r, bbox))
+
+def _added_fig(kind, label, pno, bbox, kind_src, lines, page=None):
+    """An uncaptioned figure / table entry (9.1): U-label, captioned false, no caption_bbox."""
+    tl = [l for l in lines if _inside(l[:4], bbox) and re.search(r"[A-Za-z]{2,}", l[4]) and not PANEL_RE.match(l[4])] if kind == "figure" else []
+    return {"label": label, "kind": kind, "n": None, "page": pno, "bbox": [round(v, 1) for v in bbox], "caption": "", "panels": [], "parts": [],
+            "labels": tl[:200], "labels_src": "pdf" if tl else "none", "objects": _objects(page, bbox) if page is not None and kind == "figure" else [],
+            "bbox_src": "detector", "captioned": False, "printed_label": None, "aliases": [], "caption_src": None, "kind_src": kind_src}
+
+def _reading_sort(figs, blocks):
+    """figures[] in the page's block reading order (fig_id order, 9.4)."""
+    pos = {}
+    for k, b in enumerate(blocks):
+        if b["kind"] in ("figure", "table"): pos.setdefault((b["kind"], tuple(b["bbox"])), k)
+    return sorted(figs, key=lambda f: pos.get((f["kind"], tuple(f["bbox"])), len(blocks)))
+
+def parse_pdf(path, fig_pages=None, prev=None, kinds_covered=()):
     """Text lines for every page; figures (bbox, caption, panels, text labels, graphic objects) for fig_pages (None = all).
-    prev: an earlier partial parse whose figure pages are kept."""
-    import pdfpage, layoutdet
+    prev: an earlier partial parse whose figure pages are kept. kinds_covered: pages an existing kind sidecar covers (A2.5)."""
+    import pdfpage, layoutdet, blockcls
     doc = pdfpage.open_pdf(path)
     detector = layoutdet.Detector()
+    bc = blockcls.Session()
     pages = []
     old = {p["n"]: p for p in (prev or {}).get("pages", []) if p.get("figs_done")}
+    if bc.on: bc.events = [e for e in (prev or {}).get("blockcls_events") or [] if e.get("page") in old and e.get("stage") == "classifier"]
     for pno, page in enumerate(doc):
         W, H = page.rect.width, page.rect.height
         if pno + 1 in old and (fig_pages is None or True):
@@ -374,41 +565,65 @@ def parse_pdf(path, fig_pages=None, prev=None):
                 if r.width > 20 and r.height > 20 and not (r.width > 0.9 * W and r.height > 0.9 * H): gfx.append([r.x0, r.y0, r.x1, r.y1])
         except Exception: pass
         lay = detector.layout(pno + 1, page, lines, W, H, columns)
-        if lay: blocks = lay.split_groups(blocks, lambda s: CAP_RE.match(s) or TAB_RE.match(s))
-        found = []                                          # regex captions: (line group, match, kind)
+        starts = (lambda s: caption_info(s) is not None) if bc.on else (lambda s: CAP_RE.match(s) or TAB_RE.match(s))
+        if lay: blocks = lay.split_groups(blocks, starts)
+        found, inbox = [], {}                               # captions: (line group, label fields, kind); polluted lines' in-box part
         for bl in blocks:
-            m = CAP_RE.match(lines[bl[0]][4]); kind = "figure"
-            if not m: m = TAB_RE.match(lines[bl[0]][4]); kind = "table"
-            if m: found.append((bl, m, kind))
+            if not bc.on:
+                m = CAP_RE.match(lines[bl[0]][4]); kind = "figure"
+                if not m: m = TAB_RE.match(lines[bl[0]][4]); kind = "table"
+                if m: found.append((bl, {"label": f"{'Figure' if kind == 'figure' else 'Table'} {m.group(1)}", "n": int(m.group(1))}, kind))
+                continue
+            info = caption_info(lines[bl[0]][4])
+            if info is None and lay:
+                hit = _in_box_caption(page, lines[bl[0]], lay)
+                if hit: info, inbox[bl[0]] = hit
+            if info: found.append((bl, info, info["kind"]))
+        lrect = lambda i: inbox[i][0] if i in inbox else lines[i][:4]
+        ltext = lambda i: inbox[i][1] if i in inbox else lines[i][4]
+        for k, (bl, info, kind) in enumerate(found):
+            if kind == "ambiguous":
+                cap0 = _union([lrect(i) for i in bl]); lh0 = sorted(lines[i][3] - lines[i][1] for i in bl)[len(bl) // 2]
+                kind, ksrc = _ambiguous_kind(bc, pno + 1, page, lay, cap0, lh0, gfx, lines, W, H)
+                found[k] = (bl, dict(caption_info(ltext(bl[0]), kind) or info, kind_src=ksrc, src=info["src"]), kind)
         if lay:
             regex_lines = {i for bl, _, _ in found for i in bl}
             found = [(lay.caption_lines(bl, regex_lines - set(bl)), m, kind) for bl, m, kind in found]
-            paired = lay.bodies([(kind, _union([lines[i][:4] for i in bl]), sorted(lines[i][3] - lines[i][1] for i in bl)[len(bl) // 2])
+            paired = lay.bodies([(kind, _union([lrect(i) for i in bl]), sorted(lines[i][3] - lines[i][1] for i in bl)[len(bl) // 2])
                                  for bl, _, kind in found], {i for bl, _, _ in found for i in bl})
+            if bc.on:
+                paired = _pair_typed(bc, pno + 1, page, lay, found, paired, lrect, lines, W, H)
+                paired = _split_shared(found, _widen_spanning(lay, found, paired, lrect, W), lrect, lines, gfx)
         else: paired = [None] * len(found)
         # graphics right at a caption's body side belong to that caption: another caption's body never chains over them
         own_gfx = []
         for bl, _, kind in found:
-            c = _union([lines[i][:4] for i in bl])
+            c = _union([lrect(i) for i in bl])
             own_gfx.append({k for k, g in enumerate(gfx) if g[0] < c[2] and c[0] < g[2] and (0 <= c[1] - g[3] < 20 if kind == "figure" else -8 <= g[1] - c[3] < 20)})
         figs, caption_line_groups, hier = [], [], []
         for ci, ((bl, m, kind), detected_body) in enumerate(zip(found, paired)):
             others = set().union(*own_gfx[:ci], *own_gfx[ci + 1:]) - own_gfx[ci]
             free_gfx = [g for k, g in enumerate(gfx) if k not in others]
-            cap = [round(v, 1) for v in _union([lines[i][:4] for i in bl])]
+            cap = [round(v, 1) for v in _union([lrect(i) for i in bl])]
             # the caption's column on a two-column page: a table never takes the other column's text
             nxt = min((l for l in lines if l[1] >= cap[3] - 1), key=lambda l: l[1], default=None)
             in_col = nxt is not None and nxt[2] <= W / 2 + 10 if cap[2] <= W / 2 + 10 else nxt is not None and nxt[0] >= W / 2 - 10
             if not (two_col and in_col): col = (0, W)
             elif cap[2] <= W / 2 + 10: col = (cap[0] - 12, W / 2 + 6)
             else: col = (W / 2 - 6, W)
-            text = " ".join(lines[i][4] for i in bl)
+            lex = bc.on and m.get("src") in ("lexicon", "lexicon+in-box")
+            if lex and col == (0, W) and (cap[2] <= W / 2 + 10 or cap[0] >= W / 2 - 10):
+                # a lexicon caption in one half with content in the other half beside it: side by side, its body stays in its half
+                left = cap[2] <= W / 2 + 10; lh_c = max(4.0, (cap[3] - cap[1]) / max(1, len(bl)))
+                if any(l[1] < cap[3] + 0.5 * lh_c and l[3] > cap[1] - 0.5 * lh_c and (l[0] >= W / 2 - 10 if left else l[2] <= W / 2 + 10) for l in lines):
+                    col = (cap[0] - 12, W / 2 + 6) if left else (W / 2 - 6, W)
+            text = " ".join(ltext(i) for i in bl)
             right_col, narrowed_by_prose = cap[0] >= W / 2 - 10, False
             for second_pass in (False, True):              # again inside the gutter when other-column prose sits beside it
                 # figure: graphics directly above the caption (chain upward); table: content below
                 # (graphics that run into the caption are clipped at its top)
                 cand = sorted([[g[0], g[1], g[2], min(g[3], cap[1] - 2)] for g in free_gfx if g[1] < cap[1] - 20 and (not second_pass or (g[0] >= col[0] - 4 if right_col else g[2] <= col[1] + 4)) and g[3] >= cap[1] - 0.7 * H
-                               and not (g[3] > cap[3] + 20)], key=lambda g: -g[3]) if kind == "figure" \
+                               and not (g[3] > cap[3] + 20) and (not lex or (g[0] < col[1] and g[2] > col[0]))], key=lambda g: -g[3]) if kind == "figure" \
                     else sorted([g for g in free_gfx if g[1] >= cap[3] - 8 and g[1] <= cap[3] + 0.7 * H and g[0] >= col[0] - 4 and g[2] <= col[1] + 4], key=lambda g: g[1])
                 body = None
                 for g in cand:
@@ -425,7 +640,7 @@ def parse_pdf(path, fig_pages=None, prev=None):
                     lh = max(8.0, (cap[3] - cap[1]) / max(1, len(bl)))
                     for l in below:
                         if l[1] - y > 2.2 * lh and rows: break
-                        if CAP_RE.match(l[4]) or TAB_RE.match(l[4]): break
+                        if starts(l[4]): break
                         rows.append(l); y = max(y, l[3])
                     tbody = _union([r[:4] for r in rows]) if rows else None
                     if tbody and (body is None or tbody[3] > body[3]):
@@ -440,7 +655,17 @@ def parse_pdf(path, fig_pages=None, prev=None):
                 if second_pass or (narrowed[0] <= col[0] and narrowed[1] >= col[1]): break
                 col, narrowed_by_prose = (max(col[0], narrowed[0]), min(col[1], narrowed[1])), True
             if body and narrowed_by_prose: body = [max(body[0], col[0]), *body[1:]] if right_col else [*body[:2], min(body[2], col[1]), body[3]]   # the gutter side only
+            if lex and kind == "table" and not detected_body:
+                # a lexicon table caption under its table: cell rows above it and none below it make the body
+                lh_r = sorted(lines[i][3] - lines[i][1] for i in bl)[len(bl) // 2]
+                up, down = _cell_rows(lines, cap, lh_r, W, True), _cell_rows(lines, cap, lh_r, W, False)
+                if len(up) >= 2 and len(down) < 2:
+                    body = _union([l[:4] for row in up for l in row]); bbox_src = "text-rows"
+                    body = _union([body] + [g for g in free_gfx if _overlap(g, body)])
             if detected_body: body, bbox_src = detected_body, "detector"
+            # 4.1 evidence: a lexicon caption tops a detector caption box (or is its in-box part) or has a body of its kind
+            if bc.on and m["src"] != "regex" and not (m["src"] == "lexicon+in-box" or detected_body or bbox_src in ("graphics", "graphics+text-rows")
+                                                      or (kind == "table" and bbox_src == "text-rows") or (lay and lay.caption_box_top(bl[0]))): continue
             # caption-only: a 1-pt strip on the body side, so the box never includes the caption
             fb = body or ([cap[0], max(0, cap[1] - 1), cap[2], cap[1]] if kind == "figure" else [cap[0], cap[3], cap[2], min(H, cap[3] + 1)])
             fb = [round(v, 1) for v in (max(0, fb[0]), max(0, fb[1]), min(W, fb[2]), min(H, fb[3]))]
@@ -458,11 +683,15 @@ def parse_pdf(path, fig_pages=None, prev=None):
             if body and kind == "figure" and len(tl) < 3:
                 ocr = _ocr_lines(page, fb)
                 tl = [o for o in ocr if re.search(r"[A-Za-z]{2,}", o[4])] or tl; src_l = "ocr" if tl else "none"
-            figs.append({"label": f"{'Figure' if kind == 'figure' else 'Table'} {m.group(1)}", "kind": kind, "n": int(m.group(1)),
+            figs.append({"label": m["label"], "kind": kind, "n": m["n"],
                          "page": pno + 1, "bbox": fb, "caption_bbox": cap, "caption": text[:300], "panels": [], "parts": [],
                          "labels": tl[:200], "labels_src": src_l, "objects": _objects(page, fb) if body and kind == "figure" else [], "bbox_src": bbox_src})
+            if bc.on: figs[-1].update(captioned=True, printed_label=m["printed_label"], aliases=m["aliases"], caption_src=m["src"], kind_src=m["kind_src"])
             if kind == "figure": hier.append((figs[-1], labels, ocr))
             caption_line_groups.append(bl)
+        kinds = layout2 = None
+        if bc.on and lay:
+            kinds, layout2 = _type_regions(bc, pno + 1, page, lay, lines, figs, caption_line_groups, hier, gfx, W, H)
         figs = _split_overlaps(figs)
         shapes = []
         def page_shapes():
@@ -471,10 +700,112 @@ def parse_pdf(path, fig_pages=None, prev=None):
         for f, panel_labels, ocr in hier:
             f["degenerate"] = _hairline(f["bbox"])
             _hierarchy(f, lines, [p for p in panel_labels if _inside(p["r"], f["bbox"], 6)], ocr, page_shapes)
+        if bc.on:
+            for k, f in enumerate(figs):
+                if f["kind"] == "table" and _image_table(page, lines, f["bbox"]):
+                    o = blockcls.ocr_region(bc.ocr_bin, page, f["bbox"], W, H, f"t{pno + 1}_{k}")
+                    f["ocr_rows"], f["rows_src"] = blockcls.ocr_rows(o, f["bbox"])
+                    if kinds is not None and kinds.get("ocr") != "unavailable": kinds["ocr"] = "ok" if o is not None else "unavailable"
         page_bl = page_blocks(lines, blocks, figs, caption_line_groups, W, columns, lay)
-        pages.append({"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs, "figs_done": True,
-                      "columns": columns, "blocks": page_bl, "layout": detector.page_record(pno + 1, lay, page_bl)})
-    return {"kind": "pdf", "pages": pages, "n_pages": len(pages), "layout": detector.status(), "layout_events": detector.events}
+        if bc.on and any(f.get("kind_src") != "caption" for f in figs): figs = _reading_sort(figs, page_bl)
+        pg = {"n": pno + 1, "w": round(W, 1), "h": round(H, 1), "lines": lines, "figures": figs, "figs_done": True,
+              "columns": columns, "blocks": page_bl, "layout": detector.page_record(pno + 1, lay, page_bl)}
+        if kinds is not None: pg["kinds"] = kinds; pg["layout2"] = layout2
+        pages.append(pg)
+    out = {"kind": "pdf", "pages": pages, "n_pages": len(pages), "layout": detector.status(), "layout_events": detector.events, "blockcls": bc.top(kinds_covered)}
+    if bc.on:
+        out["blockcls_events"] = sorted(bc.events + bc.det2.events, key=lambda e: e.get("page") or 0)
+        out["layout2"] = dict(bc.det2.status(), routed=bc.layout2_routed)
+    return out
+
+def _type_regions(bc, n, page, lay, lines, figs, caption_line_groups, hier, gfx, W, H):
+    """Contract 3 / 5 / 7.1 / A3 on one detected page, after its captioned figures: OCR captions on a no-text page; the gap-page
+    router; on a routed page heron's figure / table boxes join the unpaired PP-DocLayout-S bodies as candidates, and on an R1 page
+    ink regions no detector explains do too; then the filters and stage B. Accepted regions are appended to figs (U-labels).
+    Returns (pages[].kinds, pages[].layout2)."""
+    import blockcls
+    no_text = not lines
+    if no_text and bc.ocr_bin: _scan_captions(bc, n, page, lay, figs, caption_line_groups, W, H)
+    cap_lines = set().union(*[set(cl or []) for cl in caption_line_groups]) if caption_line_groups else set()
+    taken = cap_lines | {i for i, l in enumerate(lines) if any(_inside(l[:4], f["bbox"]) for f in figs)}
+    paragraphs = [_union([lines[j][:4] for j in p]) for p in lay.paragraphs(taken)[0]]
+    added, l2 = _layout2(bc, n, page, lay, lines, figs, paragraphs, cap_lines, gfx, W, H)
+    cands, dropped = blockcls.filter_candidates(lay.unpaired_bodies(cap_lines) + added, [f["bbox"] for f in figs], paragraphs, W, H)
+    l2["added"] = sum(c.get("det") == "heron" for c in cands)
+    if "R1" in l2["by"] and not blockcls.layout2_off():
+        t0 = time.perf_counter()
+        bodies = [b["bbox"] for b in lay.boxes if b["role"] in ("figure", "table")]
+        existing = [c["bbox"] for c in cands] + [f["bbox"] for f in figs] + bodies
+        # text evidence: the detectors' text-like boxes; a full-page OCR (seconds) would break the 50 ms fallback budget
+        ink = blockcls.structural_candidates(page, W, H, l2.pop("_text"), existing)
+        l2["structural"] = len(ink); l2["ms"] += int(round((time.perf_counter() - t0) * 1000)); cands += ink
+    l2.pop("_text", None)
+    if l2["routed"]:
+        bc.events.append({"event": "layout2_page", "page": n, "by": l2["by"], "ms": l2["ms"], "added": l2["added"], "structural": l2["structural"],
+                          "detector_version": blockcls.DETECTOR2_VERSION if l2["src"] == "heron" else None})
+    accepted, kinds = bc.classify_candidates(n, page, cands, W, H, "no-text" if no_text else "uncaptioned", dropped)
+    count = {"figure": 0, "table": 0}
+    for kind, c in accepted:
+        count[kind] += 1
+        f = _added_fig(kind, f"{'Figure' if kind == 'figure' else 'Table'} U{n}-{count[kind]}", n, c["bbox"], "classifier", lines, page)
+        figs.append(f); caption_line_groups.append(None)
+        if kind == "figure": hier.append((f, [], []))
+    kinds["no_text"] = no_text
+    if no_text and not bc.ocr_bin: kinds["ocr"] = "unavailable"
+    return kinds, l2
+
+def _layout2(bc, n, page, lay, lines, figs, paragraphs, cap_lines, gfx, W, H):
+    """A3.2 / A3.4: route the page; on a routed page (at most ROUTE_CAP per parse) run heron once. Returns (heron candidates that no
+    PP-DocLayout-S body box holds at IoU >= 0.5 and no captioned body or paragraph block covers by more than 30 %, the page's
+    layout2 record with the text evidence for A3.3 under "_text")."""
+    import blockcls
+    text = [b["bbox"] for b in lay.boxes if b["cls"] in blockcls.PPS_TEXT]
+    bodies = [b["bbox"] for b in lay.boxes if b["role"] in ("figure", "table")]
+    explained = bodies + [b["bbox"] for b in lay.boxes if b["role"] == "paragraph"] + [f["bbox"] for f in figs]
+    by = blockcls.route_page(lines, W, H, gfx, explained)
+    l2 = {"routed": bool(by), "by": by, "src": None, "ms": 0, "boxes": {"figure": 0, "table": 0}, "added": 0, "structural": 0, "_text": text}
+    if not by: return [], l2
+    if bc.layout2_routed >= blockcls.ROUTE_CAP: l2.update(src="skipped", skip="over-cap"); return [], l2
+    bc.layout2_routed += 1
+    det2 = bc.det2
+    if not det2.ready(): l2.update(src="unavailable", reason=det2.reason); return [], l2
+    t0 = time.perf_counter()
+    try: boxes = det2.detect(page, W, H)
+    except Exception as e:                          # one failed page keeps today's path alone
+        det2._unavailable("inference-failed", e, n); l2.update(src="unavailable", reason="inference-failed"); return [], l2
+    l2.update(src="heron", ms=int(round((time.perf_counter() - t0) * 1000)))
+    bc.layout2_ms.append(l2["ms"])
+    text += [b["bbox"] for b in boxes if b["cls"] in blockcls.HERON_TEXT]
+    out = []
+    for b in boxes:
+        fam = blockcls.HERON_FAMILY.get(b["cls"])
+        if not fam: continue
+        l2["boxes"][fam] += 1
+        r = b["bbox"]
+        if any(blockcls._iou(r, p) >= blockcls.HERON_DUP_IOU for p in bodies): continue
+        if any(blockcls._inter(r, o) > blockcls.COVER_FRAC * max(1.0, _area(r)) for o in [f["bbox"] for f in figs] + paragraphs): continue
+        out.append({"cls": b["cls"], "score": b["score"], "bbox": lay.snap_box(r, cap_lines), "det": "heron"})
+    return out, l2
+
+def _scan_captions(bc, n, page, lay, figs, caption_line_groups, W, H):
+    """7.1: on a no-text page, OCR the detector caption boxes; a standard or lexicon caption pairs with its detector body as usual."""
+    import blockcls
+    caps = []
+    for k, box in enumerate(lay.caption_boxes()):
+        o = blockcls.ocr_region(bc.ocr_bin, page, box, W, H, f"c{n}_{k}")
+        if not o or not o["lines"]: continue
+        ls = sorted(o["lines"], key=lambda l: (l[1], l[0]))
+        info = caption_info(ls[0][4])
+        if info and info["kind"] != "ambiguous":
+            caps.append((info, [round(v, 1) for v in _union([l[:4] for l in ls])], " ".join(l[4] for l in ls), sorted(l[3] - l[1] for l in ls)[len(ls) // 2]))
+    if not caps: return
+    paired = lay.bodies([(info["kind"], cap, lh) for info, cap, _, lh in caps], set())
+    for (info, cap, text, _), body in zip(caps, paired):
+        if body is None: continue
+        figs.append({"label": info["label"], "kind": info["kind"], "n": info["n"], "page": n, "bbox": [round(v, 1) for v in body], "caption_bbox": cap,
+                     "caption": text[:300], "panels": [], "parts": [], "labels": [], "labels_src": "none", "objects": [], "bbox_src": "detector",
+                     "captioned": True, "printed_label": info["printed_label"], "aliases": info["aliases"], "caption_src": info["src"], "kind_src": info["kind_src"]})
+        caption_line_groups.append([])
 
 def page_columns(lines, W):
     """2 when at least 8 half-width lines sit in each half of the page (the figure/table column logic), else 1."""
@@ -498,12 +829,14 @@ def page_blocks(lines, groups, figs, caption_line_groups, W, columns, lay=None):
     A caption block holds its own line group plus every line inside its caption box (inline-math fragments that the
     text layer puts in groups of their own). With a detector layout (lay), its paragraph boxes take their lines first
     and only the lines no detector box claims or excludes form line-group paragraphs."""
-    out, caption_lines = [], set().union(*caption_line_groups)
+    out, caption_lines = [], set().union(*[cl for cl in caption_line_groups if cl])
     for f, cl in zip(figs, caption_line_groups):
-        own = sorted(set(cl) | {i for i, l in enumerate(lines) if i not in caption_lines and _inside(l[:4], f["caption_bbox"])})
         out.append({"kind": f["kind"], "bbox": list(f["bbox"]), "label": f["label"], "src": f["bbox_src"]})
+        if "kind_src" in f: out[-1]["kind_src"] = f["kind_src"]
+        if cl is None: continue                          # an uncaptioned figure / table: no caption block
+        own = sorted(set(cl) | {i for i, l in enumerate(lines) if i not in caption_lines and _inside(l[:4], f["caption_bbox"])})
         out.append({"kind": "caption", "bbox": list(f["caption_bbox"]), "lines": own, "label": f["label"],
-                    "src": "regex+detector" if lay and cl[0] in lay.extended else "regex"})
+                    "src": "regex+detector" if lay and cl and cl[0] in lay.extended else "regex"})
         caption_lines.update(own)
     taken = caption_lines | {i for i, l in enumerate(lines) if any(_inside(l[:4], f["bbox"]) for f in figs)}
     if lay:
@@ -543,13 +876,15 @@ def parse_summary(pg):
         return {"columns": page_columns(pg["lines"], pg["w"]), "figs_done": False, "blocks": {"paragraph": len(line_groups(pg["lines"]))}}
     figs = pg["figures"]; kinds = [b["kind"] for b in pg["blocks"]]
     panels = [p for f in figs for p in f.get("panels") or []]; parts = [p for f in figs for p in f.get("parts") or []]
-    return {"columns": pg["columns"], "figs_done": True, "blocks": {k: kinds.count(k) for k in ("paragraph", "caption", "figure", "table")},
-            "bbox_src": dict(Counter(f["bbox_src"] for f in figs)), "labels_src": {k: sum(f.get("labels_src") == k for f in figs) for k in ("pdf", "ocr", "none")},
-            "panels": {"labels": sum(p.get("src") == "label" for p in panels), "guessed": sum(p.get("src") == "caption" for p in panels),
-                       "gutter": sum(p.get("src") == "gutter" for p in panels)},
-            "parts": {"text": sum(p["kind"] == "text" for p in parts), "callout": sum(p["kind"] == "callout" for p in parts),
-                      "callout_attached": sum(p["kind"] == "callout" and p["attached"] for p in parts)},
-            "split": sum(1 for f in figs if f.get("split_from")), "layout": {k: v for k, v in pg["layout"].items() if k != "detector_version"}}
+    out = {"columns": pg["columns"], "figs_done": True, "blocks": {k: kinds.count(k) for k in ("paragraph", "caption", "figure", "table")},
+           "bbox_src": dict(Counter(f["bbox_src"] for f in figs)), "labels_src": {k: sum(f.get("labels_src") == k for f in figs) for k in ("pdf", "ocr", "none")},
+           "panels": {"labels": sum(p.get("src") == "label" for p in panels), "guessed": sum(p.get("src") == "caption" for p in panels),
+                      "gutter": sum(p.get("src") == "gutter" for p in panels)},
+           "parts": {"text": sum(p["kind"] == "text" for p in parts), "callout": sum(p["kind"] == "callout" for p in parts),
+                     "callout_attached": sum(p["kind"] == "callout" and p["attached"] for p in parts)},
+           "split": sum(1 for f in figs if f.get("split_from")), "layout": {k: v for k, v in pg["layout"].items() if k != "detector_version"}}
+    if any("kind_src" in f for f in figs): out["kind_src"] = dict(Counter(f["kind_src"] for f in figs if "kind_src" in f))
+    return out
 
 # ---------------- Markdown (stdlib) ----------------
 def parse_md(path):
@@ -607,7 +942,7 @@ def load(path, timeout=30, sel_text=""):
             prev = json.load(open(c))
             if kind == "md": return prev, "hit"
             pg, _ = match_page(prev, sel_text)
-            if pg is None or pg.get("figs_done", True): return prev, "hit"
+            if pg is None or pg.get("figs_done", True): return merge_kinds(prev, c), "hit"
         except ValueError: prev = None
     if kind == "md":
         doc = parse_md(path)
@@ -634,7 +969,7 @@ def load(path, timeout=30, sel_text=""):
         tmp = c + f".{os.getpid()}.tmp"
         selp = tmp + ".sel"
         with open(selp, "w") as f: f.write(sel_text or "")
-        args = [py, os.path.realpath(__file__), "parse-pdf", path, tmp, "--sel", selp] + (["--prev", c] if prev else [])
+        args = [py, os.path.realpath(__file__), "parse-pdf", path, tmp, "--sel", selp, "--kinds", c[:-5] + ".kinds.json"] + (["--prev", c] if prev else [])
         try:
             r = subprocess.run(args, capture_output=True, timeout=timeout)
         finally:
@@ -643,9 +978,52 @@ def load(path, timeout=30, sel_text=""):
         if r.returncode != 0 or not os.path.exists(tmp):
             return None, "parse-failed: " + r.stderr.decode(errors="replace").strip().splitlines()[-1][:120] if r.stderr else "parse-failed"
         os.replace(tmp, c)
-        return json.load(open(c)), "partial-miss" if prev else "miss"
+        return merge_kinds(json.load(open(c)), c), "partial-miss" if prev else "miss"
     json.dump(doc, open(c, "w"))
     return doc, "miss"
+
+def cache_path(path):
+    return os.path.join(cache_dir(), _key(path) + ".json")
+
+def merge_kinds(doc, cache_json):
+    """A1.2: a done / partial kind sidecar merged into the loaded parse (never into the cache file): stage C figures and tables
+    become blocks (kind_src vlm, U-labels), text answers release their lines to the orphan-line rule, and the stage C records are
+    appended to blockcls_events. Entries for another KIND_PROMPT or vision model are ignored. Nothing from a failed sidecar."""
+    side_p = cache_json[:-5] + ".kinds.json"
+    if not doc or doc.get("kind") != "pdf" or not os.path.exists(side_p): return doc
+    try:
+        with open(side_p) as f: side = json.load(f)
+    except (OSError, ValueError):
+        return doc
+    if side.get("state") not in ("done", "partial"): return doc
+    import blockcls
+    from llm_client import vision_model
+    phash, model = blockcls.prompt_sha(), vision_model()
+    pages = {p["n"]: p for p in doc["pages"] if p.get("figs_done")}
+    for e in side.get("entries") or []:
+        pg = pages.get(e.get("page"))
+        if pg is None or e.get("prompt_sha") != phash or e.get("model") != model: continue
+        r = [round(v, 1) for v in e["rect"]]
+        if e["outcome"] == "accepted" and e.get("kind") in ("figure", "table"):
+            k = 1 + sum(1 for f in pg["figures"] if f["kind"] == e["kind"] and f.get("captioned") is False)
+            f = _added_fig(e["kind"], f"{'Figure' if e['kind'] == 'figure' else 'Table'} U{pg['n']}-{k}", pg["n"], r, "vlm", pg["lines"])
+            f["degenerate"] = _hairline(f["bbox"])
+            pg["figures"].append(f)
+            pg["blocks"].append({"kind": f["kind"], "bbox": list(f["bbox"]), "label": f["label"], "src": "detector", "kind_src": "vlm"})
+        elif e["outcome"] == "text":
+            held = {i for b in pg["blocks"] for i in b.get("lines") or []}
+            free = [i for i, l in enumerate(pg["lines"]) if i not in held and _centre_in(l, r)]
+            for g in line_groups([pg["lines"][i] for i in free]):
+                ix = [free[j] for j in g]
+                pg["blocks"].append({"kind": "paragraph", "bbox": _union([pg["lines"][i][:4] for i in ix]), "lines": ix, "src": "lines"})
+        else: continue
+        pg["blocks"] = reading_order(pg["blocks"], pg["w"], pg.get("columns", 1))
+        pg["figures"] = _reading_sort(pg["figures"], pg["blocks"])
+    doc.setdefault("blockcls_events", []).extend({"event": "block_kind", "page": e["page"], "rect": e["rect"], "stage": "vlm", "kind": e.get("kind"),
+                                                  "p_top": e.get("p_top"), "p_margin": e.get("p_margin"), "outcome": e["outcome"], "model": e.get("model"),
+                                                  "provider": e.get("provider"), "confidence": e.get("confidence")} for e in side.get("entries") or [])
+    doc["kind_sidecar"] = {"state": side["state"], "entries": len(side.get("entries") or [])}
+    return doc
 
 # ---------------- finding the file ----------------
 def _from_url(u):
@@ -776,20 +1154,38 @@ def sel_lines(page, sel_text):
 def figure_context(figs, limit=8, cap_chars=160):
     out = []
     for f in figs[:limit]:
-        if not f.get("label"): continue
+        if not f.get("label") or f.get("captioned") is False: continue      # U-labels are never listed in a prompt (9.1)
         pn = ", ".join(p["label"] for p in f.get("panels") or [])
         cap = re.sub(r"\s+", " ", f.get("caption") or "")
-        cap = re.sub(r"^\s*(?:fig(?:ure)?s?\.?|table)\s*\d+\s*[.:|\-\u2013\u2014]?\s*", "", cap, flags=re.I)
+        lexicon = f.get("caption_src") in ("lexicon", "lexicon+in-box")
+        if lexicon:
+            lm = LEX_RE.match(cap); cap = lm.group("rest") if lm else cap
+        else: cap = re.sub(r"^\s*(?:fig(?:ure)?s?\.?|table)\s*\d+\s*[.:|\-\u2013\u2014]?\s*", "", cap, flags=re.I)
         cap = cap[:cap_chars].rsplit(" ", 1)[0] if len(cap) > cap_chars else cap
-        out.append(f"{f['label']}" + (f" (panels {pn})" if pn else "") + (": " + cap.rstrip(" .,;:") if cap else ""))
+        out.append(f"{f['printed_label'] if lexicon else f['label']}" + (f" (panels {pn})" if pn else "") + (": " + cap.rstrip(" .,;:") if cap else ""))
     return out
 
+def _alias_re(alias):
+    return re.compile(r"(?<!\w)" + re.escape(alias).replace(r"\ ", r"\s*") + r"(?!\d)(?:\s*\(?([a-h])\)?(?![a-z]))?(?!\w)", re.I)
+
 def find_ref(sentence, figs, last=None):
-    """('Figure 4', 'b') mentioned in a spoken sentence, or a bare 'panel b' of the last figure."""
+    """('Figure 4', 'b') mentioned in a spoken sentence, or a bare 'panel b' of the last figure. Figures with aliases (Phase 6
+    lexicon captions) also match by any alias; when two share one, the one whose printed_label matches exactly wins. Uncaptioned
+    figures (U-labels) never match."""
+    figs = [f for f in figs if f.get("captioned") is not False]
+    hits = []
     for m in REF_RE.finditer(sentence or ""):
         kind = "Table" if m.group(1).lower().startswith("tab") else "Figure"
         f = next((f for f in figs if f.get("label") == f"{kind} {m.group(2)}"), None)
-        if f: return f, (m.group(3) or "").lower() or None
+        if f and not any(f.get("aliases") for f in figs): return f, (m.group(3) or "").lower() or None
+        if f: hits.append((m.start(), -len(m.group(0)), 1, f, (m.group(3) or "").lower() or None))
+    for f in figs:
+        for a in f.get("aliases") or []:
+            m = _alias_re(a).search(sentence or "")
+            if m: hits.append((m.start(), -len(a), 0 if a == f.get("printed_label") else 1, f, (m.group(1) or "").lower() or None))
+    if hits:
+        *_, f, panel = min(hits, key=lambda h: h[:3])
+        return f, panel
     m = PANEL_REF_RE.search(sentence or "")
     if m and last: return last, m.group(1).lower()
     return None, None
@@ -1033,6 +1429,17 @@ def match_row(rows, sentence, start=0):
         if sc > best + 0.05: best, bi = sc, i
     return bi if best >= 0.4 else None
 
+def match_row_ocr(rows, sentence, start=0):
+    """match_row for OCR-row tables (Phase 6 A2.3): when the header row (rows[0]) and a data row score equally, the data row
+    wins; the header is the target only when it scores strictly higher than every data row."""
+    i = match_row(rows, sentence, start)
+    if i != 0: return i
+    j = match_row(rows, sentence, 1)
+    if j is None: return 0
+    st = set(_toks(sentence))
+    score = lambda r: len(r["toks"] & st) / len(r["toks"]) if r["toks"] else 0.0
+    return 0 if score(rows[0]) > score(rows[j]) else j
+
 def area_lines(lines, prect):
     """PDF text inside a rectangle (page space), like a PDF reader's rectangle / column selection (PDFKit
     PDFPage.selection(for:), Preview's Option-drag): lines whose vertical centre is inside and at least half of whose width
@@ -1063,15 +1470,21 @@ if __name__ == "__main__":
         opt = dict(zip(sys.argv[4::2], sys.argv[5::2]))
         prev = json.load(open(opt["--prev"])) if opt.get("--prev") and os.path.exists(opt["--prev"]) else None
         sel = open(opt["--sel"]).read() if opt.get("--sel") else ""
+        covered = set()
+        if opt.get("--kinds"):
+            import blockcls
+            try: side = json.load(open(opt["--kinds"]))
+            except (OSError, ValueError): side = None
+            covered = set() if blockcls.rerun_due(side) else blockcls.covered_pages(side)
         if sel.strip():
             import pdfpage
             d0 = pdfpage.open_pdf(sys.argv[2])
             txt = {"pages": [{"n": i + 1, "lines": _text_lines(pg)[0]} for i, pg in enumerate(d0)]}
             pg, _ = match_page(txt, sel)
             want = {pg["n"] - 1, pg["n"], pg["n"] + 1} if pg else {1}
-            out = parse_pdf(sys.argv[2], want, prev)
+            out = parse_pdf(sys.argv[2], want, prev, covered)
         else:
-            out = parse_pdf(sys.argv[2], None, prev)
+            out = parse_pdf(sys.argv[2], None, prev, covered)
         json.dump(out, open(sys.argv[3], "w")); sys.exit(0)
     if len(sys.argv) == 3 and sys.argv[1] == "dump":
         print(json.dumps(parse_pdf(sys.argv[2]) if sys.argv[2].lower().endswith(".pdf") else parse_md(sys.argv[2]), indent=1)[:6000]); sys.exit(0)

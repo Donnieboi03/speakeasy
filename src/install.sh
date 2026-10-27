@@ -100,6 +100,12 @@ fi
 # PDF layout model (PP-DocLayout-S, Apache-2.0): pinned file, size and sha256 checked; a bad file never stays
 LAYOUT_MODEL_RC=0
 python3 "$SRC/layoutdet.py" fetch "$HOME_DIR/models" || LAYOUT_MODEL_RC=$?
+# Block classifier model (Docling DocumentFigureClassifier-v2.5, MIT): the same pinned-file rules
+FIGCLS_MODEL_RC=0
+python3 "$SRC/blockcls.py" fetch "$HOME_DIR/models" || FIGCLS_MODEL_RC=$?
+# Second layout detector for gap pages (Docling layout heron, Apache-2.0, ~171 MB): the same pinned-file rules
+LAYOUT2_MODEL_RC=0
+python3 "$SRC/blockcls.py" fetch-layout2 "$HOME_DIR/models" || LAYOUT2_MODEL_RC=$?
 set_cfg SPEAKEASY_NO_SELECTION_CAPTURE window
 set_cfg SPEAKEASY_VISION auto
 set_cfg SPEAKEASY_FOCUS on
@@ -137,4 +143,6 @@ Open ~/Applications/Speakeasy.app once (it stays in the menu bar; add it to Logi
 MSG
 # a checksum mismatch fails the install (after everything else is in place); a download failure only warns
 case "$LAYOUT_MODEL_RC" in 0|2) ;; *) echo "ERROR: layout model not installed (status $LAYOUT_MODEL_RC); re-run install.sh"; exit 1;; esac
+case "$FIGCLS_MODEL_RC" in 0|2) ;; *) echo "ERROR: block classifier model not installed (status $FIGCLS_MODEL_RC); re-run install.sh"; exit 1;; esac
+case "$LAYOUT2_MODEL_RC" in 0|2) ;; *) echo "ERROR: second layout model not installed (status $LAYOUT2_MODEL_RC); re-run install.sh"; exit 1;; esac
 exit 0

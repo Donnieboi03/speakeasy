@@ -177,7 +177,7 @@ def _box_target_src(f, kind, panel):
     """doc.target_src of a figure / table / panel box taken from the parse entry f."""
     if kind == "panel":
         return "panel-guessed" if next(p for p in f["panels"] if p["label"] == panel).get("guessed") else "panel-labels"
-    return f"{kind}:{f['bbox_src']}"
+    return f"{kind}:{f.get('bbox_src')}"
 
 def _rendered_line(l):
     """A source line as it looks rendered on screen (markdown/table syntax removed), for OCR re-finding."""
@@ -513,6 +513,34 @@ class Focus:
             cov = len(st & set(t for l in inside for t in docmap._toks(l[4]))) / len(st)
             if inside and cov >= 0.6: self._tb = f; break
         return self._tb
+    def _area_capture_cue(self, r, sentence):
+        """7.2: a Read-area run with no document page cues the capture's figures and tables (capture pixels mapped to screen):
+        the table row the chunk names (OCR lines grouped by table_rows), else the figure-mode figure (A2.2: the largest figure the
+        area holds). None: screen-only cues as before (the result is not in yet, or there is nothing to cue). No fig_id."""
+        ak = state.AREA_KINDS
+        if ak is None or not ak.ready() or self.rec.get("area_pdf") in (None, "ok"): return None
+        kinds = ak.result["area_kinds"]; (sx, sy), s = ak.origin, ak.scale
+        screen = lambda p: [round(sx + p[0] / s, 1), round(sy + p[1] / s, 1), round((p[2] - p[0]) / s, 1), round((p[3] - p[1]) / s, 1)]
+        def cue(rect, kind, header=None):
+            nr = FocusRect(screen(rect)); nr.rng = getattr(r, "rng", None); nr.nlines = getattr(r, "nlines", None)
+            nr.doc = {"kind": kind, "label": None, "page": None, "page_size": None, "target": None, "anchors": [], "target_src": "area-capture"}
+            nr.shape = "roundrect" if kind == "figure" else None
+            if header is not None: nr.header = screen(header)
+            return nr, "doc-" + kind
+        if not hasattr(self, "_area_rows"): self._area_rows, self._area_row_at = {}, {}
+        for t in kinds.get("table") or []:
+            key = tuple(t)
+            if key not in self._area_rows: self._area_rows[key] = docmap.table_rows([l["rect"] + [l["text"]] for l in ak.lines], t)
+            rows = self._area_rows[key]
+            if len(rows) < 2: continue
+            i = docmap.match_row_ocr(rows, sentence, self._area_row_at.get(key, 0))
+            if i is not None:
+                self._area_row_at[key] = i
+                return cue(rows[i]["rect"], "table_row", rows[0]["rect"] if i > 0 else None)
+        figs = kinds.get("figure") or []
+        if not figs: return None
+        self.rec.update(figure_mode_src="area-capture", doc_figure_mode=True)
+        return cue(max(figs, key=docmap._area), "figure")
     def _area_region(self):
         """A2.1, area runs: the area's page rect from the area fit, else the area mapped through the capture fit once it
         lands, else None (area_region_src "none": screen-only cues)."""
@@ -656,6 +684,9 @@ class Focus:
         """Page-space target. band (runs with a sentence map): the chunk's text band; C.4 decides between it and the
         Phase 2 figure / table cues."""
         d = state.DOC.get() if state.DOC is not None else None
+        if self._area_run() and (not d or not d.get("page") or self._area_region() is None):
+            cue = self._area_capture_cue(r, sentence)
+            if cue: return cue
         if not d: return r, method
         f, panel = docmap.find_ref(sentence, d.get("figures") or [], getattr(self, "last_fig", None))
         verbatim = band is not None and band["how"] == "verbatim"
@@ -742,9 +773,13 @@ class Focus:
             if rows is None:
                 if not hasattr(self, "_rows"): self._rows, self._row_at = {}, {}
                 lines = [d["page"]["lines"][i] for i in self._eligible(d, range(len(d["page"]["lines"])))]
-                rows = self._rows[f["label"]] = docmap.table_rows(lines, f["bbox"], f.get("caption_bbox"))
+                if "rows_src" in f:                                     # an image table (Phase 6 section 8): OCR rows, else the box
+                    rows = [{"rect": r_["rect"], "toks": set(docmap._toks(" ".join(r_.get("tokens") or r_.get("toks") or []))), "n": 1}
+                            for r_ in f.get("ocr_rows") or [] if isinstance(r_, dict) and isinstance(r_.get("rect"), list) and len(r_["rect"]) == 4]
+                else: rows = docmap.table_rows(lines, f["bbox"], f.get("caption_bbox"))
+                self._rows[f["label"]] = rows
             if len(rows) >= 2:
-                i = docmap.match_row(rows, sentence, self._row_at.get(f["label"], 0))
+                i = (docmap.match_row_ocr if "rows_src" in f else docmap.match_row)(rows, sentence, self._row_at.get(f["label"], 0))
                 if i is not None:
                     self._row_at[f["label"]] = i
                     tgt, kind = rows[i]["rect"], "table_row"; label = f"{f['label']} row {i}"; target_src = "table-rows"

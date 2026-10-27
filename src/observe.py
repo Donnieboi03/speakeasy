@@ -280,7 +280,7 @@ def cmd_scrub(yes=False):
                 data, n = _scrub_file(path, scrub, dumps, fields)
                 if data is not None: plan.append((path, data, st)); changed[kind] += n
         other = 0
-        for path in rotated("tracker.jsonl") + rotated("app.jsonl"):
+        for path in rotated("tracker.jsonl") + rotated("app.jsonl") + rotated("blockcls.jsonl"):    # report only; blockcls holds no text key
             if os.path.isfile(path):
                 with open(path, "rb") as f: other += sum(1 for line in f if _holds_text(line))
         total = sum(changed.values())

@@ -1,6 +1,10 @@
 """Picker provider order and scope checks (phase5-parts.md A2.6, A2.9) with a stubbed transport and render: local first,
 OpenRouter only after a local unavailable / no-logprobs with SPEAKEASY_GROUND=openrouter, out-of-scope answers rejected."""
-import math, os, sys, urllib.error
+import atexit, math, os, shutil, sys, tempfile, urllib.error
+# A breaker trip persists state (vlm_breaker.json) under SPEAKEASY_HOME; without this the tests would write into the real
+# ~/.speakeasy. Set before importing app modules, which may resolve the home at import time.
+_HOME = tempfile.mkdtemp(prefix="se_pick_fallback_"); os.environ["SPEAKEASY_HOME"] = _HOME
+atexit.register(shutil.rmtree, _HOME, True)
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 import grounding, provider
 

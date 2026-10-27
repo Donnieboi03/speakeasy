@@ -12,7 +12,7 @@ from prompts import SYSTEM_PROMPT, READ_PROMPT, VISION_PROMPT, SCREEN_INSTRUCTIO
 from llm_client import chat, chat_stream, prewarm, model_name, vision_model
 from tts import NOT_ABBREVIATION, sentences, prewarm_tts, speak, Speaker, stop, tts_server_rss_mb, KOKORO_VOICE
 from grounding import GROUNDER, ground_mode_note, parse_ground_box, ground_prompt
-from document import DocJob, doc_context_text, area_pdf_text
+from document import DocJob, doc_context_text, area_pdf_text, start_area_classify, kind_job_summary
 from focus import Focus, TAG_RX, tagging, numbered, parse_tag, strip_tags, clear_focus_file
 from textfold import fold_key
 from sentence_map import SelectionSpan
@@ -1543,6 +1543,9 @@ def main(argv=None):
     if docmap is not None and args.cmd in ("speak", "selection", "rewrite") and os.environ.get("SPEAKEASY_DOC_READ", "local").lower() in ("local", "all") \
             and (args.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT")):
         state.DOC = DocJob(args.doc_hint or os.environ.get("SPEAKEASY_DOC_HINT"), text, rec, t0); state.DOC.img_given = bool(args.image); state.DOC.start()
+    state.AREA_KINDS = None
+    if getattr(args, "capture_method", None) == "area" and getattr(args, "area_text", None) == "ocr":
+        state.AREA_KINDS = start_area_classify(args, text)
     if getattr(args, "capture_method", None) == "area" and getattr(args, "area_text", None) == "ocr" and state.DOC is not None and args.line_bounds and args.capture_rect:
         text = area_pdf_text(text, args, rec) or text
     img = args.image
@@ -1742,6 +1745,8 @@ def main(argv=None):
     rec["peak_rss_mb"] = peak_rss_mb()
     rec["ollama_models"] = ollama_ps()
     if state.DOC is not None: state.DOC.done.wait(1.0)                       # document fields for the log (speech is already done)
+    if state.AREA_KINDS is not None: state.AREA_KINDS.finish(rec)
+    kind_job_summary(rec)
     rec.update(GROUNDER.log_fields())
     if args.cmd in ("speak", "selection"): rec["fig_ids"] = list(rec.pop("_fig_ids", []))
     set_state("idle")
