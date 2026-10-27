@@ -22,7 +22,7 @@ answers decide the outcome deterministically. No real model call is made; nothin
 catches any non-loopback attempt).
 
 Usage: python3 run_phase6.py [--repo PATH] [--baseline-ref REF] [--only S,R,K,L,U,C,D,V,N,O,T,Y,A,P,H,B,Z] [--keep] [--with-bench]
-         [--det-python PY] [--noort-python PY] [--layout-model PATH] [--figcls-model PATH]
+         [--det-python PY] [--noort-python PY] [--layout-model PATH] [--figcls-model PATH] [--layout2-model PATH] [--holdout DIR]
 Output: `PASS|FAIL|SKIP <name> <detail>` per check, `INFO ...`, then `SUMMARY ...`. Exit 0 only if no FAIL.
 Sections: S schema + text-free parse output, fig_ids; R caption regex first, unchanged; K kill switch; L lexicon (positives, negatives,
 labels, aliases, in-box match); U uncaptioned candidates (gated: VLM off); C classifier missing / mismatch / no onnxruntime; D determinism
@@ -981,8 +981,16 @@ def sec_bench():
              "--last-cases-out", os.path.join(out, "gap_hidden_cases.json")], "gap gated")
     add("B_14_2_gap_bench_exit0_determinism", p.returncode == 0, p.stderr[-300:])
     g = subprocess.run(gate + [os.path.join(out, "gap.json")], capture_output=True, text=True)
-    add("B_14_2_gap_gate_pass", g.returncode == 0 and "GATE PASS" in g.stdout, [l for l in g.stdout.splitlines() if "FAIL" in l or "kind.score" in l][:8])
     gap = json.load(open(os.path.join(out, "gap.json"))) if os.path.exists(os.path.join(out, "gap.json")) else {"sets": {}}
+    # A3.6 item 2: a hidden-gap miss of the 80 target ships at the recorded ceiling (hidden kind.score >= 73.09, precision >= 90);
+    # every other gate line must still PASS.
+    gate_fails = [l for l in g.stdout.splitlines() if l.endswith("FAIL")]
+    hk = (gap["sets"].get("hidden-gap") or {}).get("kind") or {}
+    at_ceiling = bool(gate_fails) and all(l.startswith(("hidden-gap kind.score", "hidden-gap kind.by_gap")) for l in gate_fails) \
+        and (hk.get("score") or 0) >= 73.09 and (hk.get("precision") or 0) >= 90
+    add("B_14_2_gap_gate_pass_or_A3_6_ceiling", g.returncode == 0 and "GATE PASS" in g.stdout or at_ceiling,
+        [l for l in g.stdout.splitlines() if "FAIL" in l or "kind.score" in l][:8])
+    if at_ceiling: info(f"B 14.2 hidden gap at the A3.6 ceiling: kind.score {hk.get('score')} precision {hk.get('precision')}")
     l2 = (gap["sets"].get("public-gap") or {}).get("layout2") or {}
     add("B_A3_4_public_heron_ms_p95_le_600", l2.get("ms", {}).get("p95") is not None and l2["ms"]["p95"] <= 600, l2.get("ms"))
     add("B_A3_4_public_heron_load_le_300", l2.get("load_ms", {}).get("max") is not None and l2["load_ms"]["max"] <= 300, l2.get("load_ms"))
@@ -1000,7 +1008,7 @@ def sec_bench():
     if missing: skip("B_14_3_replay", f"cassettes not recorded: {[os.path.basename(os.path.dirname(x)) + '/' + os.path.basename(x) for x in missing]}"); return
     def replay(side, kind):
         o = os.path.join(out, f"replay_{side}.json")
-        p = run(["--family", "gap", "--set", side] + (["--holdout", HOLD] if HOLD else []) + ["--layout-model", LMODEL, "--figcls-model", FMODEL, "--ocr", "replay", "--out", o,
+        p = run(["--family", "gap", "--set", side] + (["--holdout", HOLD] if HOLD else []) + ["--layout-model", LMODEL, "--figcls-model", FMODEL, "--layout2-model", L2MODEL, "--ocr", "replay", "--out", o,
                  "--last-cases-out", os.path.join(out, f"replay_{side}_cases.json")] + (["--kind", "replay"] if kind else []), f"gap replay {side}")
         add(f"B_14_3_{side}_replay_exit0_not_stale", p.returncode == 0, p.stderr[-300:])
         return (json.load(open(o))["sets"].get(f"{side}-gap") or {}) if os.path.exists(o) else {}

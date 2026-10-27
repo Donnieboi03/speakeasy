@@ -60,8 +60,8 @@ SPEAKEASY_FIGCLS_MODEL (a gap run with it fails with exit 5 when a parse reports
 `speakeasy speak --image <capture> --capture-method area --area-text ocr` with OCR-like line bounds and a doc hint that names no
 document; their runs-record area_kinds are scored in capture pixels. Gated mode adds SPEAKEASY_BLOCKCLS_VLM=off and no OCR
 (SPEAKEASY_OCR_BIN unset, SPEAKEASY_TRACKER points nowhere); a KIND_PROMPT request at the mock exits 3 `kind VLM ran in gated mode
-(case ...)`. bench_gate.py gates a gap bench with score.gap_gate; --record-baseline writes B6-pre (tests/audit/bench/baseline-gap.json,
-<holdout>/gap/baseline.json).
+(case ...)`. bench_gate.py gates a gap bench with score.gap_gate; --record-baseline writes the gap baseline (tests/audit/bench/baseline-gap.json,
+<holdout>/gap/baseline.json), labelled B6-pre (classifier off) or B6 (classifier on) at the recorded commit, e.g. B6@f2126a9.
 
 Replay mode (12.4, scored separately, never gated): --kind replay|proxy sets SPEAKEASY_GROUND=local, SPEAKEASY_BLOCKCLS_VLM=local,
 SPEAKEASY_PICK=off and routes KIND_PROMPT requests to the kind cassette (default tests/audit/bench/kind_cassette.json,
@@ -900,13 +900,19 @@ def summary(bench):
                      f"by_outcome {json.dumps(bc['by_outcome'], sort_keys=True)} | stage B ms/candidate p50 {bc['ms']['p50']} p95 {bc['ms']['p95']} | ms/page p50 {bc['ms_page']['p50']} p95 {bc['ms_page']['p95']}")
 
 
+def baseline_label(bench):
+    """Gap baseline label: B6-pre (classifier off) or B6 (classifier on), at the recorded commit, e.g. `B6@f2126a9`."""
+    phase = "B6" if (bench.get("versions") or {}).get("figcls_model") else "B6-pre"
+    return f"{phase}@{(bench.get('commit') or 'unknown')[:7]}{'+dirty' if bench.get('dirty') else ''}"
+
+
 def record_baselines(bench, holdout, public_out=None, hidden_out=None):
     gap = bench.get("family") == "gap"
     for s, blk in bench["sets"].items():
         bl = {"schema": "speakeasy-bench-baseline/1", "set": s, "recorded_at": bench["generated_at"], "commit": bench["commit"], "dirty": bench["dirty"],
               "config": bench["config"], "manifest_sha256": bench["fixtures"][s]["manifest_sha256"], "versions": bench["versions"],
               "metrics": S.baseline_metrics_gap(blk) if gap else S.baseline_metrics(blk), "detail": {} if gap else S.baseline_detail(blk, s == "public")}
-        if gap: bl["baseline"] = "B6-pre"
+        if gap: bl["baseline"] = baseline_label(bench)
         pub = side_of(s) == "public"; dflt = (os.path.join(HERE, "baseline-gap.json"), os.path.join(holdout, "gap", "baseline.json")) if gap else \
             (os.path.join(HERE, "baseline.json"), os.path.join(holdout, "baseline.json"))
         p = (public_out or dflt[0]) if pub else (hidden_out or dflt[1])

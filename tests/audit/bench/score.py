@@ -736,9 +736,10 @@ def gap_gate(bench, baselines, public_only=False, budget=300):
         else: out.append("hidden-gap set not run  FAIL"); fails += 1
     for s in sorted(bench["sets"]):
         k = bench["sets"][s]["kind"]; base = (baselines[s].get("metrics") or {}).get("kind") or {}
+        base_label = baselines[s].get("baseline") or "B6-pre"
         def line(name, cur, ok, ref=None):
             nonlocal fails
-            fails += not ok; gain = "" if ref is None or cur is None else f" (B6-pre {_fmt(ref)}, {cur - ref:+.2f})"
+            fails += not ok; gain = "" if ref is None or cur is None else f" ({base_label} {_fmt(ref)}, {cur - ref:+.2f})"
             out.append(f"{s} {name} -> {_fmt(cur) if isinstance(cur, float) or cur is None else cur}{gain} {'PASS' if ok else 'FAIL'}")
         line(f"kind.score min {G['score']:.2f}", k["score"], k["score"] is not None and k["score"] >= G["score"], base.get("score"))
         line(f"kind.precision min {G['precision']:.2f}", k["precision"], k["precision"] is not None and k["precision"] >= G["precision"], base.get("precision"))
